@@ -30,8 +30,8 @@
 
           src = craneLib.cleanCargoSource ./.;
 
-          nativeBuildInputs = with pkgs; [ rustToolchain ];
-          buildInputs = with pkgs; [ ];
+          nativeBuildInputs = with pkgs; [ rustToolchain pkg-config ];
+          buildInputs = with pkgs; [ openssl ];
           commonArgs = {
             inherit src buildInputs nativeBuildInputs;
           };
