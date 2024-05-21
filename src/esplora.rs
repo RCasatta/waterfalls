@@ -19,3 +19,14 @@ pub async fn block(hash: BlockHash) -> Result<Block, Box<dyn std::error::Error +
     let block = Block::consensus_decode(bytes.as_ref())?;
     Ok(block)
 }
+
+/// GET /block-height/:height
+pub async fn block_hash(
+    height: u32,
+) -> Result<BlockHash, Box<dyn std::error::Error + Send + Sync>> {
+    let url = format!("https://blockstream.info/liquid/api/block-height/{height}");
+    println!("{url}");
+    let hex = reqwest::get(&url).await?.text().await?;
+
+    Ok(BlockHash::from_str(&hex)?)
+}

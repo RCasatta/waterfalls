@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 
 use elements::hashes::Hash;
@@ -6,10 +7,13 @@ use elements::BlockHash;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
+use index::index_infallible;
 use state::State;
 use tokio::net::TcpListener;
 
+mod db;
 mod esplora;
+mod index;
 mod route;
 mod state;
 
@@ -29,11 +33,17 @@ impl std::error::Error for Error {}
 
 pub async fn inner_main(_args: Arguments) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // TODO load persisted state
-    let state = Arc::new(State::new(BlockHash::all_zeros())); // TODO genesis hash
+    let path = Path::new("db");
+    let state = Arc::new(State::new(BlockHash::all_zeros(), path)); // TODO genesis hash
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 
     let listener = TcpListener::bind(addr).await?;
+
+    let h = {
+        let state = state.clone();
+        tokio::spawn(async move { index_infallible(state).await })
+    };
 
     loop {
         let (stream, _) = listener.accept().await?;

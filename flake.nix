@@ -20,7 +20,10 @@
     flake-utils.lib.eachDefaultSystem
       (system:
         let
-          overlays = [ (import rust-overlay) ];
+          overlays = [
+            (import rust-overlay)
+            (import ./rocksdb-overlay.nix)
+          ];
           pkgs = import nixpkgs {
             inherit system overlays;
           };
@@ -34,10 +37,17 @@
           buildInputs = with pkgs; [ openssl ];
           commonArgs = {
             inherit src buildInputs nativeBuildInputs;
+
+            LIBCLANG_PATH = "${pkgs.libclang.lib}/lib"; # for rocksdb
+
+            # link rocksdb dynamically
+            ROCKSDB_INCLUDE_DIR = "${pkgs.rocksdb}/include";
+            ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
+
           };
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
           bin = craneLib.buildPackage (commonArgs // {
-            inherit cargoArtifacts ;
+            inherit cargoArtifacts;
           });
         in
         with pkgs;
@@ -50,7 +60,13 @@
           devShells.default = mkShell {
             inputsFrom = [ bin ];
 
-            buildInputs = with pkgs; [  ];
+            LIBCLANG_PATH = "${pkgs.libclang.lib}/lib"; # for building rocksdb
+
+            # to link rocksdb dynamically
+            ROCKSDB_INCLUDE_DIR = "${pkgs.rocksdb}/include";
+            ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
+
+            buildInputs = with pkgs; [ ];
           };
         }
       );
