@@ -17,6 +17,9 @@ mod index;
 mod route;
 mod state;
 
+type ScriptH = u64;
+type Height = u32;
+
 #[derive(clap::Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Arguments {}
@@ -32,9 +35,10 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 pub async fn inner_main(_args: Arguments) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // TODO load persisted state
     let path = Path::new("db");
-    let state = Arc::new(State::new(BlockHash::all_zeros(), path)); // TODO genesis hash
+    let tip_height = esplora::tip_height().await?;
+
+    let state = Arc::new(State::new(BlockHash::all_zeros(), path, tip_height)); // TODO genesis hash
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 

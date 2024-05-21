@@ -3,28 +3,27 @@ use std::{collections::HashMap, path::Path, sync::Arc};
 use elements::{BlockHash, OutPoint};
 use tokio::sync::Mutex;
 
-use crate::db::DBStore;
+use crate::{db::DBStore, Height};
 
 type ScriptHash = u64;
 
 /// Shared state across the service
 #[derive(Debug)]
 pub(crate) struct State {
-    /// 8 random bytes used to salt hashes to avoid attackers forged collisions
-    salt: [u8; 8],
-
     /// The 0th element contain the genesis block hash, and so on.
     headers: Mutex<Vec<BlockHash>>,
 
-    db: Arc<DBStore>,
+    pub tip_height: Height,
+
+    pub db: Arc<DBStore>,
 }
 
 impl State {
-    pub fn new(genesis: BlockHash, path: &Path) -> State {
+    pub fn new(genesis: BlockHash, path: &Path, tip_height: Height) -> State {
         State {
-            salt: [0u8; 8], // TODO random
             headers: Mutex::new(vec![genesis]),
             db: Arc::new(DBStore::open(path).unwrap()),
+            tip_height,
         }
     }
 }

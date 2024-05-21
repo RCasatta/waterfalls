@@ -2,11 +2,14 @@ use anyhow::{Context, Result};
 use elements::{
     encode::Encodable,
     secp256k1_zkp::rand::{thread_rng, Rng},
-    OutPoint,
+    OutPoint, Script,
 };
-use rocksdb::{Options, DB};
+use fxhash::FxHasher;
+use rocksdb::{Options, WriteBatch, DB};
 
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, hash::Hasher, path::Path};
+
+use crate::{Height, ScriptH};
 /// RocksDB wrapper for index storage
 
 #[derive(Debug)]
@@ -14,9 +17,6 @@ pub struct DBStore {
     db: DB,
     salt: u64,
 }
-
-type ScriptH = u64;
-type Height = u32;
 
 const UTXO_CF: &str = "utxo";
 const HISTORY_CF: &str = "history";
@@ -63,6 +63,18 @@ impl DBStore {
         self.db.cf_handle(HISTORY_CF).expect("missing HISTORY_CF")
     }
 
+    fn hasher(&self) -> FxHasher {
+        let mut hasher = FxHasher::default();
+        hasher.write_u64(self.salt);
+        hasher
+    }
+    pub(crate) fn hash(&self, script: &Script) -> ScriptH {
+        let mut hasher = self.hasher();
+        hasher.write(script.as_bytes());
+        hasher.finish()
+    }
+
+    /// Return the height of the block that must be indexed, in other words we have indexed up until the given block_height-1
     pub(crate) fn get_indexed_height(&self) -> Result<u32> {
         let res = self.db.get_cf(self.other_cf(), INDEXED_KEY)?;
         Ok(res
@@ -89,7 +101,7 @@ impl DBStore {
 
     pub(crate) fn update_utxos(
         &self,
-        adds: &[(OutPoint, ScriptH)],
+        adds: &HashMap<OutPoint, ScriptH>,
         removes: &[OutPoint],
     ) -> Result<()> {
         let mut batch = rocksdb::WriteBatch::default();
@@ -110,7 +122,7 @@ impl DBStore {
         self.db.write(batch)?;
         Ok(())
     }
-    pub(crate) fn get_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<ScriptH>> {
+    pub(crate) fn get_utxos(&self, outpoints: &[OutPoint], delete: bool) -> Result<Vec<ScriptH>> {
         let mut keys = Vec::with_capacity(outpoints.len());
         let mut buf = vec![0u8; 36];
         let cf = self.utxo_cf();
@@ -120,11 +132,21 @@ impl DBStore {
             outpoint.consensus_encode(&mut buf)?;
             keys.push((cf, buf.to_vec()));
         }
-        let db_results = self.db.multi_get_cf(keys);
-        Ok(db_results
+        let db_results = self.db.multi_get_cf(keys.clone());
+        let result: Vec<_> = db_results
             .into_iter()
             .map(|e| u64::from_be_bytes(e.unwrap().unwrap().try_into().unwrap()))
-            .collect())
+            .collect();
+
+        if delete {
+            let mut batch = WriteBatch::default();
+            for k in keys {
+                batch.delete_cf(cf, &k.1);
+            }
+            self.db.write(batch)?;
+        }
+
+        Ok(result)
     }
 
     pub(crate) fn update_history(&self, add: &HashMap<ScriptH, Vec<Height>>) -> Result<()> {
@@ -235,15 +257,17 @@ mod test {
             o1
         };
         let expected = 42u64;
-        let v = vec![(o, expected), (o1, expected + 1)];
+        let v: HashMap<_, _> = vec![(o, expected), (o1, expected + 1)]
+            .into_iter()
+            .collect();
         db.update_utxos(&v, &[]).unwrap();
-        let res = db.get_utxos(&[o, o1]).unwrap();
+        let res = db.get_utxos(&[o, o1], false).unwrap();
         assert_eq!(expected, res[0]);
         assert_eq!(expected + 1, res[1]);
         assert_eq!(2, res.len());
-        db.update_utxos(&[], &[o]).unwrap();
+        db.update_utxos(&HashMap::new(), &[o]).unwrap();
 
-        let res = db.get_utxos(&[o1]).unwrap();
+        let res = db.get_utxos(&[o1], false).unwrap();
         assert_eq!(expected + 1, res[0]);
         assert_eq!(1, res.len());
 

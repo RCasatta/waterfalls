@@ -11,7 +11,7 @@ pub(crate) async fn route(
 ) -> Result<Response<Full<Bytes>>, Error> {
     println!("{:?}", state);
     println!("{:?}", req);
-    let hash = esplora::tip().await.unwrap();
+    let hash = esplora::tip_hash().await.unwrap();
     let block = esplora::block(hash).await.unwrap();
 
     Ok(Response::new(Full::new(Bytes::from(format!(
