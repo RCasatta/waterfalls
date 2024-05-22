@@ -20,22 +20,44 @@ pub async fn tip_height() -> Result<Height, Box<dyn std::error::Error + Send + S
     Ok(Height::from_str(&body)?)
 }
 
-/// GET /block/:hash/raw
-pub async fn block(hash: BlockHash) -> Result<Block, Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!("https://blockstream.info/liquid/api/block/{hash}/raw");
-    let bytes = reqwest::get(&url).await?.bytes().await?;
-
-    let block = Block::consensus_decode(bytes.as_ref())?;
-    Ok(block)
+pub struct Client {
+    client: reqwest::Client,
 }
 
-/// GET /block-height/:height
-pub async fn block_hash(
-    height: u32,
-) -> Result<BlockHash, Box<dyn std::error::Error + Send + Sync>> {
-    let url = format!("https://blockstream.info/liquid/api/block-height/{height}");
-    println!("{url}");
-    let hex = reqwest::get(&url).await?.text().await?;
+impl Client {
+    pub fn new() -> Client {
+        Client {
+            client: reqwest::Client::new(),
+        }
+    }
 
-    Ok(BlockHash::from_str(&hex)?)
+    //curl http://127.0.0.1:7041/rest/blockhashbyheight/0.hex
+    /// GET /block-height/:height
+    pub async fn block_hash(
+        &self,
+        height: u32,
+    ) -> Result<BlockHash, Box<dyn std::error::Error + Send + Sync>> {
+        //let url = format!("https://blockstream.info/liquid/api/block-height/{height}");
+        let url = format!("http://127.0.0.1:7041/rest/blockhashbyheight/{height}.hex");
+        // println!("{url}");
+        let hex = self.client.get(&url).send().await?.text().await?;
+
+        Ok(BlockHash::from_str(hex.trim())?)
+    }
+
+    /// GET /rest/block/<BLOCK-HASH>.<bin|hex|json>
+    /// GET /block/:hash/raw
+    pub async fn block(
+        &self,
+        hash: BlockHash,
+    ) -> Result<Block, Box<dyn std::error::Error + Send + Sync>> {
+        // let url = format!("https://blockstream.info/liquid/api/block/{hash}/raw");
+        let url = format!("http://127.0.0.1:7041/rest/block/{hash}.bin");
+        // println!("{url}");
+
+        let bytes = self.client.get(&url).send().await?.bytes().await?;
+
+        let block = Block::consensus_decode(bytes.as_ref())?;
+        Ok(block)
+    }
 }

@@ -7,15 +7,16 @@ use elements::BlockHash;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
-use index::index_infallible;
 use state::State;
+use threads::headers::headers_infallible;
+use threads::index::index_infallible;
 use tokio::net::TcpListener;
 
 mod db;
 mod esplora;
-mod index;
 mod route;
 mod state;
+mod threads;
 
 type ScriptH = u64;
 type Height = u32;
@@ -44,9 +45,14 @@ pub async fn inner_main(_args: Arguments) -> Result<(), Box<dyn std::error::Erro
 
     let listener = TcpListener::bind(addr).await?;
 
-    let h = {
+    let h1 = {
         let state = state.clone();
         tokio::spawn(async move { index_infallible(state).await })
+    };
+
+    let h2 = {
+        let state = state.clone();
+        tokio::spawn(async move { headers_infallible(state).await })
     };
 
     loop {

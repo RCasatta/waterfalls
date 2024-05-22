@@ -17,7 +17,7 @@ hyper-util = { version = "0.1", features = ["full"] }
 hex = "0.4.3"
 reqwest = "0.12.0"
 anyhow = "1.0.86"
-rocksdb = "0.22.0"
+rocksdb = { version = "0.22.0", features = ["multi-threaded-cf"] }
 fxhash = "0.2.1"
 
 [dev-dependencies]

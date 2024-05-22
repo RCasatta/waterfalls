@@ -12,12 +12,12 @@ pub(crate) async fn route(
     println!("{:?}", state);
     println!("{:?}", req);
     let hash = esplora::tip_hash().await.unwrap();
-    let block = esplora::block(hash).await.unwrap();
+    // let block = esplora::block(hash).await.unwrap();
 
     Ok(Response::new(Full::new(Bytes::from(format!(
-        "Last block is {} has txs {} height {}",
+        "Last block is {}",
         hash,
-        block.txdata.len(),
-        block.header.height
+        // block.txdata.len(),
+        // block.header.height
     )))))
 }
