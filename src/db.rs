@@ -5,7 +5,7 @@ use elements::{
     OutPoint, Script,
 };
 use fxhash::FxHasher;
-use rocksdb::{BoundColumnFamily, Options, WriteBatch, DB};
+use rocksdb::{BoundColumnFamily, MergeOperands, Options, WriteBatch, DB};
 
 use std::{collections::HashMap, hash::Hasher, path::Path, sync::Arc};
 
@@ -35,7 +35,13 @@ impl DBStore {
     fn create_cf_descriptors() -> Vec<rocksdb::ColumnFamilyDescriptor> {
         COLUMN_FAMILIES
             .iter()
-            .map(|&name| rocksdb::ColumnFamilyDescriptor::new(name, Options::default()))
+            .map(|&name| {
+                let mut db_opts = Options::default();
+                if name == HISTORY_CF {
+                    db_opts.set_merge_operator_associative("concat_merge", concat_merge);
+                }
+                rocksdb::ColumnFamilyDescriptor::new(name, db_opts)
+            })
             .collect()
     }
 
@@ -159,18 +165,8 @@ impl DBStore {
         for a in add {
             keys.push(*a.0);
         }
-        let existing = self.get_history(&keys)?;
-        for ((script_hash, new_heights), mut existing) in add.iter().zip(existing.into_iter()) {
-            let mut new = false;
-            for new_height in new_heights {
-                if !existing.contains(new_height) {
-                    existing.push(*new_height);
-                    new = true;
-                }
-            }
-            if new {
-                batch.put_cf(&cf, script_hash.to_be_bytes(), to_be_bytes(&existing))
-            }
+        for (script_hash, new_heights) in add {
+            batch.merge_cf(&cf, script_hash.to_be_bytes(), to_be_bytes(&new_heights))
         }
         self.db.write(batch)?;
         Ok(())
@@ -246,6 +242,25 @@ fn get_or_init_salt(db: &DB) -> Result<u64> {
     }
 }
 
+fn concat_merge(
+    _new_key: &[u8],
+    existing_val: Option<&[u8]>,
+    operands: &MergeOperands,
+) -> Option<Vec<u8>> {
+    let mut result: Vec<u8> = Vec::with_capacity(operands.len());
+    existing_val.map(|v| {
+        for e in v {
+            result.push(*e)
+        }
+    });
+    for op in operands {
+        for e in op {
+            result.push(*e)
+        }
+    }
+    Some(result)
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
@@ -286,11 +301,9 @@ mod test {
             .into_iter()
             .collect();
         db.insert_utxos(&v).unwrap();
-        let res = db.remove_utxos(&[o, o1]).unwrap();
+        let res = db.remove_utxos(&[o]).unwrap();
+        assert_eq!(1, res.len());
         assert_eq!(expected, res[0]);
-        assert_eq!(expected + 1, res[1]);
-        assert_eq!(2, res.len());
-        db.insert_utxos(&HashMap::new()).unwrap();
 
         let res = db.remove_utxos(&[o1]).unwrap();
         assert_eq!(expected + 1, res[0]);
@@ -302,5 +315,11 @@ mod test {
         db.update_history(&new_history).unwrap();
         let result = db.get_history(&[7]).unwrap();
         assert_eq!(result[0], vec![2u32, 5]);
+
+        let mut new_history = HashMap::new();
+        new_history.insert(7u64, vec![9]);
+        db.update_history(&new_history).unwrap();
+        let result = db.get_history(&[7]).unwrap();
+        assert_eq!(result[0], vec![2u32, 5, 9]);
     }
 }
