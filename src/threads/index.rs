@@ -5,7 +5,7 @@ use std::{collections::HashMap, sync::Arc, time::Instant};
 use elements::OutPoint;
 
 use crate::{
-    esplora::{self, Client},
+    esplora::{Client},
     state::State,
     Error,
 };

@@ -45,12 +45,12 @@ pub async fn inner_main(_args: Arguments) -> Result<(), Box<dyn std::error::Erro
 
     let listener = TcpListener::bind(addr).await?;
 
-    let h1 = {
+    let _h1 = {
         let state = state.clone();
         tokio::spawn(async move { index_infallible(state).await })
     };
 
-    let h2 = {
+    let _h2 = {
         let state = state.clone();
         tokio::spawn(async move { headers_infallible(state).await })
     };

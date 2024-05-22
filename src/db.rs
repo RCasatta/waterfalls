@@ -5,7 +5,7 @@ use elements::{
     OutPoint, Script,
 };
 use fxhash::FxHasher;
-use rocksdb::{BoundColumnFamily, MergeOperands, Options, WriteBatch, DB};
+use rocksdb::{BoundColumnFamily, MergeOperands, Options, DB};
 
 use std::{collections::HashMap, hash::Hasher, path::Path, sync::Arc};
 
@@ -114,7 +114,7 @@ impl DBStore {
             key_buf.clear();
             add.0.consensus_encode(&mut key_buf)?;
             let val = add.1.to_be_bytes();
-            batch.put_cf(&cf, &key_buf, &val);
+            batch.put_cf(&cf, &key_buf, val);
         }
 
         self.db.write(batch)?;
@@ -166,7 +166,7 @@ impl DBStore {
             keys.push(*a.0);
         }
         for (script_hash, new_heights) in add {
-            batch.merge_cf(&cf, script_hash.to_be_bytes(), to_be_bytes(&new_heights))
+            batch.merge_cf(&cf, script_hash.to_be_bytes(), to_be_bytes(new_heights))
         }
         self.db.write(batch)?;
         Ok(())
@@ -210,7 +210,7 @@ impl DBStore {
         // should be a db tx
         let script_hashes = self.remove_utxos(&utxo_spent).unwrap();
         for script_hash in script_hashes {
-            let el = history_map.entry(script_hash).or_insert(vec![]);
+            let el = history_map.entry(script_hash).or_default();
             el.push(block_height);
         }
 
@@ -248,11 +248,11 @@ fn concat_merge(
     operands: &MergeOperands,
 ) -> Option<Vec<u8>> {
     let mut result: Vec<u8> = Vec::with_capacity(operands.len());
-    existing_val.map(|v| {
+    if let Some(v) = existing_val {
         for e in v {
             result.push(*e)
         }
-    });
+    }
     for op in operands {
         for e in op {
             result.push(*e)

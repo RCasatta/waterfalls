@@ -17,7 +17,7 @@ pub(crate) struct State {
 }
 
 impl State {
-    pub fn new(genesis: BlockHash, path: &Path, tip_height: Height) -> State {
+    pub fn new(_genesis: BlockHash, path: &Path, tip_height: Height) -> State {
         State {
             headers: Mutex::new(vec![BlockHash::all_zeros(); tip_height as usize]),
             db: Arc::new(DBStore::open(path).unwrap()),

@@ -4,7 +4,7 @@ use elements::{hashes::Hash, BlockHash};
 use tokio::time::sleep;
 
 use crate::{
-    esplora::{self, Client},
+    esplora::{Client},
     state::State,
     Error,
 };
@@ -33,7 +33,7 @@ pub async fn headers(shared_state: Arc<State>) -> Result<(), Error> {
                     println!("headers {}/{}", height, shared_state.tip_height);
                 }
             }
-            Err(e) => {
+            Err(_e) => {
                 sleep(std::time::Duration::from_secs(1)).await;
             }
         }
