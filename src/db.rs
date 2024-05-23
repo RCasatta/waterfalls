@@ -1,15 +1,17 @@
 use anyhow::{Context, Result};
 use elements::{
     encode::Encodable,
+    hashes::Hash,
     secp256k1_zkp::rand::{thread_rng, Rng},
-    OutPoint, Script,
+    BlockHash, OutPoint, Script, Txid,
 };
 use fxhash::FxHasher;
 use rocksdb::{BoundColumnFamily, MergeOperands, Options, DB};
+use serde::Serialize;
 
 use std::{collections::HashMap, hash::Hasher, path::Path, sync::Arc};
 
-use crate::{Height, ScriptH};
+use crate::{Height, ScriptHash};
 /// RocksDB wrapper for index storage
 
 #[derive(Debug)]
@@ -18,16 +20,15 @@ pub struct DBStore {
     salt: u64,
 }
 
-const UTXO_CF: &str = "utxo";
-const HISTORY_CF: &str = "history";
+const UTXO_CF: &str = "utxo"; // OutPoint -> ScriptHash
+const HISTORY_CF: &str = "history"; // ScriptHash -> Vec<(Txid, Height)>
 const OTHER_CF: &str = "other";
+const HASHES_CF: &str = "hashes"; // Height -> BlockHash
 
-const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF];
+const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF];
 
 // height key for indexed blocks
 const INDEXED_KEY: &[u8] = b"I";
-// height key for blockchain tip
-const TIP_KEY: &[u8] = b"T";
 // height key for salting
 const SALT_KEY: &[u8] = b"S";
 
@@ -70,12 +71,16 @@ impl DBStore {
         self.db.cf_handle(HISTORY_CF).expect("missing HISTORY_CF")
     }
 
+    fn hashes_cf(&self) -> Arc<BoundColumnFamily> {
+        self.db.cf_handle(HASHES_CF).expect("missing HASHES_CF")
+    }
+
     fn hasher(&self) -> FxHasher {
         let mut hasher = FxHasher::default();
         hasher.write_u64(self.salt);
         hasher
     }
-    pub(crate) fn hash(&self, script: &Script) -> ScriptH {
+    pub(crate) fn hash(&self, script: &Script) -> ScriptHash {
         let mut hasher = self.hasher();
         hasher.write(script.as_bytes());
         hasher.finish()
@@ -94,19 +99,42 @@ impl DBStore {
         Ok(())
     }
 
-    pub(crate) fn get_tip_height(&self) -> Result<u32> {
-        let res = self.db.get_cf(&self.other_cf(), TIP_KEY)?;
-        Ok(res
-            .map(|e| u32::from_be_bytes(e.try_into().unwrap()))
-            .unwrap_or(0))
+    pub(crate) fn get_block_hash(&self, height: u32) -> Result<Option<BlockHash>> {
+        let res = self.db.get_cf(&self.hashes_cf(), &height.to_be_bytes())?;
+        Ok(res.map(|e| BlockHash::from_slice(&e).expect("schema")))
     }
-    pub(crate) fn set_tip_height(&self, height: u32) -> Result<()> {
-        let bytes = height.to_be_bytes();
-        self.db.put_cf(&self.other_cf(), TIP_KEY, bytes)?;
+    pub(crate) fn set_block_hash(&self, height: u32, hash: BlockHash) -> Result<()> {
+        self.db.put_cf(
+            &self.hashes_cf(),
+            height.to_be_bytes(),
+            hash.as_byte_array(),
+        )?;
         Ok(())
     }
+    pub(crate) fn _get_multi_block_hash(&self, height: &[u32]) -> Result<Vec<BlockHash>> {
+        let cf = self.hashes_cf();
+        let keys: Vec<_> = height.iter().map(|e| (&cf, e.to_be_bytes())).collect();
+        let res = self.db.multi_get_cf(keys);
+        let res: Vec<_> = res
+            .into_iter()
+            .map(|e| {
+                BlockHash::from_slice(&e.transpose().expect("hash must be there").unwrap()).unwrap()
+            }) // TODO unwraps
+            .collect();
+        Ok(res)
+    }
+    pub(crate) fn tip(&self) -> Result<Height> {
+        let mut iter = self
+            .db
+            .iterator_cf(&self.hashes_cf(), rocksdb::IteratorMode::End);
 
-    pub(crate) fn insert_utxos(&self, adds: &HashMap<OutPoint, ScriptH>) -> Result<()> {
+        Ok(match iter.next().transpose()? {
+            Some(el) => Height::from_be_bytes(el.0.as_ref().try_into().expect("schema")),
+            None => 0,
+        })
+    }
+
+    pub(crate) fn insert_utxos(&self, adds: &HashMap<OutPoint, ScriptHash>) -> Result<()> {
         let mut batch = rocksdb::WriteBatch::default();
         let cf = self.utxo_cf();
         let mut key_buf = vec![0u8; 36];
@@ -122,7 +150,7 @@ impl DBStore {
     }
 
     // TODO should be remove utxos but there isn't this API in rocksdb (if became remove the update_utxos become insert_utxos)
-    pub(crate) fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<ScriptH>> {
+    pub(crate) fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<ScriptHash>> {
         let mut keys = Vec::with_capacity(outpoints.len());
         let mut buf = vec![0u8; 36];
         let cf = self.utxo_cf();
@@ -152,7 +180,7 @@ impl DBStore {
         Ok(result)
     }
 
-    pub(crate) fn update_history(&self, add: &HashMap<ScriptH, Vec<Height>>) -> Result<()> {
+    pub(crate) fn update_history(&self, add: &HashMap<ScriptHash, Vec<TxSeen>>) -> Result<()> {
         if add.is_empty() {
             return Ok(());
         }
@@ -172,7 +200,7 @@ impl DBStore {
         Ok(())
     }
     /// get the block heights where the given scripts hash have been seen
-    pub(crate) fn get_history(&self, scripts: &[ScriptH]) -> Result<Vec<Vec<Height>>> {
+    pub(crate) fn get_history(&self, scripts: &[ScriptHash]) -> Result<Vec<Vec<TxSeen>>> {
         if scripts.is_empty() {
             return Ok(vec![]);
         }
@@ -187,13 +215,7 @@ impl DBStore {
             let db_result = db_result.unwrap();
             match db_result {
                 None => result.push(vec![]),
-                Some(e) => {
-                    let mut c = Vec::with_capacity(e.len() / 4);
-                    for chunk in e.chunks(4) {
-                        c.push(u32::from_be_bytes(chunk.try_into().unwrap()));
-                    }
-                    result.push(c);
-                }
+                Some(e) => result.push(from_be_bytes(&e)),
             }
         }
         Ok(result)
@@ -201,17 +223,16 @@ impl DBStore {
 
     pub(crate) fn update(
         &self,
-        block_height: u32,
-
+        block_height: Height,
         utxo_spent: Vec<OutPoint>,
-        mut history_map: HashMap<u64, Vec<u32>>,
+        mut history_map: HashMap<u64, Vec<TxSeen>>,
         utxo_created: HashMap<OutPoint, u64>,
     ) {
-        // should be a db tx
+        // TODO should be a db tx
         let script_hashes = self.remove_utxos(&utxo_spent).unwrap();
-        for script_hash in script_hashes {
+        for (script_hash, prevout) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
-            el.push(block_height);
+            el.push(TxSeen::new(prevout.txid, block_height));
         }
 
         self.update_history(&history_map).unwrap();
@@ -220,10 +241,37 @@ impl DBStore {
     }
 }
 
-fn to_be_bytes(v: &[u32]) -> Vec<u8> {
-    let mut result = Vec::with_capacity(v.len() * 4);
-    for e in v {
-        result.extend(e.to_be_bytes())
+#[derive(Serialize)]
+pub(crate) struct TxSeen {
+    txid: Txid,
+    height: Height,
+}
+impl TxSeen {
+    pub(crate) fn new(txid: Txid, height: Height) -> Self {
+        Self { txid, height }
+    }
+
+    pub(crate) fn mempool(txid: Txid) -> TxSeen {
+        Self { txid, height: 0 }
+    }
+}
+
+fn to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
+    let mut result = Vec::with_capacity(v.len() * 36);
+    for TxSeen { txid, height } in v {
+        result.extend(txid.as_byte_array());
+        result.extend(height.to_be_bytes());
+    }
+    result
+}
+
+fn from_be_bytes(v: &[u8]) -> Vec<TxSeen> {
+    let mut result = Vec::with_capacity(v.len() / 36);
+
+    for chunk in v.chunks(36) {
+        let txid = Txid::from_slice(&chunk[..32]).unwrap();
+        let height = Height::from_be_bytes(chunk[32..].try_into().unwrap());
+        result.push(TxSeen { txid, height })
     }
     result
 }
@@ -265,7 +313,7 @@ fn concat_merge(
 mod test {
     use std::collections::HashMap;
 
-    use elements::OutPoint;
+    use elements::{hashes::Hash, BlockHash, OutPoint};
 
     use crate::db::get_or_init_salt;
 
@@ -321,5 +369,18 @@ mod test {
         db.update_history(&new_history).unwrap();
         let result = db.get_history(&[7]).unwrap();
         assert_eq!(result[0], vec![2u32, 5, 9]);
+
+        assert_eq!(db.tip().unwrap(), 0);
+
+        db.set_block_hash(0, BlockHash::all_zeros()).unwrap();
+        db.set_block_hash(1, BlockHash::all_zeros()).unwrap();
+        db.set_block_hash(2, BlockHash::all_zeros()).unwrap();
+
+        assert_eq!(db.get_block_hash(3).unwrap(), None);
+        assert_eq!(db.get_block_hash(2).unwrap(), Some(BlockHash::all_zeros()));
+        assert_eq!(db.tip().unwrap(), 2);
+
+        let r = db.get_multi_block_hash(&[0, 1, 2]).unwrap();
+        assert_eq!(r, vec![BlockHash::all_zeros(); 3]);
     }
 }

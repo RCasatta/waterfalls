@@ -7,6 +7,12 @@
 - hash(script) -> [height1, height2] # for handling address_history
 - height sync / height tip / salt
 
+Indexing in this way result in just a 372Mb db in about 4h, should be in memory (estimated 1h indexing time)?
+```
+2860000 191.29 blocks/s 4640335 txs
+```
+TODO: make trait with `fn update()` and implement it for db and for memory
+
 ## in memory
 
 - `Vec<BlockHash>` # to quickly convert from height to hash

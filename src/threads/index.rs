@@ -2,25 +2,34 @@
 
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
-use elements::OutPoint;
+use elements::{BlockHash, OutPoint};
+use tokio::time::sleep;
 
 use crate::{
-    esplora::{Client},
-    state::State,
+    db::{DBStore, TxSeen},
+    esplora::Client,
     Error,
 };
 
-pub(crate) async fn index_infallible(shared_state: Arc<State>) {
+pub(crate) async fn index_infallible(shared_state: Arc<DBStore>) {
     if let Err(e) = index(shared_state).await {
         log::error!("{:?}", e);
     }
 }
 
-pub async fn index(shared_state: Arc<State>) -> Result<(), Error> {
-    let db = &shared_state.db;
+pub async fn get_block_hash_or_weight(db: &DBStore, block_height: u32) -> BlockHash {
+    loop {
+        match db.get_block_hash(block_height) {
+            Ok(Some(e)) => return e,
+            _ => sleep(std::time::Duration::from_secs(1)).await,
+        }
+    }
+}
+
+pub async fn index(db: Arc<DBStore>) -> Result<(), Error> {
     let indexed_height = db.get_to_index_height().unwrap();
-    let tip_height = shared_state.tip_height;
-    println!("indexed/tip: {indexed_height}/{tip_height}");
+    let tip_height = db.tip().unwrap();
+    println!("tip: {tip_height}");
     let client = Client::new();
 
     let mut txs_count = 0u64;
@@ -34,7 +43,8 @@ pub async fn index(shared_state: Arc<State>) -> Result<(), Error> {
             let speed = (block_height - indexed_height) as f64 / start.elapsed().as_secs() as f64;
             println!("{block_height} {speed:.2} blocks/s {txs_count} txs");
         }
-        let block_hash = shared_state.hash_from_height(block_height).await.unwrap(); // TODO
+        let block_hash = get_block_hash_or_weight(&db, block_height).await;
+
         let block = client.block(block_hash).await.unwrap();
         for tx in block.txdata {
             txs_count += 1;
@@ -46,7 +56,7 @@ pub async fn index(shared_state: Arc<State>) -> Result<(), Error> {
                 let script_hash = db.hash(&output.script_pubkey);
                 // println!("{} hash is {script_hash}", &output.script_pubkey.to_hex());
                 let el = history_map.entry(script_hash).or_insert(vec![]);
-                el.push(block_height);
+                el.push(TxSeen::new(txid, block_height));
 
                 let out_point = OutPoint::new(txid, j as u32);
                 // println!("inserting {out_point}");

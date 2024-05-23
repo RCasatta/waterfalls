@@ -1,41 +1,48 @@
-use std::sync::Arc;
-
-use elements::{hashes::Hash, BlockHash};
-use tokio::time::sleep;
-
-use crate::{
-    esplora::{Client},
-    state::State,
-    Error,
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
-pub(crate) async fn headers_infallible(shared_state: Arc<State>) {
-    if let Err(e) = headers(shared_state).await {
+use tokio::time::sleep;
+
+use crate::{db::DBStore, esplora::Client, Error};
+
+pub(crate) async fn headers_infallible(db: Arc<DBStore>) {
+    if let Err(e) = headers(db).await {
         log::error!("{:?}", e);
     }
 }
 
-pub async fn headers(shared_state: Arc<State>) -> Result<(), Error> {
-    // TODO bulk load first chunk of headers!
-    let mut height = 0usize;
+pub async fn headers(db: Arc<DBStore>) -> Result<(), Error> {
+    let mut height = 0u32;
     let client = Client::new();
+    let mut now = Instant::now();
+    let mut last_height_print = height;
     loop {
-        match client.block_hash(height as u32).await {
-            Ok(block_hash) => {
-                let mut headers = shared_state.headers.lock().await;
-                if headers.len() >= height {
-                    let new_len = headers.len() + 1000;
-                    headers.resize(new_len, BlockHash::all_zeros());
-                }
-                headers[height] = block_hash;
-                height += 1;
-                if height % 10_000 == 0 {
-                    println!("headers {}/{}", height, shared_state.tip_height);
-                }
-            }
-            Err(_e) => {
-                sleep(std::time::Duration::from_secs(1)).await;
-            }
+        if now.elapsed() > Duration::from_secs(10) && height != last_height_print {
+            now = Instant::now();
+            last_height_print = height;
+            println!("headers {}", height);
         }
+        match db.get_block_hash(height) {
+            Ok(Some(_)) => {
+                height += 1;
+                continue;
+            }
+            Ok(None) => match client.block_hash(height).await {
+                Ok(Some(block_hash)) => match db.set_block_hash(height, block_hash) {
+                    Ok(_) => {
+                        height += 1;
+                        continue;
+                    }
+                    Err(e) => println!("A error: {e:?}"),
+                },
+                Ok(None) => (),
+                Err(e) => println!("B error: {e:?}"),
+            },
+            Err(e) => println!("C error: {e:?}"),
+        }
+
+        sleep(std::time::Duration::from_secs(1)).await;
     }
 }

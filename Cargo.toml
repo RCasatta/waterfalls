@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.3", features = ["derive", "env"] }
-elements = "0.24.1"
+elements = { version = "0.24.1", features = ["serde"] }
 env_logger = "0.11.3"
 hyper = { version = "1.2.0", features = ["full"] }
 log = "0.4.21"
@@ -19,6 +19,9 @@ reqwest = "0.12.0"
 anyhow = "1.0.86"
 rocksdb = { version = "0.22.0", features = ["multi-threaded-cf"] }
 fxhash = "0.2.1"
+elements-miniscript = "0.3.1"
+serde = { version = "1.0.202", features = ["derive"] }
+serde_json = "1.0.117"
 
 [dev-dependencies]
 tempfile = "3.10.1"

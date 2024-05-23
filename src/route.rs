@@ -1,23 +1,106 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
-use http_body_util::Full;
-use hyper::{body::Bytes, Request, Response};
+use elements_miniscript::DescriptorPublicKey;
+use http_body_util::{BodyExt, Full};
+use hyper::{
+    body::{Body, Bytes},
+    Method, Request, Response, StatusCode,
+};
+use tokio::sync::Mutex;
 
-use crate::{esplora, state::State, Error};
+use crate::{
+    db::{DBStore, TxSeen},
+    mempool::Mempool,
+    Error,
+};
+
+const GAP_LIMIT: u32 = 20;
+
+// curl --request POST --data 'elwpkh(tpubDDCNstnPhbdd4vwbw5UWK3vRQSF1WXQkvBHpNXpKJAkwFYjwu735EH3GVf53qwbWimzewDUv68MUmRDgYtQ1AU8FRCPkazfuaBp7LaEaohG/<0;1>/*)' http://localhost:3000/descriptor
 
 pub(crate) async fn route(
-    state: &Arc<State>,
+    db: &Arc<DBStore>,
+    mempool: &Arc<Mutex<Mempool>>,
     req: Request<hyper::body::Incoming>,
 ) -> Result<Response<Full<Bytes>>, Error> {
-    println!("{:?}", state);
-    println!("{:?}", req);
-    let hash = esplora::tip_hash().await.unwrap();
-    // let block = esplora::block(hash).await.unwrap();
+    println!("---> {req:?}");
+    match (req.method(), req.uri().path()) {
+        (&Method::POST, "/descriptor") => {
+            let upper = req.body().size_hint().upper().unwrap_or(u64::MAX);
+            if upper > 1024 * 64 {
+                return str_resp(
+                    "Body too big".to_string(),
+                    hyper::StatusCode::PAYLOAD_TOO_LARGE,
+                );
+            }
 
-    Ok(Response::new(Full::new(Bytes::from(format!(
-        "Last block is {}",
-        hash,
-        // block.txdata.len(),
-        // block.header.height
-    )))))
+            // Await the whole body to be collected into a single `Bytes`...
+            let whole_body = req.collect().await.unwrap().to_bytes(); // TODO unwraps
+            match std::str::from_utf8(whole_body.as_ref()) {
+                Ok(desc) => handle_req(db, mempool, &desc).await,
+                Err(_) => str_resp(
+                    "Invalid utf8 string".to_string(),
+                    hyper::StatusCode::BAD_REQUEST,
+                ),
+            }
+        }
+        _ => {
+            let height = db.tip().unwrap();
+            let hash = db.get_block_hash(height).unwrap().unwrap();
+            let resp_body = format!("tip height is {} with hash {}", height, hash,);
+            str_resp(resp_body, hyper::StatusCode::OK)
+        }
+    }
+}
+
+fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {
+    let mut resp = Response::new(Full::new(s.into()));
+    *resp.status_mut() = status;
+    println!("<--- {resp:?}");
+    Ok(resp)
+}
+
+async fn handle_req(
+    db: &DBStore,
+    mempool: &Arc<Mutex<Mempool>>,
+    desc: &str,
+) -> Result<Response<Full<Bytes>>, Error> {
+    let start = Instant::now();
+    match desc.parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>() {
+        Ok(desc) => {
+            let mut map = BTreeMap::new();
+            for desc in desc.into_single_descriptors().unwrap().iter() {
+                let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
+                for batch in 0.. {
+                    let mut scripts = Vec::with_capacity(GAP_LIMIT as usize);
+
+                    let start = batch * GAP_LIMIT;
+                    for index in start..start + GAP_LIMIT {
+                        let l = desc.at_derivation_index(index).unwrap();
+                        let script_pubkey = l.script_pubkey();
+                        scripts.push(db.hash(&script_pubkey));
+                    }
+                    let mut res = db.get_history(&scripts).unwrap();
+                    let seen_mempool = mempool.lock().await.contains(&scripts);
+
+                    for (a, b) in res.iter_mut().zip(seen_mempool.iter()) {
+                        for txid in b {
+                            a.push(TxSeen::mempool(*txid))
+                        }
+                    }
+                    let is_last = res.iter().all(|e| e.is_empty());
+                    result.extend(res);
+
+                    if is_last {
+                        break;
+                    }
+                }
+                map.insert(desc.to_string(), result);
+            }
+            let result = serde_json::to_string(&map).unwrap();
+            println!("elapsed: {}ms", start.elapsed().as_millis());
+            str_resp(result, hyper::StatusCode::OK)
+        }
+        Err(e) => str_resp(e.to_string(), hyper::StatusCode::BAD_REQUEST),
+    }
 }
