@@ -71,7 +71,7 @@ async fn handle_req(
     match desc_str.parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>() {
         Ok(desc) => {
             if is_testnet == desc_str.contains("tpub") {
-                return Err(Error::WrongNetwork);
+                return str_resp("Wrong network".to_string(), hyper::StatusCode::BAD_REQUEST);
             }
             let mut map = BTreeMap::new();
             for desc in desc.into_single_descriptors().unwrap().iter() {

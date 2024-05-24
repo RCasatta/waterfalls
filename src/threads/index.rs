@@ -33,8 +33,6 @@ pub async fn get_block_hash_or_wait(db: &DBStore, block_height: u32) -> BlockHas
 
 pub async fn index(db: Arc<DBStore>, client: Client) -> Result<(), Error> {
     let indexed_height = db.get_to_index_height().unwrap();
-    let tip_height = db.tip().unwrap();
-    println!("tip: {tip_height}");
 
     let mut skip_outpoint = HashSet::new();
     let s = "0c52d2526a5c9f00e9fb74afd15dd3caaf17c823159a514f929ae25193a43a52"; // policy asset emission in testnet

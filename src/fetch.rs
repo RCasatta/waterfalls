@@ -110,7 +110,10 @@ impl Client {
         loop {
             match self.block(block_hash).await {
                 Ok(b) => return b,
-                _ => sleep(std::time::Duration::from_secs(1)).await,
+                _ => {
+                    println!("Failing for block({block_hash})");
+                    sleep(std::time::Duration::from_secs(1)).await
+                }
             }
         }
     }
@@ -119,7 +122,10 @@ impl Client {
         loop {
             match self.tx(txid).await {
                 Ok(t) => return t,
-                _ => sleep(std::time::Duration::from_secs(1)).await,
+                _ => {
+                    println!("Failing for tx({txid})");
+                    sleep(std::time::Duration::from_secs(1)).await
+                }
             }
         }
     }
