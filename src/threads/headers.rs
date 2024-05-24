@@ -5,24 +5,23 @@ use std::{
 
 use tokio::time::sleep;
 
-use crate::{db::DBStore, esplora::Client, Error};
+use crate::{db::DBStore, fetch::Client, Error};
 
-pub(crate) async fn headers_infallible(db: Arc<DBStore>) {
-    if let Err(e) = headers(db).await {
+pub(crate) async fn headers_infallible(db: Arc<DBStore>, client: Client) {
+    if let Err(e) = headers(db, client).await {
         log::error!("{:?}", e);
     }
 }
 
-pub async fn headers(db: Arc<DBStore>) -> Result<(), Error> {
+pub async fn headers(db: Arc<DBStore>, client: Client) -> Result<(), Error> {
     let mut height = 0u32;
-    let client = Client::new();
     let mut now = Instant::now();
     let mut last_height_print = height;
     loop {
         if now.elapsed() > Duration::from_secs(10) && height != last_height_print {
             now = Instant::now();
             last_height_print = height;
-            println!("headers {}", height);
+            println!("tip {}", height - 1);
         }
         match db.get_block_hash(height) {
             Ok(Some(_)) => {

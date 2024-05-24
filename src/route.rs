@@ -16,12 +16,13 @@ use crate::{
 
 const GAP_LIMIT: u32 = 20;
 
-// curl --request POST --data 'elwpkh(tpubDDCNstnPhbdd4vwbw5UWK3vRQSF1WXQkvBHpNXpKJAkwFYjwu735EH3GVf53qwbWimzewDUv68MUmRDgYtQ1AU8FRCPkazfuaBp7LaEaohG/<0;1>/*)' http://localhost:3000/descriptor
+// curl --request POST --data 'elwpkh(xpub6DLHCiTPg67KE9ksCjNVpVHTRDHzhCSmoBTKzp2K4FxLQwQvvdNzuqxhK2f9gFVCN6Dori7j2JMLeDoB4VqswG7Et9tjqauAvbDmzF8NEPH/<0;1>/*)' http://localhost:3000/descriptor
 
 pub(crate) async fn route(
     db: &Arc<DBStore>,
     mempool: &Arc<Mutex<Mempool>>,
     req: Request<hyper::body::Incoming>,
+    is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
     println!("---> {req:?}");
     match (req.method(), req.uri().path()) {
@@ -37,7 +38,7 @@ pub(crate) async fn route(
             // Await the whole body to be collected into a single `Bytes`...
             let whole_body = req.collect().await.unwrap().to_bytes(); // TODO unwraps
             match std::str::from_utf8(whole_body.as_ref()) {
-                Ok(desc) => handle_req(db, mempool, &desc).await,
+                Ok(desc) => handle_req(db, mempool, &desc, is_testnet).await,
                 Err(_) => str_resp(
                     "Invalid utf8 string".to_string(),
                     hyper::StatusCode::BAD_REQUEST,
@@ -63,11 +64,15 @@ fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Erro
 async fn handle_req(
     db: &DBStore,
     mempool: &Arc<Mutex<Mempool>>,
-    desc: &str,
+    desc_str: &str,
+    is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
     let start = Instant::now();
-    match desc.parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>() {
+    match desc_str.parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>() {
         Ok(desc) => {
+            if is_testnet == desc_str.contains("tpub") {
+                return Err(Error::WrongNetwork);
+            }
             let mut map = BTreeMap::new();
             for desc in desc.into_single_descriptors().unwrap().iter() {
                 let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
@@ -80,16 +85,16 @@ async fn handle_req(
                         let script_pubkey = l.script_pubkey();
                         scripts.push(db.hash(&script_pubkey));
                     }
-                    let mut res = db.get_history(&scripts).unwrap();
-                    let seen_mempool = mempool.lock().await.contains(&scripts);
+                    let mut seen_blockchain = db.get_history(&scripts).unwrap();
+                    let seen_mempool = mempool.lock().await.seen(&scripts);
 
-                    for (a, b) in res.iter_mut().zip(seen_mempool.iter()) {
-                        for txid in b {
-                            a.push(TxSeen::mempool(*txid))
+                    for (conf, unconf) in seen_blockchain.iter_mut().zip(seen_mempool.iter()) {
+                        for txid in unconf {
+                            conf.push(TxSeen::mempool(*txid))
                         }
                     }
-                    let is_last = res.iter().all(|e| e.is_empty());
-                    result.extend(res);
+                    let is_last = seen_blockchain.iter().all(|e| e.is_empty());
+                    result.extend(seen_blockchain);
 
                     if is_last {
                         break;

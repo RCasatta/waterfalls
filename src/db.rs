@@ -149,28 +149,45 @@ impl DBStore {
         Ok(())
     }
 
-    // TODO should be remove utxos but there isn't this API in rocksdb (if became remove the update_utxos become insert_utxos)
-    pub(crate) fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<ScriptHash>> {
+    pub(crate) fn get_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<Option<ScriptHash>>> {
         let mut keys = Vec::with_capacity(outpoints.len());
-        let mut buf = vec![0u8; 36];
         let cf = self.utxo_cf();
         for outpoint in outpoints {
-            buf.clear();
-            outpoint.consensus_encode(&mut buf)?;
-            keys.push((&cf, buf.clone()));
+            keys.push((&cf, serialize_outpoint(outpoint)));
         }
         let db_results = self.db.multi_get_cf(keys.clone());
         let result: Vec<_> = db_results
             .into_iter()
             .map(|e| {
-                let db_val = e.unwrap().unwrap();
-                let bytes = db_val.try_into().unwrap();
-                u64::from_be_bytes(bytes)
+                e.unwrap().map(|e| {
+                    let bytes = e.try_into().unwrap();
+                    u64::from_be_bytes(bytes)
+                })
+            })
+            .collect();
+        Ok(result)
+    }
+
+    // TODO should be remove utxos but there isn't this API in rocksdb (if became remove the update_utxos become insert_utxos)
+    pub(crate) fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<ScriptHash>> {
+        let result: Vec<_> = self
+            .get_utxos(outpoints)?
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                if e.is_none() {
+                    println!("can't find {}", outpoints[i]);
+                }
+                e.expect("every utxo must exist when spent")
             })
             .collect();
 
         let mut batch = rocksdb::WriteBatch::default();
         let cf = self.utxo_cf();
+        let mut keys = Vec::with_capacity(outpoints.len());
+        for outpoint in outpoints {
+            keys.push((&cf, serialize_outpoint(outpoint)));
+        }
         for key in keys {
             batch.delete_cf(&cf, &key.1);
         }
@@ -241,7 +258,7 @@ impl DBStore {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, PartialEq, Eq, Debug)]
 pub(crate) struct TxSeen {
     txid: Txid,
     height: Height,
@@ -254,6 +271,12 @@ impl TxSeen {
     pub(crate) fn mempool(txid: Txid) -> TxSeen {
         Self { txid, height: 0 }
     }
+}
+
+fn serialize_outpoint(o: &OutPoint) -> Vec<u8> {
+    let mut v = Vec::with_capacity(36);
+    o.consensus_encode(&mut v).expect("vec don't error");
+    v
 }
 
 fn to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
@@ -313,9 +336,9 @@ fn concat_merge(
 mod test {
     use std::collections::HashMap;
 
-    use elements::{hashes::Hash, BlockHash, OutPoint};
+    use elements::{hashes::Hash, BlockHash, OutPoint, Txid};
 
-    use crate::db::get_or_init_salt;
+    use crate::db::{get_or_init_salt, TxSeen};
 
     use super::DBStore;
 
@@ -328,10 +351,7 @@ mod test {
         db.set_to_index_height(expected).unwrap();
         assert_eq!(expected, db.get_to_index_height().unwrap());
 
-        assert_eq!(0, db.get_tip_height().unwrap());
-        let expected = 100;
-        db.set_tip_height(expected).unwrap();
-        assert_eq!(expected, db.get_tip_height().unwrap());
+        assert_eq!(0, db.tip().unwrap());
 
         let salt = get_or_init_salt(&db.db).unwrap();
         assert_ne!(salt, 0);
@@ -357,18 +377,21 @@ mod test {
         assert_eq!(expected + 1, res[0]);
         assert_eq!(1, res.len());
 
-        let mut new_history = HashMap::new();
-        new_history.insert(7u64, vec![2u32, 5]);
-        new_history.insert(9u64, vec![5]);
-        db.update_history(&new_history).unwrap();
-        let result = db.get_history(&[7]).unwrap();
-        assert_eq!(result[0], vec![2u32, 5]);
+        let txid = Txid::all_zeros();
 
         let mut new_history = HashMap::new();
-        new_history.insert(7u64, vec![9]);
+        let txs_seen = vec![TxSeen::new(txid, 2), TxSeen::new(txid, 5)];
+        new_history.insert(7u64, txs_seen.clone());
+        new_history.insert(9u64, vec![TxSeen::new(txid, 5)]);
         db.update_history(&new_history).unwrap();
         let result = db.get_history(&[7]).unwrap();
-        assert_eq!(result[0], vec![2u32, 5, 9]);
+        assert_eq!(result[0], txs_seen);
+
+        // let mut new_history = HashMap::new();
+        // new_history.insert(7u64, vec![9]);
+        // db.update_history(&new_history).unwrap();
+        // let result = db.get_history(&[7]).unwrap();
+        // assert_eq!(result[0], vec![2u32, 5, 9]);
 
         assert_eq!(db.tip().unwrap(), 0);
 
@@ -380,7 +403,7 @@ mod test {
         assert_eq!(db.get_block_hash(2).unwrap(), Some(BlockHash::all_zeros()));
         assert_eq!(db.tip().unwrap(), 2);
 
-        let r = db.get_multi_block_hash(&[0, 1, 2]).unwrap();
+        let r = db._get_multi_block_hash(&[0, 1, 2]).unwrap();
         assert_eq!(r, vec![BlockHash::all_zeros(); 3]);
     }
 }

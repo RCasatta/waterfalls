@@ -1,18 +1,23 @@
 // pub(crate) start()
 
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::Arc,
+    time::Instant,
+};
 
-use elements::{BlockHash, OutPoint};
+use elements::{BlockHash, OutPoint, Txid};
 use tokio::time::sleep;
 
 use crate::{
     db::{DBStore, TxSeen},
-    esplora::Client,
+    fetch::Client,
     Error,
 };
 
-pub(crate) async fn index_infallible(shared_state: Arc<DBStore>) {
-    if let Err(e) = index(shared_state).await {
+pub(crate) async fn index_infallible(shared_state: Arc<DBStore>, client: Client) {
+    if let Err(e) = index(shared_state, client).await {
         log::error!("{:?}", e);
     }
 }
@@ -26,11 +31,14 @@ pub async fn get_block_hash_or_weight(db: &DBStore, block_height: u32) -> BlockH
     }
 }
 
-pub async fn index(db: Arc<DBStore>) -> Result<(), Error> {
+pub async fn index(db: Arc<DBStore>, client: Client) -> Result<(), Error> {
     let indexed_height = db.get_to_index_height().unwrap();
     let tip_height = db.tip().unwrap();
     println!("tip: {tip_height}");
-    let client = Client::new();
+
+    let mut skip_outpoint = HashSet::new();
+    let s = "0c52d2526a5c9f00e9fb74afd15dd3caaf17c823159a514f929ae25193a43a52"; // policy asset emission in testnet
+    skip_outpoint.insert(OutPoint::new(Txid::from_str(s).expect("static"), 0));
 
     let mut txs_count = 0u64;
 
@@ -77,7 +85,9 @@ pub async fn index(db: Arc<DBStore>) -> Result<(), Error> {
                         }
                         None => {
                             // println!("removing {}", &input.previous_output);
-                            utxo_spent.push(input.previous_output)
+                            if !skip_outpoint.contains(&input.previous_output) {
+                                utxo_spent.push(input.previous_output)
+                            }
                         }
                     }
                 }
