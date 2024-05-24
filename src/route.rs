@@ -70,7 +70,8 @@ async fn handle_req(
     let start = Instant::now();
     match desc_str.parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>() {
         Ok(desc) => {
-            if is_testnet == desc_str.contains("tpub") {
+            println!("{is_testnet} == {} ", desc_str.contains("xpub"));
+            if is_testnet == desc_str.contains("xpub") {
                 return str_resp("Wrong network".to_string(), hyper::StatusCode::BAD_REQUEST);
             }
             let mut map = BTreeMap::new();
