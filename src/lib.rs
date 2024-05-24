@@ -33,6 +33,8 @@ pub struct Arguments {
     /// if specified, it uses a local node exposing the rest interface on the default port
     #[arg(long)]
     local_node: bool,
+    //
+    // TODO add ip to listen on (if missing 127.0.0.1)
 }
 
 #[derive(Debug)]

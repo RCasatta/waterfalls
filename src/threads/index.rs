@@ -7,7 +7,7 @@ use std::{
     time::Instant,
 };
 
-use elements::{BlockHash, OutPoint, Txid};
+use elements::{Block, BlockHash, OutPoint, Txid};
 use tokio::time::sleep;
 
 use crate::{
@@ -22,10 +22,19 @@ pub(crate) async fn index_infallible(shared_state: Arc<DBStore>, client: Client)
     }
 }
 
-pub async fn get_block_hash_or_weight(db: &DBStore, block_height: u32) -> BlockHash {
+pub async fn get_block_hash_or_wait(db: &DBStore, block_height: u32) -> BlockHash {
     loop {
         match db.get_block_hash(block_height) {
             Ok(Some(e)) => return e,
+            _ => sleep(std::time::Duration::from_secs(1)).await,
+        }
+    }
+}
+
+pub async fn get_block_or_wait(client: &Client, block_hash: BlockHash) -> Block {
+    loop {
+        match client.block(block_hash).await {
+            Ok(b) => return b,
             _ => sleep(std::time::Duration::from_secs(1)).await,
         }
     }
@@ -51,9 +60,10 @@ pub async fn index(db: Arc<DBStore>, client: Client) -> Result<(), Error> {
             let speed = (block_height - indexed_height) as f64 / start.elapsed().as_secs() as f64;
             println!("{block_height} {speed:.2} blocks/s {txs_count} txs");
         }
-        let block_hash = get_block_hash_or_weight(&db, block_height).await;
+        let block_hash = get_block_hash_or_wait(&db, block_height).await;
 
-        let block = client.block(block_hash).await.unwrap();
+        let block = get_block_or_wait(&client, block_hash).await;
+
         for tx in block.txdata {
             txs_count += 1;
             let txid = tx.txid();
