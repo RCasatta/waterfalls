@@ -36,7 +36,7 @@ async fn mempool_sync(
 
                 let mut txs = vec![];
                 for new_txid in new {
-                    let tx = client.tx(*new_txid).await.unwrap(); // TODO
+                    let tx = client.tx_or_wait(*new_txid).await;
                     txs.push(tx)
                 }
                 {

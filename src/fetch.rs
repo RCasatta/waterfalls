@@ -6,6 +6,7 @@ use std::{
 use elements::{encode::Decodable, Block, BlockHash, Transaction, Txid};
 use hyper::body::Buf;
 use serde::Deserialize;
+use tokio::time::sleep;
 
 pub struct Client {
     client: reqwest::Client,
@@ -103,6 +104,24 @@ impl Client {
 
         let tx = Transaction::consensus_decode(bytes.as_ref())?;
         Ok(tx)
+    }
+
+    pub(crate) async fn block_or_wait(&self, block_hash: BlockHash) -> Block {
+        loop {
+            match self.block(block_hash).await {
+                Ok(b) => return b,
+                _ => sleep(std::time::Duration::from_secs(1)).await,
+            }
+        }
+    }
+
+    pub(crate) async fn tx_or_wait(&self, txid: Txid) -> Transaction {
+        loop {
+            match self.tx(txid).await {
+                Ok(t) => return t,
+                _ => sleep(std::time::Duration::from_secs(1)).await,
+            }
+        }
     }
 }
 

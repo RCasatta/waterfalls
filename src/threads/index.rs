@@ -7,7 +7,7 @@ use std::{
     time::Instant,
 };
 
-use elements::{Block, BlockHash, OutPoint, Txid};
+use elements::{BlockHash, OutPoint, Txid};
 use tokio::time::sleep;
 
 use crate::{
@@ -26,15 +26,6 @@ pub async fn get_block_hash_or_wait(db: &DBStore, block_height: u32) -> BlockHas
     loop {
         match db.get_block_hash(block_height) {
             Ok(Some(e)) => return e,
-            _ => sleep(std::time::Duration::from_secs(1)).await,
-        }
-    }
-}
-
-pub async fn get_block_or_wait(client: &Client, block_hash: BlockHash) -> Block {
-    loop {
-        match client.block(block_hash).await {
-            Ok(b) => return b,
             _ => sleep(std::time::Duration::from_secs(1)).await,
         }
     }
@@ -62,7 +53,7 @@ pub async fn index(db: Arc<DBStore>, client: Client) -> Result<(), Error> {
         }
         let block_hash = get_block_hash_or_wait(&db, block_height).await;
 
-        let block = get_block_or_wait(&client, block_hash).await;
+        let block = client.block_or_wait(block_hash).await;
 
         for tx in block.txdata {
             txs_count += 1;
