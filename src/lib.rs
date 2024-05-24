@@ -33,8 +33,9 @@ pub struct Arguments {
     /// if specified, it uses a local node exposing the rest interface on the default port
     #[arg(long)]
     local_node: bool,
-    //
-    // TODO add ip to listen on (if missing 127.0.0.1)
+
+    #[arg(long)]
+    listen: Option<SocketAddr>,
 }
 
 #[derive(Debug)]
@@ -61,7 +62,10 @@ pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error
     let db = Arc::new(DBStore::open(&path)?);
     let mempool = Arc::new(Mutex::new(Mempool::new()));
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3100 + args.testnet as u16));
+    let addr = args.listen.unwrap_or(SocketAddr::from((
+        [127, 0, 0, 1],
+        3100 + args.testnet as u16,
+    )));
     println!("Starting on http://{addr}");
 
     let listener = TcpListener::bind(addr).await?;
