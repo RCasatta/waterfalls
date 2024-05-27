@@ -36,6 +36,9 @@ pub struct Arguments {
 
     #[arg(long)]
     listen: Option<SocketAddr>,
+
+    #[arg(long)]
+    datadir: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -53,7 +56,10 @@ impl std::error::Error for Error {}
 pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // TODO test rest connection to the node
 
-    let mut path = PathBuf::new();
+    let mut path = match args.datadir.as_ref() {
+        Some(p) => p.clone(),
+        None => PathBuf::new(),
+    };
     path.push("db");
     if args.testnet {
         path.push("testnet");
