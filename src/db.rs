@@ -241,15 +241,16 @@ impl DBStore {
     pub(crate) fn update(
         &self,
         block_height: Height,
-        utxo_spent: Vec<OutPoint>,
+        utxo_spent: Vec<(OutPoint, Txid)>,
         mut history_map: HashMap<u64, Vec<TxSeen>>,
         utxo_created: HashMap<OutPoint, u64>,
     ) {
         // TODO should be a db tx
-        let script_hashes = self.remove_utxos(&utxo_spent).unwrap();
-        for (script_hash, prevout) in script_hashes.into_iter().zip(utxo_spent) {
+        let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.0).collect();
+        let script_hashes = self.remove_utxos(&only_outpoints).unwrap();
+        for (script_hash, (_, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
-            el.push(TxSeen::new(prevout.txid, block_height));
+            el.push(TxSeen::new(txid, block_height));
         }
 
         self.update_history(&history_map).unwrap();

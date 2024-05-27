@@ -85,7 +85,7 @@ pub async fn index(db: Arc<DBStore>, client: Client) -> Result<(), Error> {
                         None => {
                             // println!("removing {}", &input.previous_output);
                             if !skip_outpoint.contains(&input.previous_output) {
-                                utxo_spent.push(input.previous_output)
+                                utxo_spent.push((input.previous_output, txid))
                             }
                         }
                     }

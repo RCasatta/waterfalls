@@ -17,7 +17,7 @@ use crate::{
 const GAP_LIMIT: u32 = 20;
 
 // curl --request POST --data 'elwpkh(xpub6DLHCiTPg67KE9ksCjNVpVHTRDHzhCSmoBTKzp2K4FxLQwQvvdNzuqxhK2f9gFVCN6Dori7j2JMLeDoB4VqswG7Et9tjqauAvbDmzF8NEPH/<0;1>/*)' http://localhost:3000/descriptor
-
+// curl --request POST --data 'elsh(wpkh(xpub6BemYiVNp19ZzoiAAnu8oiwo7o4MGRDWgD55XFqSuQX9GJfsf4Y2Vq9Z1De1TEwEzqPyESUupP6EFy4daYGMHGb8kQXaYenREC88fHBkDR1/<0;1>/*))' http://waterfall.liquidwebwallet.org/liquid/descriptor | jq
 pub(crate) async fn route(
     db: &Arc<DBStore>,
     mempool: &Arc<Mutex<Mempool>>,
@@ -70,7 +70,6 @@ async fn handle_req(
     let start = Instant::now();
     match desc_str.parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>() {
         Ok(desc) => {
-            println!("{is_testnet} == {} ", desc_str.contains("xpub"));
             if is_testnet == desc_str.contains("xpub") {
                 return str_resp("Wrong network".to_string(), hyper::StatusCode::BAD_REQUEST);
             }
