@@ -110,8 +110,8 @@ impl Client {
         loop {
             match self.block(block_hash).await {
                 Ok(b) => return b,
-                _ => {
-                    println!("Failing for block({block_hash})");
+                Err(e) => {
+                    println!("Failing for block({block_hash}) err {e:?}");
                     sleep(std::time::Duration::from_secs(1)).await
                 }
             }
@@ -122,8 +122,8 @@ impl Client {
         loop {
             match self.tx(txid).await {
                 Ok(t) => return t,
-                _ => {
-                    println!("Failing for tx({txid})");
+                Err(e) => {
+                    println!("Failing for tx({txid}) err {e:?}");
                     sleep(std::time::Duration::from_secs(1)).await
                 }
             }

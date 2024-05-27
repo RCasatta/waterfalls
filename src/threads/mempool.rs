@@ -46,7 +46,7 @@ async fn mempool_sync(
                     mempool_txids = m.txids();
                 }
             }
-            Err(e) => println!("{e:?}"),
+            Err(e) => println!("mempool sync {e:?}"),
         }
         sleep(std::time::Duration::from_secs(1)).await;
     }
