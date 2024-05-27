@@ -51,6 +51,8 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // TODO test rest connection to the node
+
     let mut path = PathBuf::new();
     path.push("db");
     if args.testnet {
