@@ -30,9 +30,9 @@ pub struct Arguments {
     #[arg(long)]
     testnet: bool,
 
-    /// if specified, it uses a local node exposing the rest interface on the default port
+    /// if specified, it uses esplora instead of local node to get data
     #[arg(long)]
-    local_node: bool,
+    use_esplora: bool,
 
     #[arg(long)]
     listen: Option<SocketAddr>,
@@ -80,20 +80,20 @@ pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error
 
     let _h1 = {
         let db = db.clone();
-        let client: Client = Client::new(args.testnet, args.local_node);
+        let client: Client = Client::new(args.testnet, args.use_esplora);
         tokio::spawn(async move { index_infallible(db, client).await })
     };
 
     let _h2 = {
         let db = db.clone();
-        let client: Client = Client::new(args.testnet, args.local_node);
+        let client: Client = Client::new(args.testnet, args.use_esplora);
         tokio::spawn(async move { headers_infallible(db, client).await })
     };
 
     let _h3 = {
         let db = db.clone();
         let mempool = mempool.clone();
-        let client = Client::new(args.testnet, args.local_node);
+        let client = Client::new(args.testnet, args.use_esplora);
         tokio::spawn(async move { mempool_sync_infallible(db, mempool, client).await })
     };
 
