@@ -80,11 +80,11 @@ impl Client {
         let body_bytes = resp.bytes().await?;
 
         Ok(if self.use_esplora {
-            let content: HashMap<Txid, Empty> = serde_json::from_reader(body_bytes.reader())?;
-            content.into_keys().collect()
-        } else {
             let content: HashSet<Txid> = serde_json::from_reader(body_bytes.reader())?;
             content
+        } else {
+            let content: HashMap<Txid, Empty> = serde_json::from_reader(body_bytes.reader())?;
+            content.into_keys().collect()
         })
     }
 
