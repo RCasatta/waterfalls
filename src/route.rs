@@ -24,7 +24,7 @@ pub(crate) async fn route(
     req: Request<hyper::body::Incoming>,
     is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
-    println!("---> {req:?}");
+    // println!("---> {req:?}");
     match (req.method(), req.uri().path()) {
         (&Method::POST, "/descriptor") => {
             let upper = req.body().size_hint().upper().unwrap_or(u64::MAX);
@@ -57,7 +57,7 @@ pub(crate) async fn route(
 fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {
     let mut resp = Response::new(Full::new(s.into()));
     *resp.status_mut() = status;
-    println!("<--- {resp:?}");
+    // println!("<--- {resp:?}");
     Ok(resp)
 }
 
@@ -103,7 +103,11 @@ async fn handle_req(
                 map.insert(desc.to_string(), result);
             }
             let result = serde_json::to_string(&map).unwrap();
-            println!("elapsed: {}ms", start.elapsed().as_millis());
+            let elements: usize = map.iter().map(|(_, v)| v.len()).sum();
+            println!(
+                "returning: {elements} elements, elapsed: {}ms",
+                start.elapsed().as_millis()
+            );
             str_resp(result, hyper::StatusCode::OK)
         }
         Err(e) => str_resp(e.to_string(), hyper::StatusCode::BAD_REQUEST),
