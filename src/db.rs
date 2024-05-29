@@ -232,7 +232,14 @@ impl DBStore {
             let db_result = db_result.unwrap();
             match db_result {
                 None => result.push(vec![]),
-                Some(e) => result.push(from_be_bytes(&e)),
+                Some(e) => {
+                    let mut txs_seen = from_be_bytes(&e);
+                    for tx in txs_seen.iter_mut() {
+                        // TODO headers list must be in memory
+                        tx.block_hash = self.get_block_hash(tx.height)?;
+                    }
+                    result.push(txs_seen)
+                }
             }
         }
         Ok(result)
@@ -263,14 +270,23 @@ impl DBStore {
 pub(crate) struct TxSeen {
     txid: Txid,
     height: Height,
+    block_hash: Option<BlockHash>,
 }
 impl TxSeen {
     pub(crate) fn new(txid: Txid, height: Height) -> Self {
-        Self { txid, height }
+        Self {
+            txid,
+            height,
+            block_hash: None,
+        }
     }
 
     pub(crate) fn mempool(txid: Txid) -> TxSeen {
-        Self { txid, height: 0 }
+        Self {
+            txid,
+            height: 0,
+            block_hash: None,
+        }
     }
 }
 
@@ -282,7 +298,12 @@ fn serialize_outpoint(o: &OutPoint) -> Vec<u8> {
 
 fn to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
     let mut result = Vec::with_capacity(v.len() * 36);
-    for TxSeen { txid, height } in v {
+    for TxSeen {
+        txid,
+        height,
+        block_hash: _,
+    } in v
+    {
         result.extend(txid.as_byte_array());
         result.extend(height.to_be_bytes());
     }
@@ -295,7 +316,11 @@ fn from_be_bytes(v: &[u8]) -> Vec<TxSeen> {
     for chunk in v.chunks(36) {
         let txid = Txid::from_slice(&chunk[..32]).unwrap();
         let height = Height::from_be_bytes(chunk[32..].try_into().unwrap());
-        result.push(TxSeen { txid, height })
+        result.push(TxSeen {
+            txid,
+            height,
+            block_hash: None,
+        })
     }
     result
 }
