@@ -4,7 +4,7 @@ use elements_miniscript::DescriptorPublicKey;
 use http_body_util::{BodyExt, Full};
 use hyper::{
     body::{Body, Bytes},
-    header::CONTENT_TYPE,
+    header::{CACHE_CONTROL, CONTENT_TYPE},
     Method, Request, Response, StatusCode,
 };
 use tokio::sync::Mutex;
@@ -56,12 +56,20 @@ pub(crate) async fn route(
 }
 
 fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {
-    any_resp(s, status, false)
+    any_resp(s, status, false, None)
 }
-fn any_resp(s: String, status: StatusCode, json: bool) -> Result<Response<Full<Bytes>>, Error> {
+fn any_resp(
+    s: String,
+    status: StatusCode,
+    json: bool,
+    cache: Option<u32>,
+) -> Result<Response<Full<Bytes>>, Error> {
     let mut builder = Response::builder().status(status);
     if json {
         builder = builder.header(CONTENT_TYPE, "application/json")
+    }
+    if let Some(cache) = cache {
+        builder = builder.header(CACHE_CONTROL, format!("public, max-age={cache}"))
     }
     Ok(builder
         .body(Full::new(s.into()))
@@ -115,7 +123,7 @@ async fn handle_req(
                 "returning: {elements} elements, elapsed: {}ms",
                 start.elapsed().as_millis()
             );
-            any_resp(result, hyper::StatusCode::OK, true)
+            any_resp(result, hyper::StatusCode::OK, true, Some(5))
         }
         Err(e) => str_resp(e.to_string(), hyper::StatusCode::BAD_REQUEST),
     }
