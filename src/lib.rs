@@ -44,6 +44,7 @@ pub struct Arguments {
 #[derive(Debug)]
 pub enum Error {
     WrongNetwork,
+    Other,
 }
 
 impl std::fmt::Display for Error {
