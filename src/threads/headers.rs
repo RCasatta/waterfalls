@@ -1,19 +1,18 @@
+use crate::{fetch::Client, state::State, Error};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-
 use tokio::time::sleep;
 
-use crate::{db::DBStore, fetch::Client, Error};
-
-pub(crate) async fn headers_infallible(db: Arc<DBStore>, client: Client) {
-    if let Err(e) = headers(db, client).await {
+pub(crate) async fn headers_infallible(state: Arc<State>, client: Client) {
+    if let Err(e) = headers(state, client).await {
         log::error!("{:?}", e);
     }
 }
 
-pub async fn headers(db: Arc<DBStore>, client: Client) -> Result<(), Error> {
+pub async fn headers(state: Arc<State>, client: Client) -> Result<(), Error> {
+    let db = &state.db;
     let mut height = 0u32;
     let mut now = Instant::now();
     let mut last_height_print = height;

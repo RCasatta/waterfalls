@@ -1,22 +1,19 @@
-// pub(crate) start()
-
+use crate::{
+    db::{DBStore, TxSeen},
+    fetch::Client,
+    state::State,
+    Error,
+};
+use elements::{BlockHash, OutPoint, Txid};
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
     sync::Arc,
     time::Instant,
 };
-
-use elements::{BlockHash, OutPoint, Txid};
 use tokio::time::sleep;
 
-use crate::{
-    db::{DBStore, TxSeen},
-    fetch::Client,
-    Error,
-};
-
-pub(crate) async fn index_infallible(shared_state: Arc<DBStore>, client: Client) {
+pub(crate) async fn index_infallible(shared_state: Arc<State>, client: Client) {
     if let Err(e) = index(shared_state, client).await {
         log::error!("{:?}", e);
     }
@@ -31,7 +28,8 @@ pub async fn get_block_hash_or_wait(db: &DBStore, block_height: u32) -> BlockHas
     }
 }
 
-pub async fn index(db: Arc<DBStore>, client: Client) -> Result<(), Error> {
+pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
+    let db = &state.db;
     let indexed_height = db.get_to_index_height().unwrap();
 
     let mut skip_outpoint = HashSet::new();

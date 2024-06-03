@@ -1,24 +1,15 @@
+use crate::{fetch::Client, state::State, Error};
 use std::{collections::HashSet, sync::Arc};
+use tokio::time::sleep;
 
-use tokio::{sync::Mutex, time::sleep};
-
-use crate::{db::DBStore, fetch::Client, mempool::Mempool, Error};
-
-pub(crate) async fn mempool_sync_infallible(
-    db: Arc<DBStore>,
-    mempool: Arc<Mutex<Mempool>>,
-    client: Client,
-) {
-    if let Err(e) = mempool_sync(db, mempool, client).await {
+pub(crate) async fn mempool_sync_infallible(state: Arc<State>, client: Client) {
+    if let Err(e) = mempool_sync(state, client).await {
         log::error!("{:?}", e);
     }
 }
 
-async fn mempool_sync(
-    db: Arc<DBStore>,
-    mempool: Arc<Mutex<Mempool>>,
-    client: Client,
-) -> Result<(), Error> {
+async fn mempool_sync(state: Arc<State>, client: Client) -> Result<(), Error> {
+    let db = &state.db;
     let mut mempool_txids = HashSet::new();
     loop {
         match client.mempool().await {
@@ -40,7 +31,7 @@ async fn mempool_sync(
                     txs.push(tx)
                 }
                 {
-                    let mut m = mempool.lock().await;
+                    let mut m = state.mempool.lock().await;
                     m.remove(&removed);
                     m.add(&db, &txs);
                     mempool_txids = m.txids();

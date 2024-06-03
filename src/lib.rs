@@ -8,6 +8,7 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use mempool::Mempool;
+use state::State;
 use threads::headers::headers_infallible;
 use threads::index::index_infallible;
 use threads::mempool::mempool_sync_infallible;
@@ -18,6 +19,7 @@ mod db;
 mod fetch;
 mod mempool;
 mod route;
+mod state;
 mod threads;
 
 type ScriptHash = u64;
@@ -68,8 +70,11 @@ pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error
         path.push("mainnet");
     }
 
-    let db = Arc::new(DBStore::open(&path)?);
-    let mempool = Arc::new(Mutex::new(Mempool::new()));
+    let state = Arc::new(State {
+        db: DBStore::open(&path)?,
+        mempool: Mutex::new(Mempool::new()),
+        // block_hashes: Mutex::new(Vec::new()),
+    });
 
     let addr = args.listen.unwrap_or(SocketAddr::from((
         [127, 0, 0, 1],
@@ -80,37 +85,34 @@ pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error
     let listener = TcpListener::bind(addr).await?;
 
     let _h1 = {
-        let db = db.clone();
+        let state = state.clone();
         let client: Client = Client::new(args.testnet, args.use_esplora);
-        tokio::spawn(async move { index_infallible(db, client).await })
+        tokio::spawn(async move { index_infallible(state, client).await })
     };
 
     let _h2 = {
-        let db = db.clone();
+        let state = state.clone();
         let client: Client = Client::new(args.testnet, args.use_esplora);
-        tokio::spawn(async move { headers_infallible(db, client).await })
+        tokio::spawn(async move { headers_infallible(state, client).await })
     };
 
     let _h3 = {
-        let db = db.clone();
-        let mempool = mempool.clone();
+        let state = state.clone();
         let client = Client::new(args.testnet, args.use_esplora);
-        tokio::spawn(async move { mempool_sync_infallible(db, mempool, client).await })
+        tokio::spawn(async move { mempool_sync_infallible(state, client).await })
     };
 
     loop {
         let (stream, _) = listener.accept().await?;
 
         let io = TokioIo::new(stream);
-        let db: Arc<DBStore> = db.clone();
-        let mempool: Arc<Mutex<Mempool>> = mempool.clone();
+        let state = state.clone();
 
         tokio::task::spawn(async move {
-            let db = &db;
-            let mempool = &mempool;
+            let state = &state;
             let is_testnet = args.testnet;
 
-            let service = service_fn(move |req| route::route(db, mempool, req, is_testnet));
+            let service = service_fn(move |req| route::route(state, req, is_testnet));
 
             if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
                 println!("Error serving connection: {:?}", err);

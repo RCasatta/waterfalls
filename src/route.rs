@@ -1,30 +1,23 @@
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
-
+use crate::{db::TxSeen, state::State, Error};
 use elements_miniscript::DescriptorPublicKey;
 use http_body_util::{BodyExt, Full};
 use hyper::{
-    body::{Body, Bytes},
+    body::{Body, Bytes, Incoming},
     header::{CACHE_CONTROL, CONTENT_TYPE},
     Method, Request, Response, StatusCode,
 };
-use tokio::sync::Mutex;
-
-use crate::{
-    db::{DBStore, TxSeen},
-    mempool::Mempool,
-    Error,
-};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 const GAP_LIMIT: u32 = 20;
 
 // curl --request POST --data 'elwpkh(xpub6DLHCiTPg67KE9ksCjNVpVHTRDHzhCSmoBTKzp2K4FxLQwQvvdNzuqxhK2f9gFVCN6Dori7j2JMLeDoB4VqswG7Et9tjqauAvbDmzF8NEPH/<0;1>/*)' http://localhost:3000/descriptor
 // curl --request POST --data 'elsh(wpkh(xpub6BemYiVNp19ZzoiAAnu8oiwo7o4MGRDWgD55XFqSuQX9GJfsf4Y2Vq9Z1De1TEwEzqPyESUupP6EFy4daYGMHGb8kQXaYenREC88fHBkDR1/<0;1>/*))' http://waterfall.liquidwebwallet.org/liquid/descriptor | jq
 pub(crate) async fn route(
-    db: &Arc<DBStore>,
-    mempool: &Arc<Mutex<Mempool>>,
-    req: Request<hyper::body::Incoming>,
+    state: &Arc<State>,
+    req: Request<Incoming>,
     is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
+    let db = &state.db;
     // println!("---> {req:?}");
     match (req.method(), req.uri().path()) {
         (&Method::POST, "/descriptor") => {
@@ -39,7 +32,7 @@ pub(crate) async fn route(
             // Await the whole body to be collected into a single `Bytes`...
             let whole_body = req.collect().await.unwrap().to_bytes(); // TODO unwraps
             match std::str::from_utf8(whole_body.as_ref()) {
-                Ok(desc) => handle_req(db, mempool, &desc, is_testnet).await,
+                Ok(desc) => handle_req(state, &desc, is_testnet).await,
                 Err(_) => str_resp(
                     "Invalid utf8 string".to_string(),
                     hyper::StatusCode::BAD_REQUEST,
@@ -77,11 +70,11 @@ fn any_resp(
 }
 
 async fn handle_req(
-    db: &DBStore,
-    mempool: &Arc<Mutex<Mempool>>,
+    state: &Arc<State>,
     desc_str: &str,
     is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
+    let db = &state.db;
     let start = Instant::now();
     match desc_str.parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>() {
         Ok(desc) => {
@@ -101,7 +94,7 @@ async fn handle_req(
                         scripts.push(db.hash(&script_pubkey));
                     }
                     let mut seen_blockchain = db.get_history(&scripts).unwrap();
-                    let seen_mempool = mempool.lock().await.seen(&scripts);
+                    let seen_mempool = state.mempool.lock().await.seen(&scripts);
 
                     for (conf, unconf) in seen_blockchain.iter_mut().zip(seen_mempool.iter()) {
                         for txid in unconf {
