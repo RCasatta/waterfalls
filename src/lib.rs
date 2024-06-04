@@ -49,6 +49,7 @@ pub struct Arguments {
 pub enum Error {
     WrongNetwork,
     Other,
+    DescriptorFieldMandatory,
 }
 
 impl std::fmt::Display for Error {

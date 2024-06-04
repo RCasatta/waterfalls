@@ -1,14 +1,30 @@
 use crate::{db::TxSeen, state::State, Error};
 use elements_miniscript::DescriptorPublicKey;
-use http_body_util::{BodyExt, Full};
+use http_body_util::Full;
 use hyper::{
     body::{Body, Bytes, Incoming},
     header::{CACHE_CONTROL, CONTENT_TYPE},
     Method, Request, Response, StatusCode,
 };
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use serde::Serialize;
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+    time::Instant,
+};
 
 const GAP_LIMIT: u32 = 20;
+const MAX_BATCH: u32 = 50;
+const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
+
+struct Inputs {
+    descriptor: String,
+
+    /// Requested page, 0 if not specified
+    /// The first returned index is equal to `page * 1000`
+    /// The same page is used for all the descriptor (ie both external and internal)
+    page: u16,
+}
 
 // curl --request POST --data 'elwpkh(xpub6DLHCiTPg67KE9ksCjNVpVHTRDHzhCSmoBTKzp2K4FxLQwQvvdNzuqxhK2f9gFVCN6Dori7j2JMLeDoB4VqswG7Et9tjqauAvbDmzF8NEPH/<0;1>/*)' http://localhost:3000/descriptor
 // curl --request POST --data 'elsh(wpkh(xpub6BemYiVNp19ZzoiAAnu8oiwo7o4MGRDWgD55XFqSuQX9GJfsf4Y2Vq9Z1De1TEwEzqPyESUupP6EFy4daYGMHGb8kQXaYenREC88fHBkDR1/<0;1>/*))' http://waterfall.liquidwebwallet.org/liquid/descriptor | jq
@@ -18,8 +34,8 @@ pub(crate) async fn route(
     is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
     // println!("---> {req:?}");
-    match (req.method(), req.uri().path()) {
-        (&Method::POST, "/descriptor") => {
+    match (req.method(), req.uri().path(), req.uri().query()) {
+        (&Method::GET, "/v1/descriptor", Some(query)) => {
             let upper = req.body().size_hint().upper().unwrap_or(u64::MAX);
             if upper > 1024 * 64 {
                 return str_resp(
@@ -27,16 +43,9 @@ pub(crate) async fn route(
                     hyper::StatusCode::PAYLOAD_TOO_LARGE,
                 );
             }
+            let inputs = parse_query(query)?;
 
-            // Await the whole body to be collected into a single `Bytes`...
-            let whole_body = req.collect().await.unwrap().to_bytes(); // TODO unwraps
-            match std::str::from_utf8(whole_body.as_ref()) {
-                Ok(desc) => handle_req(state, &desc, is_testnet).await,
-                Err(_) => str_resp(
-                    "Invalid utf8 string".to_string(),
-                    hyper::StatusCode::BAD_REQUEST,
-                ),
-            }
+            handle_req(state, &inputs, is_testnet).await
         }
         _ => {
             let resp_body = match state.tip().await {
@@ -47,6 +56,21 @@ pub(crate) async fn route(
             str_resp(resp_body, hyper::StatusCode::OK)
         }
     }
+}
+
+fn parse_query(query: &str) -> Result<Inputs, Error> {
+    let mut params = form_urlencoded::parse(query.as_bytes())
+        .into_owned()
+        .collect::<HashMap<String, String>>();
+    let descriptor = params
+        .remove("descriptor")
+        .ok_or(Error::DescriptorFieldMandatory)?;
+    let page = params
+        .get("page")
+        .map(|e| e.parse().unwrap_or(0))
+        .unwrap_or(0u16);
+
+    Ok(Inputs { descriptor, page })
 }
 
 fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {
@@ -70,11 +94,18 @@ fn any_resp(
         .map_err(|_| Error::Other)?)
 }
 
+#[derive(Serialize)]
+struct Output {
+    txs_seen: BTreeMap<String, Vec<Vec<TxSeen>>>,
+    page: u16,
+}
+
 async fn handle_req(
     state: &Arc<State>,
-    desc_str: &str,
+    inputs: &Inputs,
     is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
+    let desc_str = &inputs.descriptor;
     let db = &state.db;
     let start = Instant::now();
     match desc_str.parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>() {
@@ -85,10 +116,10 @@ async fn handle_req(
             let mut map = BTreeMap::new();
             for desc in desc.into_single_descriptors().unwrap().iter() {
                 let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
-                for batch in 0.. {
+                for batch in 0..MAX_BATCH {
                     let mut scripts = Vec::with_capacity(GAP_LIMIT as usize);
 
-                    let start = batch * GAP_LIMIT;
+                    let start = batch * GAP_LIMIT + inputs.page as u32 * MAX_ADDRESSES;
                     for index in start..start + GAP_LIMIT {
                         let l = desc.at_derivation_index(index).unwrap();
                         let script_pubkey = l.script_pubkey();
@@ -126,8 +157,12 @@ async fn handle_req(
                 }
             }
 
-            let result = serde_json::to_string(&map).unwrap();
             let elements: usize = map.iter().map(|(_, v)| v.len()).sum();
+            let result = serde_json::to_string(&Output {
+                txs_seen: map,
+                page: inputs.page,
+            })
+            .unwrap();
             println!(
                 "returning: {elements} elements, elapsed: {}ms",
                 start.elapsed().as_millis()
