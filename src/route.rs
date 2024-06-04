@@ -17,7 +17,6 @@ pub(crate) async fn route(
     req: Request<Incoming>,
     is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
-    let db = &state.db;
     // println!("---> {req:?}");
     match (req.method(), req.uri().path()) {
         (&Method::POST, "/descriptor") => {
@@ -40,9 +39,11 @@ pub(crate) async fn route(
             }
         }
         _ => {
-            let height = db.tip().unwrap();
-            let hash = db.get_block_hash(height).unwrap().unwrap();
-            let resp_body = format!("tip height is {} with hash {}", height, hash,);
+            let resp_body = match state.tip().await {
+                Some(tip) => format!("tip height is {tip:?}"),
+                None => "indexing need to start".to_owned(),
+            };
+
             str_resp(resp_body, hyper::StatusCode::OK)
         }
     }
@@ -110,6 +111,21 @@ async fn handle_req(
                 }
                 map.insert(desc.to_string(), result);
             }
+
+            // enrich with block hashes and timestamps
+            {
+                let blocks_hash_ts = state.blocks_hash_ts.lock().await;
+                for v in map.values_mut() {
+                    for tx_seens in v.iter_mut() {
+                        for tx_seen in tx_seens.iter_mut() {
+                            let (hash, ts) = blocks_hash_ts[tx_seen.height as usize];
+                            tx_seen.block_hash = Some(hash);
+                            tx_seen.block_timestamp = Some(ts);
+                        }
+                    }
+                }
+            }
+
             let result = serde_json::to_string(&map).unwrap();
             let elements: usize = map.iter().map(|(_, v)| v.len()).sum();
             println!(

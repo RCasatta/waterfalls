@@ -1,57 +1,40 @@
-use crate::{
-    db::{DBStore, TxSeen},
-    fetch::Client,
-    state::State,
-    Error,
-};
-use elements::{BlockHash, OutPoint, Txid};
+use crate::{db::TxSeen, fetch::Client, state::State, Error};
+use elements::{OutPoint, Txid};
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
     sync::Arc,
     time::Instant,
 };
-use tokio::time::sleep;
 
-pub(crate) async fn index_infallible(shared_state: Arc<State>, client: Client) {
+pub(crate) async fn blocks_infallible(shared_state: Arc<State>, client: Client) {
     if let Err(e) = index(shared_state, client).await {
         log::error!("{:?}", e);
     }
 }
 
-pub async fn get_block_hash_or_wait(db: &DBStore, block_height: u32) -> BlockHash {
-    loop {
-        match db.get_block_hash(block_height) {
-            Ok(Some(e)) => return e,
-            _ => sleep(std::time::Duration::from_secs(1)).await,
-        }
-    }
-}
-
 pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
     let db = &state.db;
-    let indexed_height = db.get_to_index_height().unwrap();
+    let next_height = state.blocks_hash_ts.lock().await.len() as u32;
 
-    let mut skip_outpoint = HashSet::new();
-    let s = "0c52d2526a5c9f00e9fb74afd15dd3caaf17c823159a514f929ae25193a43a52"; // policy asset emission in testnet
-    skip_outpoint.insert(OutPoint::new(Txid::from_str(s).expect("static"), 0));
+    let skip_outpoint = generate_skip_outpoint();
 
     let mut txs_count = 0u64;
 
     let start = Instant::now();
-    for block_height in indexed_height.. {
+    for block_height in next_height.. {
         let mut history_map = HashMap::new();
         let mut utxo_created = HashMap::new();
         let mut utxo_spent = vec![];
         if block_height % 10_000 == 0 {
-            let speed = (block_height - indexed_height) as f64 / start.elapsed().as_secs() as f64;
+            let speed = (block_height - next_height) as f64 / start.elapsed().as_secs() as f64;
             println!("{block_height} {speed:.2} blocks/s {txs_count} txs");
         }
-        let block_hash = get_block_hash_or_wait(&db, block_height).await;
+        let block_hash = client.block_hash_or_wait(block_height).await;
 
         let block = client.block_or_wait(block_hash).await;
 
-        for tx in block.txdata {
+        for tx in block.txdata.iter() {
             txs_count += 1;
             let txid = tx.txid();
             for (j, output) in tx.output.iter().enumerate() {
@@ -91,7 +74,20 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
             }
         }
 
+        // TODO update and set_hash_ts should be a db tx
         db.update(block_height, utxo_spent, history_map, utxo_created);
+
+        let hash = block.block_hash();
+        let ts = block.header.time;
+        state.set_hash_ts(block_height, hash, ts).await;
     }
     Ok(())
+}
+
+fn generate_skip_outpoint() -> HashSet<OutPoint> {
+    let mut skip_outpoint = HashSet::new();
+    let s = "0c52d2526a5c9f00e9fb74afd15dd3caaf17c823159a514f929ae25193a43a52";
+    // policy asset emission in testnet
+    skip_outpoint.insert(OutPoint::new(Txid::from_str(s).expect("static"), 0));
+    skip_outpoint
 }

@@ -14,15 +14,14 @@ async fn mempool_sync(state: Arc<State>, client: Client) -> Result<(), Error> {
     loop {
         match client.mempool().await {
             Ok(current) => {
+                let tip = state.tip().await;
                 let new: Vec<_> = current.difference(&mempool_txids).collect();
                 let removed: Vec<_> = mempool_txids.difference(&current).cloned().collect();
                 if !new.is_empty() {
-                    let tip = db.tip().unwrap_or(0);
-                    println!("new txs in mempool {:?}, tip: {tip}", new);
+                    println!("new txs in mempool {:?}, tip: {tip:?}", new);
                 }
                 if !removed.is_empty() {
-                    let tip = db.tip().unwrap_or(0);
-                    println!("removed txs from mempool {:?}, tip: {tip}", removed);
+                    println!("removed txs from mempool {:?}, tip: {tip:?}", removed);
                 }
 
                 let mut txs = vec![];
@@ -33,7 +32,7 @@ async fn mempool_sync(state: Arc<State>, client: Client) -> Result<(), Error> {
                 {
                     let mut m = state.mempool.lock().await;
                     m.remove(&removed);
-                    m.add(&db, &txs);
+                    m.add(db, &txs);
                     mempool_txids = m.txids();
                 }
             }

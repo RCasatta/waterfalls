@@ -8,9 +8,9 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use mempool::Mempool;
+use preload::headers;
 use state::State;
-use threads::headers::headers_infallible;
-use threads::index::index_infallible;
+use threads::blocks::blocks_infallible;
 use threads::mempool::mempool_sync_infallible;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -18,12 +18,14 @@ use tokio::sync::Mutex;
 mod db;
 mod fetch;
 mod mempool;
+mod preload;
 mod route;
 mod state;
 mod threads;
 
 type ScriptHash = u64;
 type Height = u32;
+type Timestamp = u32;
 
 #[derive(clap::Parser)]
 #[command(author, version, about, long_about = None)]
@@ -73,8 +75,25 @@ pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error
     let state = Arc::new(State {
         db: DBStore::open(&path)?,
         mempool: Mutex::new(Mempool::new()),
-        // block_hashes: Mutex::new(Vec::new()),
+        blocks_hash_ts: Mutex::new(Vec::new()),
     });
+
+    {
+        let state = state.clone();
+        headers(state).await.unwrap();
+    }
+
+    let _h1 = {
+        let state = state.clone();
+        let client: Client = Client::new(args.testnet, args.use_esplora);
+        tokio::spawn(async move { blocks_infallible(state, client).await })
+    };
+
+    let _h2 = {
+        let state = state.clone();
+        let client = Client::new(args.testnet, args.use_esplora);
+        tokio::spawn(async move { mempool_sync_infallible(state, client).await })
+    };
 
     let addr = args.listen.unwrap_or(SocketAddr::from((
         [127, 0, 0, 1],
@@ -83,24 +102,6 @@ pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error
     println!("Starting on http://{addr}");
 
     let listener = TcpListener::bind(addr).await?;
-
-    let _h1 = {
-        let state = state.clone();
-        let client: Client = Client::new(args.testnet, args.use_esplora);
-        tokio::spawn(async move { index_infallible(state, client).await })
-    };
-
-    let _h2 = {
-        let state = state.clone();
-        let client: Client = Client::new(args.testnet, args.use_esplora);
-        tokio::spawn(async move { headers_infallible(state, client).await })
-    };
-
-    let _h3 = {
-        let state = state.clone();
-        let client = Client::new(args.testnet, args.use_esplora);
-        tokio::spawn(async move { mempool_sync_infallible(state, client).await })
-    };
 
     loop {
         let (stream, _) = listener.accept().await?;

@@ -118,6 +118,18 @@ impl Client {
         }
     }
 
+    pub(crate) async fn block_hash_or_wait(&self, height: u32) -> BlockHash {
+        loop {
+            match self.block_hash(height).await {
+                Ok(Some(b)) => return b,
+                _ => {
+                    println!("Failing for blockhash({height})");
+                    sleep(std::time::Duration::from_secs(1)).await
+                }
+            }
+        }
+    }
+
     pub(crate) async fn tx_or_wait(&self, txid: Txid) -> Transaction {
         loop {
             match self.tx(txid).await {

@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use std::{collections::HashMap, hash::Hasher, path::Path, sync::Arc};
 
-use crate::{Height, ScriptHash};
+use crate::{Height, ScriptHash, Timestamp};
 /// RocksDB wrapper for index storage
 
 #[derive(Debug)]
@@ -23,12 +23,14 @@ pub struct DBStore {
 const UTXO_CF: &str = "utxo"; // OutPoint -> ScriptHash
 const HISTORY_CF: &str = "history"; // ScriptHash -> Vec<(Txid, Height)>
 const OTHER_CF: &str = "other";
-const HASHES_CF: &str = "hashes"; // Height -> BlockHash
+
+// when height exists, it also mean the indexing happened up to that height included
+const HASHES_CF: &str = "hashesv2"; // Height -> (BlockHash, Timestamp)
 
 const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF];
 
 // height key for indexed blocks
-const INDEXED_KEY: &[u8] = b"I";
+// const INDEXED_KEY: &[u8] = b"I";
 // height key for salting
 const SALT_KEY: &[u8] = b"S";
 
@@ -63,10 +65,6 @@ impl DBStore {
         self.db.cf_handle(UTXO_CF).expect("missing UTXO_CF")
     }
 
-    fn other_cf(&self) -> Arc<BoundColumnFamily> {
-        self.db.cf_handle(OTHER_CF).expect("missing OTHER_CF")
-    }
-
     fn history_cf(&self) -> Arc<BoundColumnFamily> {
         self.db.cf_handle(HISTORY_CF).expect("missing HISTORY_CF")
     }
@@ -86,52 +84,26 @@ impl DBStore {
         hasher.finish()
     }
 
-    /// Return the height of the block that must be indexed, in other words we have indexed up until the given block_height-1
-    pub(crate) fn get_to_index_height(&self) -> Result<u32> {
-        let res = self.db.get_cf(&self.other_cf(), INDEXED_KEY)?;
-        Ok(res
-            .map(|e| u32::from_be_bytes(e.try_into().unwrap()))
-            .unwrap_or(0))
+    pub(crate) fn iter_hash_ts(&self) -> impl Iterator<Item = (Height, BlockHash, Timestamp)> + '_ {
+        let mode = rocksdb::IteratorMode::Start;
+        let opts = rocksdb::ReadOptions::default();
+        self.db
+            .iterator_cf_opt(&self.hashes_cf(), opts, mode)
+            .map(|kv| {
+                let kv = kv.expect("iterator failed");
+                let height = u32::from_be_bytes((&kv.0[..]).try_into().expect("schema"));
+                let hash = BlockHash::from_slice(&kv.1[..32]).expect("schema");
+                let ts = u32::from_be_bytes((&kv.1[32..]).try_into().expect("schema"));
+                (height, hash, ts)
+            })
     }
-    pub(crate) fn set_to_index_height(&self, height: u32) -> Result<()> {
-        let bytes = height.to_be_bytes();
-        self.db.put_cf(&self.other_cf(), INDEXED_KEY, bytes)?;
-        Ok(())
-    }
-
-    pub(crate) fn get_block_hash(&self, height: u32) -> Result<Option<BlockHash>> {
-        let res = self.db.get_cf(&self.hashes_cf(), &height.to_be_bytes())?;
-        Ok(res.map(|e| BlockHash::from_slice(&e).expect("schema")))
-    }
-    pub(crate) fn set_block_hash(&self, height: u32, hash: BlockHash) -> Result<()> {
-        self.db.put_cf(
-            &self.hashes_cf(),
-            height.to_be_bytes(),
-            hash.as_byte_array(),
-        )?;
-        Ok(())
-    }
-    pub(crate) fn _get_multi_block_hash(&self, height: &[u32]) -> Result<Vec<BlockHash>> {
-        let cf = self.hashes_cf();
-        let keys: Vec<_> = height.iter().map(|e| (&cf, e.to_be_bytes())).collect();
-        let res = self.db.multi_get_cf(keys);
-        let res: Vec<_> = res
-            .into_iter()
-            .map(|e| {
-                BlockHash::from_slice(&e.transpose().expect("hash must be there").unwrap()).unwrap()
-            }) // TODO unwraps
-            .collect();
-        Ok(res)
-    }
-    pub(crate) fn tip(&self) -> Result<Height> {
-        let mut iter = self
-            .db
-            .iterator_cf(&self.hashes_cf(), rocksdb::IteratorMode::End);
-
-        Ok(match iter.next().transpose()? {
-            Some(el) => Height::from_be_bytes(el.0.as_ref().try_into().expect("schema")),
-            None => 0,
-        })
+    pub(crate) fn set_hash_ts(&self, height: u32, hash: BlockHash, ts: Timestamp) {
+        let mut buffer = Vec::with_capacity(36);
+        buffer.extend(hash.as_byte_array());
+        buffer.extend(&ts.to_be_bytes());
+        self.db
+            .put_cf(&self.hashes_cf(), height.to_be_bytes(), buffer)
+            .unwrap();
     }
 
     pub(crate) fn insert_utxos(&self, adds: &HashMap<OutPoint, ScriptHash>) -> Result<()> {
@@ -168,7 +140,6 @@ impl DBStore {
         Ok(result)
     }
 
-    // TODO should be remove utxos but there isn't this API in rocksdb (if became remove the update_utxos become insert_utxos)
     pub(crate) fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<ScriptHash>> {
         let result: Vec<_> = self
             .get_utxos(outpoints)?
@@ -233,11 +204,7 @@ impl DBStore {
             match db_result {
                 None => result.push(vec![]),
                 Some(e) => {
-                    let mut txs_seen = from_be_bytes(&e);
-                    for tx in txs_seen.iter_mut() {
-                        // TODO headers list must be in memory
-                        tx.block_hash = self.get_block_hash(tx.height)?;
-                    }
+                    let txs_seen = from_be_bytes(&e);
                     result.push(txs_seen)
                 }
             }
@@ -262,15 +229,15 @@ impl DBStore {
 
         self.update_history(&history_map).unwrap();
         self.insert_utxos(&utxo_created).unwrap();
-        self.set_to_index_height(block_height + 1).unwrap()
     }
 }
 
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
 pub(crate) struct TxSeen {
-    txid: Txid,
-    height: Height,
-    block_hash: Option<BlockHash>,
+    pub(crate) txid: Txid,
+    pub(crate) height: Height,
+    pub(crate) block_hash: Option<BlockHash>,
+    pub(crate) block_timestamp: Option<Timestamp>,
 }
 impl TxSeen {
     pub(crate) fn new(txid: Txid, height: Height) -> Self {
@@ -278,15 +245,12 @@ impl TxSeen {
             txid,
             height,
             block_hash: None,
+            block_timestamp: None,
         }
     }
 
     pub(crate) fn mempool(txid: Txid) -> TxSeen {
-        Self {
-            txid,
-            height: 0,
-            block_hash: None,
-        }
+        TxSeen::new(txid, 0)
     }
 }
 
@@ -298,12 +262,7 @@ fn serialize_outpoint(o: &OutPoint) -> Vec<u8> {
 
 fn to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
     let mut result = Vec::with_capacity(v.len() * 36);
-    for TxSeen {
-        txid,
-        height,
-        block_hash: _,
-    } in v
-    {
+    for TxSeen { txid, height, .. } in v {
         result.extend(txid.as_byte_array());
         result.extend(height.to_be_bytes());
     }
@@ -316,11 +275,7 @@ fn from_be_bytes(v: &[u8]) -> Vec<TxSeen> {
     for chunk in v.chunks(36) {
         let txid = Txid::from_slice(&chunk[..32]).unwrap();
         let height = Height::from_be_bytes(chunk[32..].try_into().unwrap());
-        result.push(TxSeen {
-            txid,
-            height,
-            block_hash: None,
-        })
+        result.push(TxSeen::new(txid, height))
     }
     result
 }
@@ -362,7 +317,7 @@ fn concat_merge(
 mod test {
     use std::collections::HashMap;
 
-    use elements::{hashes::Hash, BlockHash, OutPoint, Txid};
+    use elements::{hashes::Hash, OutPoint, Txid};
 
     use crate::db::{get_or_init_salt, TxSeen};
 
@@ -372,12 +327,6 @@ mod test {
     fn test_db() {
         let tempdir = tempfile::TempDir::new().unwrap();
         let db = DBStore::open(tempdir.path()).unwrap();
-        assert_eq!(0, db.get_to_index_height().unwrap());
-        let expected = 100;
-        db.set_to_index_height(expected).unwrap();
-        assert_eq!(expected, db.get_to_index_height().unwrap());
-
-        assert_eq!(0, db.tip().unwrap());
 
         let salt = get_or_init_salt(&db.db).unwrap();
         assert_ne!(salt, 0);
@@ -419,17 +368,17 @@ mod test {
         // let result = db.get_history(&[7]).unwrap();
         // assert_eq!(result[0], vec![2u32, 5, 9]);
 
-        assert_eq!(db.tip().unwrap(), 0);
+        // assert_eq!(db.tip().unwrap(), 0);
 
-        db.set_block_hash(0, BlockHash::all_zeros()).unwrap();
-        db.set_block_hash(1, BlockHash::all_zeros()).unwrap();
-        db.set_block_hash(2, BlockHash::all_zeros()).unwrap();
+        // db.set_hash_ts(0, BlockHash::all_zeros(), 4).unwrap();
+        // db.set_hash_ts(1, BlockHash::all_zeros(), 5).unwrap();
+        // db.set_hash_ts(2, BlockHash::all_zeros(), 6).unwrap();
 
-        assert_eq!(db.get_block_hash(3).unwrap(), None);
-        assert_eq!(db.get_block_hash(2).unwrap(), Some(BlockHash::all_zeros()));
-        assert_eq!(db.tip().unwrap(), 2);
+        // assert_eq!(db.get_block_hash(3).unwrap(), None);
+        // assert_eq!(db.get_block_hash(2).unwrap(), Some(BlockHash::all_zeros()));
+        // assert_eq!(db.tip().unwrap(), 2);
 
-        let r = db._get_multi_block_hash(&[0, 1, 2]).unwrap();
-        assert_eq!(r, vec![BlockHash::all_zeros(); 3]);
+        // let r = db._get_multi_block_hash(&[0, 1, 2]).unwrap();
+        // assert_eq!(r, vec![BlockHash::all_zeros(); 3]);
     }
 }

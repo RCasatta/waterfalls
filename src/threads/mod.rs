@@ -1,3 +1,2 @@
-pub(crate) mod headers;
-pub(crate) mod index;
+pub(crate) mod blocks;
 pub(crate) mod mempool;
