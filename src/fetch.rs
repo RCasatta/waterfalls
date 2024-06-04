@@ -119,11 +119,19 @@ impl Client {
     }
 
     pub(crate) async fn block_hash_or_wait(&self, height: u32) -> BlockHash {
+        let mut i = 0;
         loop {
             match self.block_hash(height).await {
-                Ok(Some(b)) => return b,
+                Ok(Some(b)) => {
+                    i = 0;
+                    return b;
+                }
                 _ => {
-                    println!("Failing for blockhash({height})");
+                    if i > 100 {
+                        // when waiting for a new block, 60 fails are expected
+                        println!("Failing for blockhash({height})");
+                    }
+                    i += 1;
                     sleep(std::time::Duration::from_secs(1)).await
                 }
             }
