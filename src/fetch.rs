@@ -123,7 +123,6 @@ impl Client {
         loop {
             match self.block_hash(height).await {
                 Ok(Some(b)) => {
-                    i = 0;
                     return b;
                 }
                 _ => {
