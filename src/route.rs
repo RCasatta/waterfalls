@@ -35,7 +35,7 @@ pub(crate) async fn route(
 ) -> Result<Response<Full<Bytes>>, Error> {
     // println!("---> {req:?}");
     match (req.method(), req.uri().path(), req.uri().query()) {
-        (&Method::GET, "/v1/descriptor", Some(query)) => {
+        (&Method::GET, "/v1/waterfall", Some(query)) => {
             let upper = req.body().size_hint().upper().unwrap_or(u64::MAX);
             if upper > 1024 * 64 {
                 return str_resp(
