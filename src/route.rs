@@ -1,4 +1,5 @@
-use crate::{db::TxSeen, state::State, Error};
+use crate::{db::TxSeen, fetch::Client, state::State, Error};
+use elements::{encode::serialize, Txid};
 use elements_miniscript::DescriptorPublicKey;
 use http_body_util::Full;
 use hyper::{
@@ -9,9 +10,11 @@ use hyper::{
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, HashMap},
+    str::FromStr,
     sync::Arc,
     time::Instant,
 };
+use tokio::sync::Mutex;
 
 const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 50;
@@ -36,6 +39,7 @@ struct Inputs {
 // curl --request POST --data 'elsh(wpkh(xpub6BemYiVNp19ZzoiAAnu8oiwo7o4MGRDWgD55XFqSuQX9GJfsf4Y2Vq9Z1De1TEwEzqPyESUupP6EFy4daYGMHGb8kQXaYenREC88fHBkDR1/<0;1>/*))' http://waterfall.liquidwebwallet.org/liquid/descriptor | jq
 pub(crate) async fn route(
     state: &Arc<State>,
+    client: &Arc<Mutex<Client>>,
     req: Request<Incoming>,
     is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
@@ -49,13 +53,24 @@ pub(crate) async fn route(
             let block_hash = state.tip_hash().await;
             block_hash_resp(block_hash)
         }
-        (&Method::GET, p, None) => {
-            let mut parts = p.split('/');
-            match (parts.next(), parts.next(), parts.next(), parts.next()) {
-                (Some(""), Some("block-height"), Some(v), None) => {
+        (&Method::GET, path, None) => {
+            let mut s = path.split('/');
+            match (s.next(), s.next(), s.next(), s.next(), s.next()) {
+                (Some(""), Some("block-height"), Some(v), None, None) => {
                     let height: u32 = v.parse().map_err(|_| Error::CannotParseHeight)?;
                     let block_hash = state.block_hash(height).await;
                     block_hash_resp(block_hash)
+                }
+                (Some(""), Some("tx"), Some(v), Some("raw"), None) => {
+                    let txid = Txid::from_str(v).map_err(|_| Error::InvalidTxid)?;
+                    let tx = client
+                        .lock()
+                        .await
+                        .tx(txid)
+                        .await
+                        .map_err(|_| Error::CannotFindTx)?;
+                    let result = serialize(&tx);
+                    any_resp(result, StatusCode::OK, false, Some(157784630))
                 }
                 _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),
             }
@@ -89,10 +104,10 @@ fn parse_query(query: &str) -> Result<Inputs, Error> {
 }
 
 fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {
-    any_resp(s, status, false, None)
+    any_resp(s.as_bytes().to_vec(), status, false, None)
 }
 fn any_resp(
-    s: String,
+    bytes: Vec<u8>,
     status: StatusCode,
     json: bool,
     cache: Option<u32>,
@@ -101,11 +116,11 @@ fn any_resp(
     if json {
         builder = builder.header(CONTENT_TYPE, "application/json")
     }
-    if let Some(cache) = cache {
-        builder = builder.header(CACHE_CONTROL, format!("public, max-age={cache}"))
-    }
+    let cache = cache.unwrap_or(5);
+    builder = builder.header(CACHE_CONTROL, format!("public, max-age={cache}"));
+
     Ok(builder
-        .body(Full::new(s.into()))
+        .body(Full::new(bytes.into()))
         .map_err(|_| Error::Other)?)
 }
 
@@ -182,7 +197,12 @@ async fn handle_waterfall_req(
                 "returning: {elements} elements, elapsed: {}ms",
                 start.elapsed().as_millis()
             );
-            any_resp(result, hyper::StatusCode::OK, true, Some(5))
+            any_resp(
+                result.as_bytes().to_vec(),
+                hyper::StatusCode::OK,
+                true,
+                Some(5),
+            )
         }
         Err(e) => str_resp(e.to_string(), hyper::StatusCode::BAD_REQUEST),
     }

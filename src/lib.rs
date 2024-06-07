@@ -51,6 +51,8 @@ pub enum Error {
     Other,
     DescriptorFieldMandatory,
     CannotParseHeight,
+    InvalidTxid,
+    CannotFindTx,
 }
 
 impl std::fmt::Display for Error {
@@ -104,18 +106,22 @@ pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error
     println!("Starting on http://{addr}");
 
     let listener = TcpListener::bind(addr).await?;
+    let client = Client::new(args.testnet, args.use_esplora);
+    let client = Arc::new(Mutex::new(client));
 
     loop {
         let (stream, _) = listener.accept().await?;
 
         let io = TokioIo::new(stream);
         let state = state.clone();
+        let client = client.clone();
 
         tokio::task::spawn(async move {
             let state = &state;
             let is_testnet = args.testnet;
+            let client = &client;
 
-            let service = service_fn(move |req| route::route(state, req, is_testnet));
+            let service = service_fn(move |req| route::route(state, client, req, is_testnet));
 
             if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
                 println!("Error serving connection: {:?}", err);
