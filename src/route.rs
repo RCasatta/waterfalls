@@ -92,7 +92,7 @@ pub(crate) async fn route(
                     any_resp(
                         result.into_bytes(),
                         StatusCode::OK,
-                        Some("application/octet-stream"),
+                        Some("text/plain"),
                         Some(157784630),
                     )
                 }
