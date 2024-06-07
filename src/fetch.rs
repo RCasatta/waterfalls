@@ -8,21 +8,39 @@ use hyper::body::Buf;
 use serde::Deserialize;
 use tokio::time::sleep;
 
+use crate::Arguments;
+
 pub struct Client {
     client: reqwest::Client,
-    testnet: bool,
     use_esplora: bool,
+    base_url: String,
 }
 
 const BS: &str = "https://blockstream.info";
 const LOCAL: &str = "http://127.0.0.1";
 
 impl Client {
-    pub fn new(testnet: bool, use_esplora: bool) -> Client {
+    pub fn new(args: &Arguments) -> Client {
+        let use_esplora = args.use_esplora;
+        let base_url = if use_esplora {
+            let esplora_url = args.esplora_url.clone();
+            if args.testnet {
+                esplora_url.unwrap_or(format!("{BS}/liquidtestnet/api"))
+            } else {
+                esplora_url.unwrap_or(format!("{BS}/liquid/api"))
+            }
+        } else {
+            let node_url = args.node_url.clone();
+            if args.testnet {
+                node_url.unwrap_or(format!("{LOCAL}:7039"))
+            } else {
+                node_url.unwrap_or(format!("{LOCAL}:7041"))
+            }
+        };
         Client {
             client: reqwest::Client::new(),
-            testnet,
             use_esplora,
+            base_url,
         }
     }
 
@@ -32,11 +50,11 @@ impl Client {
         &self,
         height: u32,
     ) -> Result<Option<BlockHash>, Box<dyn std::error::Error + Send + Sync>> {
-        let url = match (self.testnet, self.use_esplora) {
-            (true, false) => format!("{LOCAL}:7039/rest/blockhashbyheight/{height}.hex"),
-            (true, true) => format!("{BS}/liquidtestnet/api/block-height/{height}"),
-            (false, false) => format!("{LOCAL}:7041/rest/blockhashbyheight/{height}.hex"),
-            (false, true) => format!("{BS}/liquid/api/block-height/{height}"),
+        let base = &self.base_url;
+        let url = if self.use_esplora {
+            format!("{base}/block-height/{height}")
+        } else {
+            format!("{base}/rest/blockhashbyheight/{height}.hex",)
         };
         let response = self.client.get(&url).send().await?;
         if response.status() == 200 {
@@ -53,11 +71,11 @@ impl Client {
         &self,
         hash: BlockHash,
     ) -> Result<Block, Box<dyn std::error::Error + Send + Sync>> {
-        let url = match (self.testnet, self.use_esplora) {
-            (true, false) => format!("{LOCAL}:7039/rest/block/{hash}.bin"),
-            (true, true) => format!("{BS}/liquidtestnet/api/block/{hash}/raw"),
-            (false, false) => format!("{LOCAL}:7041/rest/block/{hash}.bin"),
-            (false, true) => format!("{BS}/liquid/api/block/{hash}/raw"),
+        let base = &self.base_url;
+        let url = if self.use_esplora {
+            format!("{base}/block/{hash}/raw")
+        } else {
+            format!("{base}/rest/block/{hash}.bin",)
         };
         let bytes = self.client.get(&url).send().await?.bytes().await?;
 
@@ -69,11 +87,11 @@ impl Client {
     // curl -s http://localhost:7041/rest/mempool/contents.json | jq
     // verbose false is not supported on liquid
     pub async fn mempool(&self) -> Result<HashSet<Txid>, Box<dyn std::error::Error + Send + Sync>> {
-        let url = match (self.testnet, self.use_esplora) {
-            (true, false) => format!("{LOCAL}:7039/rest/mempool/contents.json"),
-            (true, true) => format!("{BS}/liquidtestnet/api/mempool/txids"),
-            (false, false) => format!("{LOCAL}:7041/rest/mempool/contents.json"),
-            (false, true) => format!("{BS}/liquid/api/mempool/txids"),
+        let base = &self.base_url;
+        let url = if self.use_esplora {
+            format!("{base}/mempool/txids")
+        } else {
+            format!("{base}/rest/mempool/contents.json")
         };
 
         let resp = self.client.get(url).send().await?;
@@ -93,11 +111,11 @@ impl Client {
         &self,
         txid: Txid,
     ) -> Result<Transaction, Box<dyn std::error::Error + Send + Sync>> {
-        let url = match (self.testnet, self.use_esplora) {
-            (true, false) => format!("{LOCAL}:7039/rest/tx/{txid}.bin"),
-            (true, true) => format!("{BS}/liquidtestnet/api/tx/{txid}/raw"),
-            (false, false) => format!("{LOCAL}:7041/rest/tx/{txid}.bin"),
-            (false, true) => format!("{BS}/liquid/api/tx/{txid}/raw"),
+        let base = &self.base_url;
+        let url = if self.use_esplora {
+            format!("{base}/tx/{txid}/raw")
+        } else {
+            format!("{base}/rest/tx/{txid}.bin",)
         };
 
         let bytes = self.client.get(&url).send().await?.bytes().await?;
@@ -159,13 +177,18 @@ mod test {
 
     use elements::{BlockHash, Txid};
 
+    use crate::Arguments;
+
     use super::Client;
 
     #[tokio::test]
     #[ignore = "connects to prod server"]
     async fn test_client_esplora() {
+        let mut args = Arguments::default();
+        args.use_esplora = true;
         for is_testnet in [true, false] {
-            let client = Client::new(is_testnet, true);
+            args.testnet = is_testnet;
+            let client = Client::new(&args);
             test(client, is_testnet).await;
         }
     }
@@ -173,8 +196,12 @@ mod test {
     #[tokio::test]
     #[ignore = "connects to local node instance"]
     async fn test_client_local() {
+        let mut args = Arguments::default();
+        args.use_esplora = false;
+
         for is_testnet in [true, false] {
-            let client = Client::new(is_testnet, false);
+            args.testnet = is_testnet;
+            let client = Client::new(&args);
             test(client, is_testnet).await;
         }
     }

@@ -27,7 +27,7 @@ type ScriptHash = u64;
 type Height = u32;
 type Timestamp = u32;
 
-#[derive(clap::Parser)]
+#[derive(clap::Parser, Clone, Default)]
 #[command(author, version, about, long_about = None)]
 pub struct Arguments {
     /// if specified, use liquid testnet
@@ -37,6 +37,14 @@ pub struct Arguments {
     /// if specified, it uses esplora instead of local node to get data
     #[arg(long)]
     use_esplora: bool,
+
+    /// If `use_esplora` is true will use this address to fetch data from esplora or a default url according to the used network if not provided.
+    #[arg(long)]
+    esplora_url: Option<String>,
+
+    /// If `use_esplora` is false will use this address to fetch data from the local rest-enabled elements node or a default url according to the used network if not provided.
+    #[arg(long)]
+    node_url: Option<String>,
 
     #[arg(long)]
     listen: Option<SocketAddr>,
@@ -91,13 +99,13 @@ pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error
 
     let _h1 = {
         let state = state.clone();
-        let client: Client = Client::new(args.testnet, args.use_esplora);
+        let client: Client = Client::new(&args);
         tokio::spawn(async move { blocks_infallible(state, client).await })
     };
 
     let _h2 = {
         let state = state.clone();
-        let client = Client::new(args.testnet, args.use_esplora);
+        let client = Client::new(&args);
         tokio::spawn(async move { mempool_sync_infallible(state, client).await })
     };
 
@@ -108,7 +116,7 @@ pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error
     println!("Starting on http://{addr}");
 
     let listener = TcpListener::bind(addr).await?;
-    let client = Client::new(args.testnet, args.use_esplora);
+    let client = Client::new(&args);
     let client = Arc::new(Mutex::new(client));
 
     loop {
