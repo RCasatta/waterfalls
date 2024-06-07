@@ -47,19 +47,29 @@ pub(crate) async fn route(
         }
         (&Method::GET, "blocks/tip/hash", None) => {
             let block_hash = state.tip_hash().await;
-            match block_hash {
-                Some(h) => str_resp(h.to_string(), StatusCode::OK),
-                None => str_resp("need to sync".to_string(), StatusCode::NOT_FOUND),
+            block_hash_resp(block_hash)
+        }
+        (&Method::GET, p, None) => {
+            let mut parts = p.split('/');
+            match (parts.next(), parts.next(), parts.next(), parts.next()) {
+                (Some(""), Some("block-height"), Some(v), None) => {
+                    let height: u32 = v.parse().map_err(|_| Error::CannotParseHeight)?;
+                    let block_hash = state.block_hash(height).await;
+                    block_hash_resp(block_hash)
+                }
+                _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),
             }
         }
-        _ => {
-            let resp_body = match state.tip().await {
-                Some(tip) => format!("tip height is {tip:?}"),
-                None => "indexing need to start".to_owned(),
-            };
+        _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),
+    }
+}
 
-            str_resp(resp_body, hyper::StatusCode::OK)
-        }
+fn block_hash_resp(
+    block_hash: Option<elements::BlockHash>,
+) -> Result<Response<Full<Bytes>>, Error> {
+    match block_hash {
+        Some(h) => str_resp(h.to_string(), StatusCode::OK),
+        None => str_resp("cannot find it".to_string(), StatusCode::NOT_FOUND),
     }
 }
 

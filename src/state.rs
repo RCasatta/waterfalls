@@ -20,6 +20,10 @@ impl State {
         blocks_hash_ts.last().map(|e| e.0)
     }
 
+    pub(crate) async fn block_hash(&self, height: u32) -> Option<BlockHash> {
+        let blocks_hash_ts = self.blocks_hash_ts.lock().await;
+        blocks_hash_ts.get(height as usize).map(|e| e.0)
+    }
     pub(crate) async fn set_hash_ts(&self, height: u32, hash: BlockHash, ts: Timestamp) {
         {
             let mut blocks_hash_ts = self.blocks_hash_ts.lock().await;

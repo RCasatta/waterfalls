@@ -50,6 +50,7 @@ pub enum Error {
     WrongNetwork,
     Other,
     DescriptorFieldMandatory,
+    CannotParseHeight,
 }
 
 impl std::fmt::Display for Error {
