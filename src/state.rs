@@ -15,6 +15,11 @@ impl State {
         (self.blocks_hash_ts.lock().await.len() as u32).checked_sub(1)
     }
 
+    pub(crate) async fn tip_hash(&self) -> Option<BlockHash> {
+        let blocks_hash_ts = self.blocks_hash_ts.lock().await;
+        blocks_hash_ts.last().map(|e| e.0)
+    }
+
     pub(crate) async fn set_hash_ts(&self, height: u32, hash: BlockHash, ts: Timestamp) {
         {
             let mut blocks_hash_ts = self.blocks_hash_ts.lock().await;

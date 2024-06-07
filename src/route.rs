@@ -2,7 +2,7 @@ use crate::{db::TxSeen, state::State, Error};
 use elements_miniscript::DescriptorPublicKey;
 use http_body_util::Full;
 use hyper::{
-    body::{Body, Bytes, Incoming},
+    body::{Bytes, Incoming},
     header::{CACHE_CONTROL, CONTENT_TYPE},
     Method, Request, Response, StatusCode,
 };
@@ -42,16 +42,15 @@ pub(crate) async fn route(
     // println!("---> {req:?}");
     match (req.method(), req.uri().path(), req.uri().query()) {
         (&Method::GET, "/v1/waterfall", Some(query)) => {
-            let upper = req.body().size_hint().upper().unwrap_or(u64::MAX);
-            if upper > 1024 * 64 {
-                return str_resp(
-                    "Body too big".to_string(),
-                    hyper::StatusCode::PAYLOAD_TOO_LARGE,
-                );
-            }
             let inputs = parse_query(query)?;
-
-            handle_req(state, &inputs, is_testnet).await
+            handle_waterfall_req(state, &inputs, is_testnet).await
+        }
+        (&Method::GET, "blocks/tip/hash", None) => {
+            let block_hash = state.tip_hash().await;
+            match block_hash {
+                Some(h) => str_resp(h.to_string(), StatusCode::OK),
+                None => str_resp("need to sync".to_string(), StatusCode::NOT_FOUND),
+            }
         }
         _ => {
             let resp_body = match state.tip().await {
@@ -106,7 +105,7 @@ struct Output {
     page: u16,
 }
 
-async fn handle_req(
+async fn handle_waterfall_req(
     state: &Arc<State>,
     inputs: &Inputs,
     is_testnet: bool,
