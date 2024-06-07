@@ -49,7 +49,7 @@ pub(crate) async fn route(
             let inputs = parse_query(query)?;
             handle_waterfall_req(state, &inputs, is_testnet).await
         }
-        (&Method::GET, "blocks/tip/hash", None) => {
+        (&Method::GET, "/blocks/tip/hash", None) => {
             let block_hash = state.tip_hash().await;
             block_hash_resp(block_hash)
         }
