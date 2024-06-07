@@ -1,5 +1,5 @@
 use crate::{db::TxSeen, fetch::Client, state::State, Error};
-use elements::{encode::serialize, Txid};
+use elements::{encode::serialize, BlockHash, Txid};
 use elements_miniscript::DescriptorPublicKey;
 use http_body_util::Full;
 use hyper::{
@@ -70,6 +70,17 @@ pub(crate) async fn route(
                         .await
                         .map_err(|_| Error::CannotFindTx)?;
                     let result = serialize(&tx);
+                    any_resp(result, StatusCode::OK, false, Some(157784630))
+                }
+                (Some(""), Some("block"), Some(v), Some("header"), None) => {
+                    let block_hash = BlockHash::from_str(v).map_err(|_| Error::InvalidBlockHash)?;
+                    let block = client
+                        .lock()
+                        .await
+                        .block(block_hash) // TODO should ask only header
+                        .await
+                        .map_err(|_| Error::CannotFindBlockHeader)?;
+                    let result = serialize(&block.header);
                     any_resp(result, StatusCode::OK, false, Some(157784630))
                 }
                 _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),

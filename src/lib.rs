@@ -53,6 +53,8 @@ pub enum Error {
     CannotParseHeight,
     InvalidTxid,
     CannotFindTx,
+    InvalidBlockHash,
+    CannotFindBlockHeader,
 }
 
 impl std::fmt::Display for Error {
