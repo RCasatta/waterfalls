@@ -21,6 +21,7 @@ mod mempool;
 mod preload;
 mod route;
 mod state;
+mod store;
 mod threads;
 
 type ScriptHash = u64;

@@ -1,4 +1,4 @@
-use crate::{db::DBStore, mempool::Mempool, Timestamp};
+use crate::{db::DBStore, mempool::Mempool, store::BlockMeta, Timestamp};
 use elements::BlockHash;
 use tokio::sync::Mutex;
 
@@ -24,13 +24,11 @@ impl State {
         let blocks_hash_ts = self.blocks_hash_ts.lock().await;
         blocks_hash_ts.get(height as usize).map(|e| e.0)
     }
-    pub(crate) async fn set_hash_ts(&self, height: u32, hash: BlockHash, ts: Timestamp) {
+    pub(crate) async fn set_hash_ts(&self, meta: &BlockMeta) {
         {
             let mut blocks_hash_ts = self.blocks_hash_ts.lock().await;
-            blocks_hash_ts.push((hash, ts));
-            assert_eq!(blocks_hash_ts.len() as u32 - 1, height)
+            blocks_hash_ts.push((meta.hash(), meta.timestamp()));
+            assert_eq!(blocks_hash_ts.len() as u32 - 1, meta.height())
         }
-
-        self.db.set_hash_ts(height, hash, ts); // TODO spawn
     }
 }

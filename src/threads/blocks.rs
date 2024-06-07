@@ -1,4 +1,4 @@
-use crate::{db::TxSeen, fetch::Client, state::State, Error};
+use crate::{db::TxSeen, fetch::Client, state::State, store::BlockMeta, Error};
 use elements::{OutPoint, Txid};
 use std::{
     collections::{HashMap, HashSet},
@@ -74,12 +74,9 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
             }
         }
 
-        // TODO update and set_hash_ts should be a db tx
-        db.update(block_height, utxo_spent, history_map, utxo_created);
-
-        let hash = block.block_hash();
-        let ts = block.header.time;
-        state.set_hash_ts(block_height, hash, ts).await;
+        let meta = BlockMeta::new(block_height, block.block_hash(), block.header.time);
+        state.set_hash_ts(&meta).await;
+        db.update(&meta, utxo_spent, history_map, utxo_created);
     }
     Ok(())
 }

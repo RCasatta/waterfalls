@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use std::{collections::HashMap, hash::Hasher, path::Path, sync::Arc};
 
-use crate::{Height, ScriptHash, Timestamp};
+use crate::{store::BlockMeta, Height, ScriptHash, Timestamp};
 /// RocksDB wrapper for index storage
 
 #[derive(Debug)]
@@ -97,16 +97,16 @@ impl DBStore {
                 (height, hash, ts)
             })
     }
-    pub(crate) fn set_hash_ts(&self, height: u32, hash: BlockHash, ts: Timestamp) {
+    fn set_hash_ts(&self, meta: &BlockMeta) {
         let mut buffer = Vec::with_capacity(36);
-        buffer.extend(hash.as_byte_array());
-        buffer.extend(&ts.to_be_bytes());
+        buffer.extend(meta.hash().as_byte_array());
+        buffer.extend(&meta.timestamp().to_be_bytes());
         self.db
-            .put_cf(&self.hashes_cf(), height.to_be_bytes(), buffer)
+            .put_cf(&self.hashes_cf(), meta.height().to_be_bytes(), buffer)
             .unwrap();
     }
 
-    pub(crate) fn insert_utxos(&self, adds: &HashMap<OutPoint, ScriptHash>) -> Result<()> {
+    fn insert_utxos(&self, adds: &HashMap<OutPoint, ScriptHash>) -> Result<()> {
         let mut batch = rocksdb::WriteBatch::default();
         let cf = self.utxo_cf();
         let mut key_buf = vec![0u8; 36];
@@ -140,7 +140,7 @@ impl DBStore {
         Ok(result)
     }
 
-    pub(crate) fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<ScriptHash>> {
+    fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<ScriptHash>> {
         let result: Vec<_> = self
             .get_utxos(outpoints)?
             .iter()
@@ -173,7 +173,6 @@ impl DBStore {
             return Ok(());
         }
         // println!("update_history {add:?}");
-        // TODO use merge https://docs.rs/rocksdb/latest/rocksdb/merge_operator/index.html
         let mut batch = rocksdb::WriteBatch::default();
         let cf = self.history_cf();
 
@@ -214,7 +213,7 @@ impl DBStore {
 
     pub(crate) fn update(
         &self,
-        block_height: Height,
+        block_meta: &BlockMeta,
         utxo_spent: Vec<(OutPoint, Txid)>,
         mut history_map: HashMap<u64, Vec<TxSeen>>,
         utxo_created: HashMap<OutPoint, u64>,
@@ -224,9 +223,10 @@ impl DBStore {
         let script_hashes = self.remove_utxos(&only_outpoints).unwrap();
         for (script_hash, (_, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
-            el.push(TxSeen::new(txid, block_height));
+            el.push(TxSeen::new(txid, block_meta.height()));
         }
 
+        self.set_hash_ts(block_meta);
         self.update_history(&history_map).unwrap();
         self.insert_utxos(&utxo_created).unwrap();
     }
