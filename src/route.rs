@@ -1,5 +1,8 @@
 use crate::{db::TxSeen, fetch::Client, state::State, Error};
-use elements::{encode::serialize, BlockHash, Txid};
+use elements::{
+    encode::{serialize, serialize_hex},
+    BlockHash, Txid,
+};
 use elements_miniscript::DescriptorPublicKey;
 use http_body_util::Full;
 use hyper::{
@@ -43,7 +46,7 @@ pub(crate) async fn route(
     req: Request<Incoming>,
     is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
-    // println!("---> {req:?}");
+    println!("---> {req:?}");
     match (req.method(), req.uri().path(), req.uri().query()) {
         (&Method::GET, "/v1/waterfall", Some(query)) => {
             let inputs = parse_query(query)?;
@@ -80,8 +83,8 @@ pub(crate) async fn route(
                         .block(block_hash) // TODO should ask only header
                         .await
                         .map_err(|_| Error::CannotFindBlockHeader)?;
-                    let result = serialize(&block.header);
-                    any_resp(result, StatusCode::OK, false, Some(157784630))
+                    let result = serialize_hex(&block.header);
+                    any_resp(result.into_bytes(), StatusCode::OK, false, Some(157784630))
                 }
                 _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),
             }
@@ -115,7 +118,7 @@ fn parse_query(query: &str) -> Result<Inputs, Error> {
 }
 
 fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {
-    any_resp(s.as_bytes().to_vec(), status, false, None)
+    any_resp(s.into_bytes(), status, false, None)
 }
 fn any_resp(
     bytes: Vec<u8>,
@@ -208,12 +211,7 @@ async fn handle_waterfall_req(
                 "returning: {elements} elements, elapsed: {}ms",
                 start.elapsed().as_millis()
             );
-            any_resp(
-                result.as_bytes().to_vec(),
-                hyper::StatusCode::OK,
-                true,
-                Some(5),
-            )
+            any_resp(result.into_bytes(), hyper::StatusCode::OK, true, Some(5))
         }
         Err(e) => str_resp(e.to_string(), hyper::StatusCode::BAD_REQUEST),
     }
