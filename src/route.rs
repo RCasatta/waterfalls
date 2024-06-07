@@ -73,7 +73,12 @@ pub(crate) async fn route(
                         .await
                         .map_err(|_| Error::CannotFindTx)?;
                     let result = serialize(&tx);
-                    any_resp(result, StatusCode::OK, false, Some(157784630))
+                    any_resp(
+                        result,
+                        StatusCode::OK,
+                        Some("application/octet-stream"),
+                        Some(157784630),
+                    )
                 }
                 (Some(""), Some("block"), Some(v), Some("header"), None) => {
                     let block_hash = BlockHash::from_str(v).map_err(|_| Error::InvalidBlockHash)?;
@@ -84,7 +89,12 @@ pub(crate) async fn route(
                         .await
                         .map_err(|_| Error::CannotFindBlockHeader)?;
                     let result = serialize_hex(&block.header);
-                    any_resp(result.into_bytes(), StatusCode::OK, false, Some(157784630))
+                    any_resp(
+                        result.into_bytes(),
+                        StatusCode::OK,
+                        Some("application/octet-stream"),
+                        Some(157784630),
+                    )
                 }
                 _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),
             }
@@ -118,17 +128,17 @@ fn parse_query(query: &str) -> Result<Inputs, Error> {
 }
 
 fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {
-    any_resp(s.into_bytes(), status, false, None)
+    any_resp(s.into_bytes(), status, Some("text/plain"), None)
 }
 fn any_resp(
     bytes: Vec<u8>,
     status: StatusCode,
-    json: bool,
+    content: Option<&str>,
     cache: Option<u32>,
 ) -> Result<Response<Full<Bytes>>, Error> {
     let mut builder = Response::builder().status(status);
-    if json {
-        builder = builder.header(CONTENT_TYPE, "application/json")
+    if let Some(content) = content {
+        builder = builder.header(CONTENT_TYPE, content)
     }
     let cache = cache.unwrap_or(5);
     builder = builder.header(CACHE_CONTROL, format!("public, max-age={cache}"));
@@ -211,7 +221,12 @@ async fn handle_waterfall_req(
                 "returning: {elements} elements, elapsed: {}ms",
                 start.elapsed().as_millis()
             );
-            any_resp(result.into_bytes(), hyper::StatusCode::OK, true, Some(5))
+            any_resp(
+                result.into_bytes(),
+                hyper::StatusCode::OK,
+                Some("application/json"),
+                Some(5),
+            )
         }
         Err(e) => str_resp(e.to_string(), hyper::StatusCode::BAD_REQUEST),
     }
