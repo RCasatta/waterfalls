@@ -227,7 +227,7 @@ impl Store for DBStore {
         let mut history_map = history_map;
         // TODO should be a db tx
         let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.0).collect();
-        let script_hashes = self.remove_utxos(&only_outpoints).unwrap();
+        let script_hashes = self.remove_utxos(&only_outpoints)?;
         for (script_hash, (_, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
             el.push(TxSeen::new(txid, block_meta.height()));

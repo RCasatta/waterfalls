@@ -5,7 +5,7 @@ use tokio::sync::Mutex;
 pub(crate) struct State {
     pub(crate) db: DBStore,
     pub(crate) mempool: Mutex<Mempool>,
-    pub(crate) blocks_hash_ts: Mutex<Vec<(BlockHash, Timestamp)>>,
+    pub(crate) blocks_hash_ts: Mutex<Vec<(BlockHash, Timestamp)>>, // TODO should be moved into the Store, but in memory for db
 }
 
 impl State {

@@ -5,6 +5,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 pub mod db;
+pub mod memory;
 
 pub trait Store {
     /// Hash the given script
@@ -54,6 +55,7 @@ impl TxSeen {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct BlockMeta {
     height: Height,
     hash: BlockHash,
