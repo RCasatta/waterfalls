@@ -1,4 +1,4 @@
-use crate::{db::TxSeen, fetch::Client, state::State, store::BlockMeta, Error};
+use crate::{fetch::Client, state::State, store::BlockMeta, store::TxSeen, Error};
 use elements::{OutPoint, Txid};
 use std::{
     collections::{HashMap, HashSet},

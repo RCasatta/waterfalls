@@ -1,4 +1,4 @@
-use crate::{db::TxSeen, fetch::Client, state::State, Error};
+use crate::{fetch::Client, state::State, store::TxSeen, Error};
 use elements::{
     encode::{serialize, serialize_hex},
     BlockHash, Txid,

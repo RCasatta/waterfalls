@@ -7,11 +7,13 @@ use elements::{
 };
 use fxhash::FxHasher;
 use rocksdb::{BoundColumnFamily, MergeOperands, Options, DB};
-use serde::Serialize;
 
 use std::{collections::HashMap, hash::Hasher, path::Path, sync::Arc};
 
-use crate::{store::BlockMeta, Height, ScriptHash, Timestamp};
+use crate::{
+    store::{BlockMeta, TxSeen},
+    Height, ScriptHash,
+};
 /// RocksDB wrapper for index storage
 
 #[derive(Debug)]
@@ -84,7 +86,7 @@ impl DBStore {
         hasher.finish()
     }
 
-    pub(crate) fn iter_hash_ts(&self) -> impl Iterator<Item = (Height, BlockHash, Timestamp)> + '_ {
+    pub(crate) fn iter_hash_ts(&self) -> impl Iterator<Item = BlockMeta> + '_ {
         let mode = rocksdb::IteratorMode::Start;
         let opts = rocksdb::ReadOptions::default();
         self.db
@@ -94,7 +96,7 @@ impl DBStore {
                 let height = u32::from_be_bytes((&kv.0[..]).try_into().expect("schema"));
                 let hash = BlockHash::from_slice(&kv.1[..32]).expect("schema");
                 let ts = u32::from_be_bytes((&kv.1[32..]).try_into().expect("schema"));
-                (height, hash, ts)
+                BlockMeta::new(height, hash, ts)
             })
     }
     fn set_hash_ts(&self, meta: &BlockMeta) {
@@ -229,28 +231,6 @@ impl DBStore {
         self.set_hash_ts(block_meta);
         self.update_history(&history_map).unwrap();
         self.insert_utxos(&utxo_created).unwrap();
-    }
-}
-
-#[derive(Serialize, Clone, PartialEq, Eq, Debug)]
-pub(crate) struct TxSeen {
-    pub(crate) txid: Txid,
-    pub(crate) height: Height,
-    pub(crate) block_hash: Option<BlockHash>,
-    pub(crate) block_timestamp: Option<Timestamp>,
-}
-impl TxSeen {
-    pub(crate) fn new(txid: Txid, height: Height) -> Self {
-        Self {
-            txid,
-            height,
-            block_hash: None,
-            block_timestamp: None,
-        }
-    }
-
-    pub(crate) fn mempool(txid: Txid) -> TxSeen {
-        TxSeen::new(txid, 0)
     }
 }
 
