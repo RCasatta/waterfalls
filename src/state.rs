@@ -1,4 +1,4 @@
-use crate::{db::DBStore, mempool::Mempool, store::BlockMeta, Timestamp};
+use crate::{mempool::Mempool, store::db::DBStore, store::BlockMeta, Timestamp};
 use elements::BlockHash;
 use tokio::sync::Mutex;
 

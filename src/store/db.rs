@@ -306,7 +306,10 @@ mod test {
 
     use elements::{hashes::Hash, OutPoint, Txid};
 
-    use crate::db::{get_or_init_salt, TxSeen};
+    use crate::{
+        store::db::{get_or_init_salt, TxSeen},
+        store::Store,
+    };
 
     use super::DBStore;
 

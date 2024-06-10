@@ -4,6 +4,8 @@ use elements::{BlockHash, OutPoint, Script, Txid};
 use serde::Serialize;
 use std::collections::HashMap;
 
+pub mod db;
+
 pub trait Store {
     /// Hash the given script
     ///

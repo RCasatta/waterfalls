@@ -2,7 +2,6 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use db::DBStore;
 use fetch::Client;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -10,12 +9,12 @@ use hyper_util::rt::TokioIo;
 use mempool::Mempool;
 use preload::headers;
 use state::State;
+use store::db::DBStore;
 use threads::blocks::blocks_infallible;
 use threads::mempool::mempool_sync_infallible;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
-mod db;
 mod fetch;
 mod mempool;
 mod preload;
