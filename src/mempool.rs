@@ -5,7 +5,10 @@ use std::{
 
 use elements::{OutPoint, Transaction, Txid};
 
-use crate::{store::db::DBStore, store::Store, ScriptHash};
+use crate::{
+    store::{AnyStore, Store},
+    ScriptHash,
+};
 
 pub(crate) struct Mempool {
     txid_hashes: HashMap<Txid, HashSet<ScriptHash>>,
@@ -34,7 +37,7 @@ impl Mempool {
             .retain(|k, _| !txids.contains(&k.txid));
     }
 
-    pub(crate) fn add(&mut self, db: &DBStore, txs: &[Transaction]) {
+    pub(crate) fn add(&mut self, db: &AnyStore, txs: &[Transaction]) {
         let txs_map: HashMap<Txid, &Transaction> = txs.iter().map(|tx| (tx.txid(), tx)).collect();
 
         // update the unconfirmed utxo set

@@ -9,7 +9,7 @@ pub(crate) async fn mempool_sync_infallible(state: Arc<State>, client: Client) {
 }
 
 async fn mempool_sync(state: Arc<State>, client: Client) -> Result<(), Error> {
-    let db = &state.db;
+    let db = &state.store;
     let mut mempool_txids = HashSet::new();
     loop {
         match client.mempool().await {

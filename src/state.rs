@@ -1,9 +1,13 @@
-use crate::{mempool::Mempool, store::db::DBStore, store::BlockMeta, Timestamp};
+use crate::{
+    mempool::Mempool,
+    store::{AnyStore, BlockMeta},
+    Timestamp,
+};
 use elements::BlockHash;
 use tokio::sync::Mutex;
 
 pub(crate) struct State {
-    pub(crate) db: DBStore,
+    pub(crate) store: AnyStore,
     pub(crate) mempool: Mutex<Mempool>,
     pub(crate) blocks_hash_ts: Mutex<Vec<(BlockHash, Timestamp)>>, // TODO should be moved into the Store, but in memory for db
 }

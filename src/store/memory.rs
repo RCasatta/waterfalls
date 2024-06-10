@@ -21,9 +21,9 @@ impl Store for MemoryStore {
         hasher.finish()
     }
 
-    fn iter_hash_ts(&self) -> impl Iterator<Item = BlockMeta> + '_ {
+    fn iter_hash_ts(&self) -> Box<dyn Iterator<Item = BlockMeta> + '_> {
         // it's not needed to preload
-        vec![].into_iter()
+        Box::new(vec![].into_iter())
     }
 
     fn get_utxos(
@@ -99,5 +99,12 @@ impl MemoryStore {
     }
     fn insert_utxos(&self, adds: &HashMap<OutPoint, ScriptHash>) {
         self.utxos.lock().unwrap().extend(adds);
+    }
+
+    pub(crate) fn new() -> Self {
+        Self {
+            utxos: Mutex::new(HashMap::new()),
+            history: Mutex::new(HashMap::new()),
+        }
     }
 }

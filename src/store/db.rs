@@ -159,18 +159,20 @@ impl Store for DBStore {
         hasher.finish()
     }
 
-    fn iter_hash_ts(&self) -> impl Iterator<Item = BlockMeta> + '_ {
+    fn iter_hash_ts(&self) -> Box<dyn Iterator<Item = BlockMeta> + '_> {
         let mode = rocksdb::IteratorMode::Start;
         let opts = rocksdb::ReadOptions::default();
-        self.db
-            .iterator_cf_opt(&self.hashes_cf(), opts, mode)
-            .map(|kv| {
-                let kv = kv.expect("iterator failed");
-                let height = u32::from_be_bytes((&kv.0[..]).try_into().expect("schema"));
-                let hash = BlockHash::from_slice(&kv.1[..32]).expect("schema");
-                let ts = u32::from_be_bytes((&kv.1[32..]).try_into().expect("schema"));
-                BlockMeta::new(height, hash, ts)
-            })
+        Box::new(
+            self.db
+                .iterator_cf_opt(&self.hashes_cf(), opts, mode)
+                .map(|kv| {
+                    let kv = kv.expect("iterator failed");
+                    let height = u32::from_be_bytes((&kv.0[..]).try_into().expect("schema"));
+                    let hash = BlockHash::from_slice(&kv.1[..32]).expect("schema");
+                    let ts = u32::from_be_bytes((&kv.1[32..]).try_into().expect("schema"));
+                    BlockMeta::new(height, hash, ts)
+                }),
+        )
     }
 
     fn get_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<Option<ScriptHash>>> {

@@ -165,7 +165,7 @@ async fn handle_waterfall_req(
     is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
     let desc_str = &inputs.descriptor;
-    let db = &state.db;
+    let db = &state.store;
     let start = Instant::now();
     match desc_str.parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>() {
         Ok(desc) => {

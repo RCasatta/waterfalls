@@ -10,6 +10,8 @@ use mempool::Mempool;
 use preload::headers;
 use state::State;
 use store::db::DBStore;
+use store::memory::MemoryStore;
+use store::AnyStore;
 use threads::blocks::blocks_infallible;
 use threads::mempool::mempool_sync_infallible;
 use tokio::net::TcpListener;
@@ -75,19 +77,22 @@ impl std::error::Error for Error {}
 pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // TODO test rest connection to the node
 
-    let mut path = match args.datadir.as_ref() {
-        Some(p) => p.clone(),
-        None => PathBuf::new(),
+    let store = match args.datadir.as_ref() {
+        Some(p) => {
+            let mut path = p.clone();
+            path.push("db");
+            if args.testnet {
+                path.push("testnet");
+            } else {
+                path.push("mainnet");
+            }
+            AnyStore::Db(DBStore::open(&path)?)
+        }
+        None => AnyStore::Mem(MemoryStore::new()),
     };
-    path.push("db");
-    if args.testnet {
-        path.push("testnet");
-    } else {
-        path.push("mainnet");
-    }
 
     let state = Arc::new(State {
-        db: DBStore::open(&path)?,
+        store,
         mempool: Mutex::new(Mempool::new()),
         blocks_hash_ts: Mutex::new(Vec::new()),
     });

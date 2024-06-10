@@ -19,7 +19,7 @@ pub(crate) async fn blocks_infallible(shared_state: Arc<State>, client: Client) 
 }
 
 pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
-    let db = &state.db;
+    let db = &state.store;
     let next_height = state.blocks_hash_ts.lock().await.len() as u32;
 
     let skip_outpoint = generate_skip_outpoint();

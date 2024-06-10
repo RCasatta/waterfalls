@@ -7,6 +7,11 @@ use std::collections::HashMap;
 pub mod db;
 pub mod memory;
 
+pub enum AnyStore {
+    Db(db::DBStore),
+    Mem(memory::MemoryStore),
+}
+
 pub trait Store {
     /// Hash the given script
     ///
@@ -15,7 +20,7 @@ pub trait Store {
     fn hash(&self, script: &Script) -> ScriptHash;
 
     /// Iterate over blocks metadata to preload those in memory
-    fn iter_hash_ts(&self) -> impl Iterator<Item = BlockMeta> + '_;
+    fn iter_hash_ts(&self) -> Box<dyn Iterator<Item = BlockMeta> + '_>;
 
     /// Get given outpoints from the UTXO set to compute the mempool history
     fn get_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<Option<ScriptHash>>>;
@@ -31,6 +36,49 @@ pub trait Store {
         history_map: HashMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: HashMap<OutPoint, ScriptHash>,
     ) -> Result<()>;
+}
+
+impl Store for AnyStore {
+    fn hash(&self, script: &Script) -> ScriptHash {
+        match self {
+            AnyStore::Db(d) => d.hash(script),
+            AnyStore::Mem(m) => m.hash(script),
+        }
+    }
+
+    fn iter_hash_ts(&self) -> Box<dyn Iterator<Item = BlockMeta> + '_> {
+        match self {
+            AnyStore::Db(d) => d.iter_hash_ts(),
+            AnyStore::Mem(m) => m.iter_hash_ts(),
+        }
+    }
+
+    fn get_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<Option<ScriptHash>>> {
+        match self {
+            AnyStore::Db(d) => d.get_utxos(outpoints),
+            AnyStore::Mem(m) => m.get_utxos(outpoints),
+        }
+    }
+
+    fn get_history(&self, scripts: &[ScriptHash]) -> Result<Vec<Vec<TxSeen>>> {
+        match self {
+            AnyStore::Db(d) => d.get_history(scripts),
+            AnyStore::Mem(m) => m.get_history(scripts),
+        }
+    }
+
+    fn update(
+        &self,
+        block_meta: &BlockMeta,
+        utxo_spent: Vec<(OutPoint, Txid)>,
+        history_map: HashMap<ScriptHash, Vec<TxSeen>>,
+        utxo_created: HashMap<OutPoint, ScriptHash>,
+    ) -> Result<()> {
+        match self {
+            AnyStore::Db(d) => d.update(block_meta, utxo_spent, history_map, utxo_created),
+            AnyStore::Mem(m) => m.update(block_meta, utxo_spent, history_map, utxo_created),
+        }
+    }
 }
 
 #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
