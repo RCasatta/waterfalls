@@ -4,7 +4,7 @@ use elements::{BlockHash, OutPoint, Script, Txid};
 use serde::Serialize;
 use std::collections::HashMap;
 
-trait Store {
+pub trait Store {
     /// Hash the given script
     ///
     /// It's in the trait cause it can be salted with some random values contained in the
@@ -23,7 +23,7 @@ trait Store {
     /// update the store with all the data from the last block
     fn update(
         &self,
-        block_meta: BlockMeta,
+        block_meta: &BlockMeta,
         utxo_spent: Vec<(OutPoint, Txid)>,
         history_map: HashMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: HashMap<OutPoint, ScriptHash>,

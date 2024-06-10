@@ -1,4 +1,9 @@
-use crate::{fetch::Client, state::State, store::BlockMeta, store::TxSeen, Error};
+use crate::{
+    fetch::Client,
+    state::State,
+    store::{BlockMeta, Store, TxSeen},
+    Error,
+};
 use elements::{OutPoint, Txid};
 use std::{
     collections::{HashMap, HashSet},
@@ -76,7 +81,8 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
 
         let meta = BlockMeta::new(block_height, block.block_hash(), block.header.time);
         state.set_hash_ts(&meta).await;
-        db.update(&meta, utxo_spent, history_map, utxo_created);
+        db.update(&meta, utxo_spent, history_map, utxo_created)
+            .map_err(|_| Error::Other)?; // TODO
     }
     Ok(())
 }

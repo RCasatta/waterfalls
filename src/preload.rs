@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{state::State, Error};
+use crate::{state::State, store::Store, Error};
 
 pub async fn headers(state: Arc<State>) -> Result<(), Error> {
     let mut blocks_hash_ts = state.blocks_hash_ts.lock().await;

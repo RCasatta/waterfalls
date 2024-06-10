@@ -5,7 +5,7 @@ use std::{
 
 use elements::{OutPoint, Transaction, Txid};
 
-use crate::{db::DBStore, ScriptHash};
+use crate::{db::DBStore, store::Store, ScriptHash};
 
 pub(crate) struct Mempool {
     txid_hashes: HashMap<Txid, HashSet<ScriptHash>>,

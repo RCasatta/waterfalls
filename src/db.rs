@@ -11,7 +11,7 @@ use rocksdb::{BoundColumnFamily, MergeOperands, Options, DB};
 use std::{collections::HashMap, hash::Hasher, path::Path, sync::Arc};
 
 use crate::{
-    store::{BlockMeta, TxSeen},
+    store::{BlockMeta, Store, TxSeen},
     Height, ScriptHash,
 };
 /// RocksDB wrapper for index storage
@@ -80,25 +80,6 @@ impl DBStore {
         hasher.write_u64(self.salt);
         hasher
     }
-    pub(crate) fn hash(&self, script: &Script) -> ScriptHash {
-        let mut hasher = self.hasher();
-        hasher.write(script.as_bytes());
-        hasher.finish()
-    }
-
-    pub(crate) fn iter_hash_ts(&self) -> impl Iterator<Item = BlockMeta> + '_ {
-        let mode = rocksdb::IteratorMode::Start;
-        let opts = rocksdb::ReadOptions::default();
-        self.db
-            .iterator_cf_opt(&self.hashes_cf(), opts, mode)
-            .map(|kv| {
-                let kv = kv.expect("iterator failed");
-                let height = u32::from_be_bytes((&kv.0[..]).try_into().expect("schema"));
-                let hash = BlockHash::from_slice(&kv.1[..32]).expect("schema");
-                let ts = u32::from_be_bytes((&kv.1[32..]).try_into().expect("schema"));
-                BlockMeta::new(height, hash, ts)
-            })
-    }
     fn set_hash_ts(&self, meta: &BlockMeta) {
         let mut buffer = Vec::with_capacity(36);
         buffer.extend(meta.hash().as_byte_array());
@@ -121,25 +102,6 @@ impl DBStore {
 
         self.db.write(batch)?;
         Ok(())
-    }
-
-    pub(crate) fn get_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<Option<ScriptHash>>> {
-        let mut keys = Vec::with_capacity(outpoints.len());
-        let cf = self.utxo_cf();
-        for outpoint in outpoints {
-            keys.push((&cf, serialize_outpoint(outpoint)));
-        }
-        let db_results = self.db.multi_get_cf(keys.clone());
-        let result: Vec<_> = db_results
-            .into_iter()
-            .map(|e| {
-                e.unwrap().map(|e| {
-                    let bytes = e.try_into().unwrap();
-                    u64::from_be_bytes(bytes)
-                })
-            })
-            .collect();
-        Ok(result)
     }
 
     fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<ScriptHash>> {
@@ -188,8 +150,50 @@ impl DBStore {
         self.db.write(batch)?;
         Ok(())
     }
+}
+
+impl Store for DBStore {
+    fn hash(&self, script: &Script) -> ScriptHash {
+        let mut hasher = self.hasher();
+        hasher.write(script.as_bytes());
+        hasher.finish()
+    }
+
+    fn iter_hash_ts(&self) -> impl Iterator<Item = BlockMeta> + '_ {
+        let mode = rocksdb::IteratorMode::Start;
+        let opts = rocksdb::ReadOptions::default();
+        self.db
+            .iterator_cf_opt(&self.hashes_cf(), opts, mode)
+            .map(|kv| {
+                let kv = kv.expect("iterator failed");
+                let height = u32::from_be_bytes((&kv.0[..]).try_into().expect("schema"));
+                let hash = BlockHash::from_slice(&kv.1[..32]).expect("schema");
+                let ts = u32::from_be_bytes((&kv.1[32..]).try_into().expect("schema"));
+                BlockMeta::new(height, hash, ts)
+            })
+    }
+
+    fn get_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<Option<ScriptHash>>> {
+        let mut keys = Vec::with_capacity(outpoints.len());
+        let cf = self.utxo_cf();
+        for outpoint in outpoints {
+            keys.push((&cf, serialize_outpoint(outpoint)));
+        }
+        let db_results = self.db.multi_get_cf(keys.clone());
+        let result: Vec<_> = db_results
+            .into_iter()
+            .map(|e| {
+                e.unwrap().map(|e| {
+                    let bytes = e.try_into().unwrap();
+                    u64::from_be_bytes(bytes)
+                })
+            })
+            .collect();
+        Ok(result)
+    }
+
     /// get the block heights where the given scripts hash have been seen
-    pub(crate) fn get_history(&self, scripts: &[ScriptHash]) -> Result<Vec<Vec<TxSeen>>> {
+    fn get_history(&self, scripts: &[ScriptHash]) -> Result<Vec<Vec<TxSeen>>> {
         if scripts.is_empty() {
             return Ok(vec![]);
         }
@@ -213,13 +217,14 @@ impl DBStore {
         Ok(result)
     }
 
-    pub(crate) fn update(
+    fn update(
         &self,
         block_meta: &BlockMeta,
         utxo_spent: Vec<(OutPoint, Txid)>,
-        mut history_map: HashMap<u64, Vec<TxSeen>>,
-        utxo_created: HashMap<OutPoint, u64>,
-    ) {
+        history_map: HashMap<ScriptHash, Vec<TxSeen>>,
+        utxo_created: HashMap<OutPoint, ScriptHash>,
+    ) -> Result<()> {
+        let mut history_map = history_map;
         // TODO should be a db tx
         let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.0).collect();
         let script_hashes = self.remove_utxos(&only_outpoints).unwrap();
@@ -229,8 +234,10 @@ impl DBStore {
         }
 
         self.set_hash_ts(block_meta);
-        self.update_history(&history_map).unwrap();
-        self.insert_utxos(&utxo_created).unwrap();
+        self.update_history(&history_map)?;
+        self.insert_utxos(&utxo_created)?;
+
+        Ok(())
     }
 }
 
