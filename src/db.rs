@@ -170,7 +170,7 @@ impl DBStore {
         Ok(result)
     }
 
-    pub(crate) fn update_history(&self, add: &HashMap<ScriptHash, Vec<TxSeen>>) -> Result<()> {
+    fn update_history(&self, add: &HashMap<ScriptHash, Vec<TxSeen>>) -> Result<()> {
         if add.is_empty() {
             return Ok(());
         }
