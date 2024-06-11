@@ -24,6 +24,9 @@ mod state;
 mod store;
 mod threads;
 
+#[cfg(feature = "test_env")]
+pub mod test_env;
+
 type ScriptHash = u64;
 type Height = u32;
 type Timestamp = u32;
@@ -52,7 +55,7 @@ pub struct Arguments {
 
     #[cfg(feature = "db")]
     #[arg(long)]
-    pub datadir: Option<PathBuf>,
+    pub datadir: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug)]
@@ -65,6 +68,7 @@ pub enum Error {
     CannotFindTx,
     InvalidBlockHash,
     CannotFindBlockHeader,
+    DBOpen,
 }
 
 impl std::fmt::Display for Error {
@@ -75,12 +79,12 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 #[cfg(not(feature = "db"))]
-fn get_store(_args: &Arguments) -> AnyStore {
-    AnyStore::Mem(MemoryStore::new())
+fn get_store(_args: &Arguments) -> Result<AnyStore, Error> {
+    Ok(AnyStore::Mem(MemoryStore::new()))
 }
 #[cfg(feature = "db")]
-fn get_store(args: &Arguments) -> AnyStore {
-    match args.datadir.as_ref() {
+fn get_store(args: &Arguments) -> Result<AnyStore, Error> {
+    Ok(match args.datadir.as_ref() {
         Some(p) => {
             let mut path = p.clone();
             path.push("db");
@@ -89,10 +93,10 @@ fn get_store(args: &Arguments) -> AnyStore {
             } else {
                 path.push("mainnet");
             }
-            AnyStore::Db(store::db::DBStore::open(&path)?)
+            AnyStore::Db(store::db::DBStore::open(&path).map_err(|_| Error::DBOpen)?)
         }
         None => AnyStore::Mem(MemoryStore::new()),
-    }
+    })
 }
 
 pub async fn inner_main(
@@ -101,7 +105,7 @@ pub async fn inner_main(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // TODO test rest connection to the node
 
-    let store = get_store(&args);
+    let store = get_store(&args)?;
 
     let state = Arc::new(State {
         store,
