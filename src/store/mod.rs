@@ -4,10 +4,13 @@ use elements::{BlockHash, OutPoint, Script, Txid};
 use serde::Serialize;
 use std::collections::HashMap;
 
+#[cfg(feature = "db")]
 pub mod db;
+
 pub mod memory;
 
 pub enum AnyStore {
+    #[cfg(feature = "db")]
     Db(db::DBStore),
     Mem(memory::MemoryStore),
 }
@@ -41,6 +44,7 @@ pub trait Store {
 impl Store for AnyStore {
     fn hash(&self, script: &Script) -> ScriptHash {
         match self {
+            #[cfg(feature = "db")]
             AnyStore::Db(d) => d.hash(script),
             AnyStore::Mem(m) => m.hash(script),
         }
@@ -48,6 +52,7 @@ impl Store for AnyStore {
 
     fn iter_hash_ts(&self) -> Box<dyn Iterator<Item = BlockMeta> + '_> {
         match self {
+            #[cfg(feature = "db")]
             AnyStore::Db(d) => d.iter_hash_ts(),
             AnyStore::Mem(m) => m.iter_hash_ts(),
         }
@@ -55,6 +60,7 @@ impl Store for AnyStore {
 
     fn get_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<Option<ScriptHash>>> {
         match self {
+            #[cfg(feature = "db")]
             AnyStore::Db(d) => d.get_utxos(outpoints),
             AnyStore::Mem(m) => m.get_utxos(outpoints),
         }
@@ -62,6 +68,7 @@ impl Store for AnyStore {
 
     fn get_history(&self, scripts: &[ScriptHash]) -> Result<Vec<Vec<TxSeen>>> {
         match self {
+            #[cfg(feature = "db")]
             AnyStore::Db(d) => d.get_history(scripts),
             AnyStore::Mem(m) => m.get_history(scripts),
         }
@@ -75,6 +82,7 @@ impl Store for AnyStore {
         utxo_created: HashMap<OutPoint, ScriptHash>,
     ) -> Result<()> {
         match self {
+            #[cfg(feature = "db")]
             AnyStore::Db(d) => d.update(block_meta, utxo_spent, history_map, utxo_created),
             AnyStore::Mem(m) => m.update(block_meta, utxo_spent, history_map, utxo_created),
         }

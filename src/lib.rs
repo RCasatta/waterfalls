@@ -1,5 +1,4 @@
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use fetch::Client;
@@ -9,7 +8,6 @@ use hyper_util::rt::TokioIo;
 use mempool::Mempool;
 use preload::headers;
 use state::State;
-use store::db::DBStore;
 use store::memory::MemoryStore;
 use store::AnyStore;
 use threads::blocks::blocks_infallible;
@@ -51,6 +49,7 @@ pub struct Arguments {
     #[arg(long)]
     listen: Option<SocketAddr>,
 
+    #[cfg(feature = "db")]
     #[arg(long)]
     datadir: Option<PathBuf>,
 }
@@ -74,10 +73,13 @@ impl std::fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
-pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // TODO test rest connection to the node
-
-    let store = match args.datadir.as_ref() {
+#[cfg(not(feature = "db"))]
+fn get_store(_args: &Arguments) -> AnyStore {
+    AnyStore::Mem(MemoryStore::new())
+}
+#[cfg(feature = "db")]
+fn get_store(args: &Arguments) -> AnyStore {
+    match args.datadir.as_ref() {
         Some(p) => {
             let mut path = p.clone();
             path.push("db");
@@ -86,10 +88,16 @@ pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error
             } else {
                 path.push("mainnet");
             }
-            AnyStore::Db(DBStore::open(&path)?)
+            AnyStore::Db(store::db::DBStore::open(&path)?)
         }
         None => AnyStore::Mem(MemoryStore::new()),
-    };
+    }
+}
+
+pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // TODO test rest connection to the node
+
+    let store = get_store(&args);
 
     let state = Arc::new(State {
         store,
