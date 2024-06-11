@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -94,7 +95,10 @@ fn get_store(args: &Arguments) -> AnyStore {
     }
 }
 
-pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn inner_main(
+    args: Arguments,
+    shutdown_signal: impl Future<Output = ()>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // TODO test rest connection to the node
 
     let store = get_store(&args);
@@ -131,7 +135,7 @@ pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error
     let listener = TcpListener::bind(addr).await?;
     let client = Client::new(&args);
     let client = Arc::new(Mutex::new(client));
-    let mut signal = std::pin::pin!(shutdown_signal());
+    let mut signal = std::pin::pin!(shutdown_signal);
 
     loop {
         tokio::select! {
@@ -161,11 +165,4 @@ pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error
         }
     }
     Ok(())
-}
-
-async fn shutdown_signal() {
-    // Wait for the CTRL+C signal
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to install CTRL+C signal handler");
 }
