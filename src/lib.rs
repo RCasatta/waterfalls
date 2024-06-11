@@ -32,26 +32,26 @@ type Timestamp = u32;
 pub struct Arguments {
     /// if specified, use liquid testnet
     #[arg(long)]
-    testnet: bool,
+    pub testnet: bool,
 
     /// if specified, it uses esplora instead of local node to get data
     #[arg(long)]
-    use_esplora: bool,
+    pub use_esplora: bool,
 
     /// If `use_esplora` is true will use this address to fetch data from esplora or a default url according to the used network if not provided.
     #[arg(long)]
-    esplora_url: Option<String>,
+    pub esplora_url: Option<String>,
 
     /// If `use_esplora` is false will use this address to fetch data from the local rest-enabled elements node or a default url according to the used network if not provided.
     #[arg(long)]
-    node_url: Option<String>,
+    pub node_url: Option<String>,
 
     #[arg(long)]
-    listen: Option<SocketAddr>,
+    pub listen: Option<SocketAddr>,
 
     #[cfg(feature = "db")]
     #[arg(long)]
-    datadir: Option<PathBuf>,
+    pub datadir: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -131,24 +131,41 @@ pub async fn inner_main(args: Arguments) -> Result<(), Box<dyn std::error::Error
     let listener = TcpListener::bind(addr).await?;
     let client = Client::new(&args);
     let client = Arc::new(Mutex::new(client));
+    let mut signal = std::pin::pin!(shutdown_signal());
 
     loop {
-        let (stream, _) = listener.accept().await?;
+        tokio::select! {
+            Ok( (stream, _)) = listener.accept() => {
+                let io = TokioIo::new(stream);
+                let state = state.clone();
+                let client = client.clone();
 
-        let io = TokioIo::new(stream);
-        let state = state.clone();
-        let client = client.clone();
+                tokio::task::spawn(async move {
+                    let state = &state;
+                    let is_testnet = args.testnet;
+                    let client = &client;
 
-        tokio::task::spawn(async move {
-            let state = &state;
-            let is_testnet = args.testnet;
-            let client = &client;
+                    let service = service_fn(move |req| route::route(state, client, req, is_testnet));
 
-            let service = service_fn(move |req| route::route(state, client, req, is_testnet));
+                    if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
+                        println!("Error serving connection: {:?}", err);
+                    }
+                });
+            },
 
-            if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
-                println!("Error serving connection: {:?}", err);
+            _ = &mut signal => {
+                eprintln!("graceful shutdown signal received");
+                // stop the accept loop
+                break;
             }
-        });
+        }
     }
+    Ok(())
+}
+
+async fn shutdown_signal() {
+    // Wait for the CTRL+C signal
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install CTRL+C signal handler");
 }

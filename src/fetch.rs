@@ -37,6 +37,7 @@ impl Client {
                 node_url.unwrap_or(format!("{LOCAL}:7041"))
             }
         };
+        println!("connecting to {base_url}");
         Client {
             client: reqwest::Client::new(),
             use_esplora,

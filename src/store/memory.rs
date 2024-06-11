@@ -86,7 +86,7 @@ impl MemoryStore {
                     .lock()
                     .unwrap()
                     .remove(outpoint)
-                    .expect("must be unspent"),
+                    .unwrap_or_else(|| panic!("{outpoint} must be unspent")),
             );
         }
         result

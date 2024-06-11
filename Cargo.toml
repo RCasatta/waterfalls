@@ -3,21 +3,30 @@ name = "waterfall"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 clap = { version = "4.5.3", features = ["derive", "env"] }
 elements = { version = "0.24.1", features = ["serde"] }
 env_logger = "0.11.3"
 hyper = { version = "1.2.0", features = ["full"] }
 log = "0.4.21"
-tokio = { version = "1.36.0", features = ["rt", "macros", "rt-multi-thread"] }
+tokio = { version = "1.36.0", features = [
+    "rt",
+    "macros",
+    "rt-multi-thread",
+    "signal",
+] }
 http-body-util = "0.1"
-hyper-util = { version = "0.1", features = ["full"] }
+hyper-util = { version = "0.1.5", features = [
+    "full",
+    "server",
+    "server-graceful",
+] }
 hex = "0.4.3"
 reqwest = "0.12.0"
 anyhow = "1.0.86"
-rocksdb = { version = "0.22.0", features = ["multi-threaded-cf"] }
+rocksdb = { version = "0.22.0", features = [
+    "multi-threaded-cf",
+], optional = true }
 fxhash = "0.2.1"
 elements-miniscript = "0.3.1"
 serde = { version = "1.0.202", features = ["derive"] }
@@ -26,3 +35,8 @@ form_urlencoded = "1.2.1"
 
 [dev-dependencies]
 tempfile = "3.10.1"
+bitcoind = "0.36"   # it's used instead of elementsd because we don't use autodownload, neither validatepegin and we also have to specify custom args (rest=1)
+
+[features]
+default = []
+db = ["rocksdb"]

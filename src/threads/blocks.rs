@@ -89,8 +89,15 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
 
 fn generate_skip_outpoint() -> HashSet<OutPoint> {
     let mut skip_outpoint = HashSet::new();
-    let s = "0c52d2526a5c9f00e9fb74afd15dd3caaf17c823159a514f929ae25193a43a52";
+    let outpoint = |txid, vout| OutPoint::new(Txid::from_str(txid).expect("static"), vout);
+
     // policy asset emission in testnet
-    skip_outpoint.insert(OutPoint::new(Txid::from_str(s).expect("static"), 0));
+    let s = "0c52d2526a5c9f00e9fb74afd15dd3caaf17c823159a514f929ae25193a43a52";
+    skip_outpoint.insert(outpoint(s, 0));
+
+    // policy asset emission in regtest
+    let s = "50cdc410c9d0d61eeacc531f52d2c70af741da33af127c364e52ac1ee7c030a5";
+    skip_outpoint.insert(outpoint(s, 0));
+
     skip_outpoint
 }
