@@ -111,7 +111,7 @@ impl DBStore {
             .enumerate()
             .map(|(i, e)| {
                 if e.is_none() {
-                    println!("can't find {}", outpoints[i]);
+                    log::error!("can't find {}", outpoints[i]);
                 }
                 e.expect("every utxo must exist when spent")
             })
@@ -136,7 +136,7 @@ impl DBStore {
         if add.is_empty() {
             return Ok(());
         }
-        // println!("update_history {add:?}");
+        log::debug!("update_history {add:?}");
         let mut batch = rocksdb::WriteBatch::default();
         let cf = self.history_cf();
 

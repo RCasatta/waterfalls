@@ -51,8 +51,8 @@ pub(crate) async fn route(
     req: Request<Incoming>,
     is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
-    println!("---> {req:?}");
-    match (req.method(), req.uri().path(), req.uri().query()) {
+    log::debug!("---> {req:?}");
+    let res = match (req.method(), req.uri().path(), req.uri().query()) {
         (&Method::GET, "/v1/waterfall", Some(query)) => {
             let inputs = parse_query(query)?;
             handle_waterfall_req(state, &inputs, is_testnet).await
@@ -105,7 +105,9 @@ pub(crate) async fn route(
             }
         }
         _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),
-    }
+    };
+    log::debug!("<--- {res:?}");
+    res
 }
 
 fn block_hash_resp(
@@ -241,7 +243,7 @@ async fn handle_waterfall_req(
                 page: inputs.page,
             })
             .unwrap();
-            println!(
+            log::info!(
                 "returning: {elements} elements, elapsed: {}ms",
                 start.elapsed().as_millis()
             );

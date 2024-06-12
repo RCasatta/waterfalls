@@ -4,7 +4,7 @@ use crate::{
     store::{BlockMeta, Store, TxSeen},
     Error,
 };
-use elements::{OutPoint, Txid};
+use elements::{hex::ToHex, OutPoint, Txid};
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
@@ -33,7 +33,7 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
         let mut utxo_spent = vec![];
         if block_height % 10_000 == 0 {
             let speed = (block_height - next_height) as f64 / start.elapsed().as_secs() as f64;
-            println!("{block_height} {speed:.2} blocks/s {txs_count} txs");
+            log::info!("{block_height} {speed:.2} blocks/s {txs_count} txs");
         }
         let block_hash = client.block_hash_or_wait(block_height).await;
 
@@ -47,12 +47,12 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
                     continue;
                 }
                 let script_hash = db.hash(&output.script_pubkey);
-                // println!("{} hash is {script_hash}", &output.script_pubkey.to_hex());
+                log::debug!("{} hash is {script_hash}", &output.script_pubkey.to_hex());
                 let el = history_map.entry(script_hash).or_insert(vec![]);
                 el.push(TxSeen::new(txid, block_height));
 
                 let out_point = OutPoint::new(txid, j as u32);
-                // println!("inserting {out_point}");
+                log::debug!("inserting {out_point}");
                 utxo_created.insert(out_point, script_hash);
             }
 
@@ -63,13 +63,13 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
                     }
                     match utxo_created.remove(&input.previous_output) {
                         Some(_) => {
-                            // println!("spent same block, avoiding {}", &input.previous_output);
+                            log::debug!("spent same block, avoiding {}", &input.previous_output);
                             // spent in the same block:
                             // - no need to remove from the persisted utxo
                             // - this height already inserted for this script from the relative same-height output
                         }
                         None => {
-                            // println!("removing {}", &input.previous_output);
+                            log::debug!("removing {}", &input.previous_output);
                             if !skip_outpoint.contains(&input.previous_output) {
                                 utxo_spent.push((input.previous_output, txid))
                             }

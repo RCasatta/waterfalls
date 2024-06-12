@@ -162,7 +162,6 @@ impl WaterfallClient {
             .await?;
 
         let body = response.text().await?;
-        println!("{body}");
         Ok(serde_json::from_str(&body)?)
     }
 
@@ -222,7 +221,6 @@ impl WaterfallClient {
     pub async fn header(&self, block_hash: BlockHash) -> anyhow::Result<BlockHeader> {
         let url = format!("{}/block/{}/header", self.base_url, block_hash);
         let response = self.client.get(&url).send().await?;
-        println!("{response:?}");
         let text = response.text().await?;
         let bytes = hex::decode(&text)?;
         let header = BlockHeader::consensus_decode(&bytes[..])?;

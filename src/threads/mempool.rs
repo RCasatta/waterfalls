@@ -18,10 +18,10 @@ async fn mempool_sync(state: Arc<State>, client: Client) -> Result<(), Error> {
                 let new: Vec<_> = current.difference(&mempool_txids).collect();
                 let removed: Vec<_> = mempool_txids.difference(&current).cloned().collect();
                 if !new.is_empty() {
-                    println!("new txs in mempool {:?}, tip: {tip:?}", new);
+                    log::info!("new txs in mempool {:?}, tip: {tip:?}", new);
                 }
                 if !removed.is_empty() {
-                    println!("removed txs from mempool {:?}, tip: {tip:?}", removed);
+                    log::info!("removed txs from mempool {:?}, tip: {tip:?}", removed);
                 }
 
                 let mut txs = vec![];
@@ -36,7 +36,7 @@ async fn mempool_sync(state: Arc<State>, client: Client) -> Result<(), Error> {
                     mempool_txids = m.txids();
                 }
             }
-            Err(e) => println!("mempool sync {e:?}"),
+            Err(e) => log::warn!("mempool sync {e:?}"),
         }
         sleep(std::time::Duration::from_secs(1)).await;
     }

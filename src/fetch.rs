@@ -37,7 +37,7 @@ impl Client {
                 node_url.unwrap_or(format!("{LOCAL}:7041"))
             }
         };
-        println!("connecting to {base_url}");
+        log::info!("connecting to {base_url}");
         Client {
             client: reqwest::Client::new(),
             use_esplora,
@@ -130,7 +130,7 @@ impl Client {
             match self.block(block_hash).await {
                 Ok(b) => return b,
                 Err(e) => {
-                    println!("Failing for block({block_hash}) err {e:?}");
+                    log::warn!("Failing for block({block_hash}) err {e:?}");
                     sleep(std::time::Duration::from_secs(1)).await
                 }
             }
@@ -147,7 +147,7 @@ impl Client {
                 _ => {
                     if i > 100 {
                         // when waiting for a new block, 60 fails are expected
-                        println!("Failing for blockhash({height})");
+                        log::warn!("Failing for blockhash({height})");
                     }
                     i += 1;
                     sleep(std::time::Duration::from_secs(1)).await
@@ -161,7 +161,7 @@ impl Client {
             match self.tx(txid).await {
                 Ok(t) => return t,
                 Err(e) => {
-                    println!("Failing for tx({txid}) err {e:?}");
+                    log::warn!("Failing for tx({txid}) err {e:?}");
                     sleep(std::time::Duration::from_secs(1)).await
                 }
             }

@@ -10,7 +10,7 @@ pub async fn headers(state: Arc<State>) -> Result<(), Error> {
         blocks_hash_ts.push((meta.hash(), meta.timestamp()));
         i += 1;
     }
-    println!("{i} block meta preloaded");
+    log::info!("{i} block meta preloaded");
 
     Ok(())
 }

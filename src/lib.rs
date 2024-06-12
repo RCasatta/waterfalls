@@ -134,7 +134,7 @@ pub async fn inner_main(
         [127, 0, 0, 1],
         3100 + args.testnet as u16,
     )));
-    println!("Starting on http://{addr}");
+    log::info!("Starting on http://{addr}");
 
     let listener = TcpListener::bind(addr).await?;
     let client = Client::new(&args);
@@ -156,13 +156,13 @@ pub async fn inner_main(
                     let service = service_fn(move |req| route::route(state, client, req, is_testnet));
 
                     if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
-                        println!("Error serving connection: {:?}", err);
+                        log::error!("Error serving connection: {:?}", err);
                     }
                 });
             },
 
             _ = &mut signal => {
-                eprintln!("graceful shutdown signal received");
+                log::error!("graceful shutdown signal received");
                 // stop the accept loop
                 break;
             }
