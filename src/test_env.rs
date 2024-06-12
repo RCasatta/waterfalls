@@ -1,4 +1,4 @@
-use crate::{inner_main, Arguments};
+use crate::{inner_main, route::WaterfallResponse, Arguments};
 use std::{
     error::Error,
     ffi::OsStr,
@@ -10,7 +10,8 @@ use std::{
 use bitcoind::{bitcoincore_rpc::RpcApi, get_available_port, BitcoinD, Conf};
 use elements::{
     bitcoin::{Amount, Denomination},
-    Address, Txid,
+    encode::Decodable,
+    Address, BlockHash, BlockHeader, Txid,
 };
 use serde_json::Value;
 use tokio::sync::oneshot::{self, Receiver, Sender};
@@ -20,7 +21,7 @@ pub struct TestEnv {
     elementsd: BitcoinD,
     handle: tokio::task::JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>,
     tx: Sender<()>,
-    base_url: String,
+    client: WaterfallClient,
 }
 
 #[cfg(feature = "db")]
@@ -70,22 +71,22 @@ async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv
     let (tx, rx) = oneshot::channel();
     let handle = tokio::spawn(inner_main(args, shutdown_signal(rx)));
 
+    let client = WaterfallClient::new(base_url.to_string());
+
     let test_env = TestEnv {
         elementsd,
         handle,
         tx,
-        base_url,
+        client,
     };
 
-    test_env.node_generate(1);
+    test_env.node_generate(1).await;
     test_env
         .elementsd
         .client
         .call::<Value>("rescanblockchain", &[])
         .unwrap();
-    test_env.node_generate(1);
-
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await; // give some time to start the server
+    test_env.node_generate(1).await;
 
     test_env
 }
@@ -96,8 +97,8 @@ impl TestEnv {
         let _ = self.handle.await.unwrap();
     }
 
-    pub fn base_url(&self) -> &str {
-        &self.base_url
+    pub fn client(&self) -> &WaterfallClient {
+        &self.client
     }
 
     pub fn send_to(&self, address: &elements::Address, satoshis: u64) -> Txid {
@@ -121,15 +122,110 @@ impl TestEnv {
         Address::from_str(addr.as_str().unwrap()).unwrap()
     }
 
-    pub fn node_generate(&self, block_num: u32) {
+    /// generate `block_num` blocks and wait the waterfall server had indexed them
+    pub async fn node_generate(&self, block_num: u32) {
+        let (prev_height, _) = self.client.wait_tip_height_hash(None).await.unwrap();
         let address = self.get_new_address(None).to_string();
         self.elementsd
             .client
             .call::<Value>("generatetoaddress", &[block_num.into(), address.into()])
+            .unwrap();
+        self.client
+            .wait_tip_height_hash(Some(prev_height + block_num))
+            .await
             .unwrap();
     }
 }
 
 async fn shutdown_signal(rx: Receiver<()>) {
     rx.await.unwrap()
+}
+
+pub struct WaterfallClient {
+    client: reqwest::Client,
+    base_url: String,
+}
+
+impl WaterfallClient {
+    pub fn new(base_url: String) -> Self {
+        let client = reqwest::Client::new();
+        Self { client, base_url }
+    }
+    pub async fn waterfall(&self, desc: &str) -> anyhow::Result<WaterfallResponse> {
+        let descriptor_url = format!("{}/v1/waterfall", self.base_url);
+
+        let response = self
+            .client
+            .get(&descriptor_url)
+            .query(&[("descriptor", desc)])
+            .send()
+            .await?;
+
+        let body = response.text().await?;
+        println!("{body}");
+        Ok(serde_json::from_str(&body)?)
+    }
+
+    pub async fn wait_waterfall_non_empty(
+        &self,
+        bitcoin_desc: &str,
+    ) -> anyhow::Result<WaterfallResponse> {
+        for _ in 0..50 {
+            if let Ok(res) = self.waterfall(&bitcoin_desc).await {
+                if !res.is_empty() {
+                    return Ok(res);
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        panic!("no non-empty result after 10s")
+    }
+
+    pub async fn tip_hash(&self) -> anyhow::Result<BlockHash> {
+        let url = format!("{}/blocks/tip/hash", self.base_url);
+        let response = self.client.get(&url).send().await?;
+        let text = response.text().await?;
+        Ok(BlockHash::from_str(&text)?)
+    }
+
+    pub async fn tip_height_hash(&self) -> anyhow::Result<(u32, BlockHash)> {
+        let hash = self.tip_hash().await?;
+        let height = self.height(hash).await?;
+        Ok((height, hash))
+    }
+
+    pub async fn wait_tip_height_hash(
+        &self,
+        up_to: Option<u32>,
+    ) -> anyhow::Result<(u32, BlockHash)> {
+        for _ in 0..50 {
+            if let Ok((height, hash)) = self.tip_height_hash().await {
+                match up_to.as_ref() {
+                    Some(expected) => {
+                        if height == *expected {
+                            return Ok((height, hash));
+                        }
+                    }
+                    None => return Ok((height, hash)),
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        panic!("no tip height after 10s")
+    }
+
+    pub async fn height(&self, block_hash: BlockHash) -> anyhow::Result<u32> {
+        Ok(self.header(block_hash).await?.height)
+    }
+    pub async fn header(&self, block_hash: BlockHash) -> anyhow::Result<BlockHeader> {
+        let url = format!("{}/block/{}/header", self.base_url, block_hash);
+        let response = self.client.get(&url).send().await?;
+        println!("{response:?}");
+        let text = response.text().await?;
+        let bytes = hex::decode(&text)?;
+        let header = BlockHeader::consensus_decode(&bytes[..])?;
+        Ok(header)
+    }
 }

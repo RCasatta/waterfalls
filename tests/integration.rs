@@ -4,8 +4,6 @@
 //! Thus following tests aren't a proper wallet scan but they checks memory/db backend and also
 //! mempool/confirmation result in receiving a payment
 
-use waterfall::route::WaterfallResponse;
-
 #[cfg(feature = "test_env")]
 #[tokio::test]
 async fn integration_memory() {
@@ -41,14 +39,14 @@ async fn do_test(test_env: waterfall::test_env::TestEnv) {
     use elements_miniscript::{ConfidentialDescriptor, DescriptorPublicKey};
     use std::str::FromStr;
     let secp = secp256k1::Secp256k1::new();
+    let client = test_env.client();
 
     let bitcoin_desc = "elwpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)";
     let single_bitcoin_desc = bitcoin_desc.replace("<0;1>", "0");
     let blinding = "slip77(9c8e4f05c7711a98c838be228bcb84924d4570ca53f35fa1c793e58841d47023)";
     let desc_str = format!("ct({blinding},{single_bitcoin_desc})#qwqap8xk"); // we use a non-multipath to generate addresses
 
-    let client = WaterfallClient::new(test_env.base_url().to_string());
-    let result = client.waterfall(&bitcoin_desc).await;
+    let result = client.waterfall(&bitcoin_desc).await.unwrap();
     assert_eq!(result.page, 0);
     assert_eq!(result.txs_seen.len(), 2);
     assert!(result.is_empty());
@@ -62,9 +60,10 @@ async fn do_test(test_env: waterfall::test_env::TestEnv) {
 
     let txid = test_env.send_to(&addr, 10_000);
 
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await; // give some time to start the server, TODO should wait conditionally
-
-    let result = client.waterfall(&bitcoin_desc).await;
+    let result = client
+        .wait_waterfall_non_empty(&bitcoin_desc)
+        .await
+        .unwrap();
     assert_eq!(result.page, 0);
     assert_eq!(result.txs_seen.len(), 2);
     assert!(!result.is_empty());
@@ -75,10 +74,9 @@ async fn do_test(test_env: waterfall::test_env::TestEnv) {
     assert_eq!(first.block_hash, None);
     assert_eq!(first.block_timestamp, None);
 
-    test_env.node_generate(1);
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await; // give some time for scan to happen, TODO should wait conditionally
+    test_env.node_generate(1).await;
 
-    let result = client.waterfall(&bitcoin_desc).await;
+    let result = client.waterfall(&bitcoin_desc).await.unwrap();
     assert_eq!(result.page, 0);
     assert_eq!(result.txs_seen.len(), 2);
     assert!(!result.is_empty());
@@ -91,32 +89,4 @@ async fn do_test(test_env: waterfall::test_env::TestEnv) {
 
     test_env.shutdown().await;
     assert!(true);
-}
-
-struct WaterfallClient {
-    client: reqwest::Client,
-    base_url: String,
-}
-
-impl WaterfallClient {
-    pub fn new(base_url: String) -> Self {
-        let client = reqwest::Client::new();
-        Self { client, base_url }
-    }
-    async fn waterfall(&self, desc: &str) -> WaterfallResponse {
-        let descriptor_url = format!("{}/v1/waterfall", self.base_url);
-
-        let response = self
-            .client
-            .get(&descriptor_url)
-            .query(&[("descriptor", desc)])
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(response.status().as_u16(), 200);
-        let body = response.text().await.unwrap();
-        println!("{body}");
-        serde_json::from_str(&body).unwrap()
-    }
 }
