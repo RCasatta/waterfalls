@@ -25,6 +25,7 @@ pub struct TestEnv {
     handle: tokio::task::JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>,
     tx: Sender<()>,
     client: WaterfallClient,
+    base_url: String,
 }
 
 #[cfg(feature = "db")]
@@ -81,6 +82,7 @@ async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv
         handle,
         tx,
         client,
+        base_url,
     };
 
     test_env.node_generate(1).await;
@@ -102,6 +104,10 @@ impl TestEnv {
 
     pub fn client(&self) -> &WaterfallClient {
         &self.client
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
 
     pub fn send_to(&self, address: &elements::Address, satoshis: u64) -> Txid {
