@@ -1,5 +1,5 @@
 use crate::{
-    mempool::Mempool,
+    server::Mempool,
     store::{AnyStore, BlockMeta},
     Timestamp,
 };

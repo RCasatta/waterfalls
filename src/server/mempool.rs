@@ -10,14 +10,14 @@ use crate::{
     ScriptHash,
 };
 
-pub(crate) struct Mempool {
+pub struct Mempool {
     txid_hashes: HashMap<Txid, HashSet<ScriptHash>>,
     hash_txids: HashMap<ScriptHash, Vec<Txid>>,
     outpoints_created: HashMap<OutPoint, ScriptHash>,
 }
 
 impl Mempool {
-    pub(crate) fn new() -> Mempool {
+    pub fn new() -> Mempool {
         Mempool {
             txid_hashes: HashMap::new(),
             hash_txids: HashMap::new(),
@@ -25,7 +25,7 @@ impl Mempool {
         }
     }
 
-    pub(crate) fn remove(&mut self, txids: &[Txid]) {
+    pub fn remove(&mut self, txids: &[Txid]) {
         for txid in txids {
             if let Some(hashes) = self.txid_hashes.remove(txid) {
                 for hash in hashes {
@@ -37,7 +37,7 @@ impl Mempool {
             .retain(|k, _| !txids.contains(&k.txid));
     }
 
-    pub(crate) fn add(&mut self, db: &AnyStore, txs: &[Transaction]) {
+    pub fn add(&mut self, db: &AnyStore, txs: &[Transaction]) {
         let txs_map: HashMap<Txid, &Transaction> = txs.iter().map(|tx| (tx.txid(), tx)).collect();
 
         // update the unconfirmed utxo set
@@ -102,7 +102,7 @@ impl Mempool {
         }
     }
 
-    pub(crate) fn seen(&self, script_hashes: &[ScriptHash]) -> Vec<Vec<Txid>> {
+    pub fn seen(&self, script_hashes: &[ScriptHash]) -> Vec<Vec<Txid>> {
         let mut result = vec![];
         for h in script_hashes {
             let r = self.hash_txids.get(h).cloned().unwrap_or(vec![]);
