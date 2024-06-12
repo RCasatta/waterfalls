@@ -6,9 +6,9 @@ use fetch::Client;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
-use preload::headers;
+use server::preload::headers;
 use server::Mempool;
-use state::State;
+use server::State;
 use store::memory::MemoryStore;
 use store::AnyStore;
 use threads::blocks::blocks_infallible;
@@ -17,10 +17,7 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 mod fetch;
-mod preload;
-pub mod route;
 mod server;
-mod state;
 mod store;
 mod threads;
 
@@ -153,7 +150,7 @@ pub async fn inner_main(
                     let is_testnet = args.testnet;
                     let client = &client;
 
-                    let service = service_fn(move |req| route::route(state, client, req, is_testnet));
+                    let service = service_fn(move |req| server::route(state, client, req, is_testnet));
 
                     if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
                         log::error!("Error serving connection: {:?}", err);

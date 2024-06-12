@@ -1,6 +1,6 @@
 use crate::{
     fetch::Client,
-    state::State,
+    server::State,
     store::{BlockMeta, Store, TxSeen},
     Error,
 };

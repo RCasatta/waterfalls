@@ -54,3 +54,4 @@ Txs | First         | Following
 ## TODO
 
 - [ ] `WaterfallRequest` and `WaterfallResponse` should be handy in a separate crate so that client can use that
+- [ ] caching script derivations, cache also max derivation, so that you can use that to do a single multiget instead of n*gap_limit
