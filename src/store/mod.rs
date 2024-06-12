@@ -1,7 +1,6 @@
-use crate::{Height, ScriptHash, Timestamp};
+use crate::{Height, ScriptHash, Timestamp, TxSeen};
 use anyhow::Result;
 use elements::{BlockHash, OutPoint, Script, Txid};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[cfg(feature = "db")]
@@ -86,28 +85,6 @@ impl Store for AnyStore {
             AnyStore::Db(d) => d.update(block_meta, utxo_spent, history_map, utxo_created),
             AnyStore::Mem(m) => m.update(block_meta, utxo_spent, history_map, utxo_created),
         }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct TxSeen {
-    pub txid: Txid,
-    pub height: Height,
-    pub block_hash: Option<BlockHash>,
-    pub block_timestamp: Option<Timestamp>,
-}
-impl TxSeen {
-    pub fn new(txid: Txid, height: Height) -> Self {
-        Self {
-            txid,
-            height,
-            block_hash: None,
-            block_timestamp: None,
-        }
-    }
-
-    pub fn mempool(txid: Txid) -> TxSeen {
-        TxSeen::new(txid, 0)
     }
 }
 

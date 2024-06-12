@@ -22,7 +22,6 @@ pub mod route;
 mod state;
 
 pub use mempool::Mempool;
-pub use route::WaterfallResponse;
 pub use state::State;
 
 #[derive(clap::Parser, Clone, Default)]

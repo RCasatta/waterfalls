@@ -55,3 +55,4 @@ Txs | First         | Following
 
 - [ ] `WaterfallRequest` and `WaterfallResponse` should be handy in a separate crate so that client can use that
 - [ ] caching script derivations, cache also max derivation, so that you can use that to do a single multiget instead of n*gap_limit
+- [ ] polling configurable with default 1s like it is (but tests can use much less)

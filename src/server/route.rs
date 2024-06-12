@@ -1,8 +1,8 @@
 use crate::{
     fetch::Client,
-    server::Error,
-    server::State,
-    store::{Store, TxSeen},
+    server::{Error, State},
+    store::Store,
+    TxSeen, WaterfallRequest, WaterfallResponse,
 };
 use elements::{
     encode::{serialize, serialize_hex},
@@ -15,7 +15,6 @@ use hyper::{
     header::{CACHE_CONTROL, CONTENT_TYPE},
     Method, Request, Response, StatusCode,
 };
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
     str::FromStr,
@@ -27,15 +26,6 @@ use tokio::sync::Mutex;
 const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 50;
 const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
-
-struct WaterfallRequest {
-    descriptor: String,
-
-    /// Requested page, 0 if not specified
-    /// The first returned index is equal to `page * 1000`
-    /// The same page is used for all the descriptor (ie both external and internal)
-    page: u16,
-}
 
 // needed endpoint to make this self-contained for testing, in prod they should probably be never hit cause proxied by nginx
 // https://waterfall.liquidwebwallet.org/liquidtestnet/api/blocks/tip/hash
@@ -153,28 +143,6 @@ fn any_resp(
     Ok(builder
         .body(Full::new(bytes.into()))
         .map_err(|_| Error::Other)?)
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct WaterfallResponse {
-    pub txs_seen: BTreeMap<String, Vec<Vec<TxSeen>>>,
-    pub page: u16,
-}
-
-impl WaterfallResponse {
-    pub fn is_empty(&self) -> bool {
-        self.txs_seen
-            .iter()
-            .flat_map(|(_, v)| v.iter())
-            .all(|a| a.is_empty())
-    }
-    pub fn count_non_empty(&self) -> usize {
-        self.txs_seen
-            .iter()
-            .flat_map(|(_, v)| v.iter())
-            .filter(|a| !a.is_empty())
-            .count()
-    }
 }
 
 async fn handle_waterfall_req(

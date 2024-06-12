@@ -1,8 +1,8 @@
 use crate::{
     fetch::Client,
-    server::Error,
-    server::State,
-    store::{BlockMeta, Store, TxSeen},
+    server::{Error, State},
+    store::{BlockMeta, Store},
+    TxSeen,
 };
 use elements::{hex::ToHex, OutPoint, Txid};
 use std::{
