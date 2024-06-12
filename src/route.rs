@@ -28,7 +28,7 @@ const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 50;
 const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
 
-struct Inputs {
+struct WaterfallRequest {
     descriptor: String,
 
     /// Requested page, 0 if not specified
@@ -117,7 +117,7 @@ fn block_hash_resp(
     }
 }
 
-fn parse_query(query: &str) -> Result<Inputs, Error> {
+fn parse_query(query: &str) -> Result<WaterfallRequest, Error> {
     let mut params = form_urlencoded::parse(query.as_bytes())
         .into_owned()
         .collect::<HashMap<String, String>>();
@@ -129,7 +129,7 @@ fn parse_query(query: &str) -> Result<Inputs, Error> {
         .map(|e| e.parse().unwrap_or(0))
         .unwrap_or(0u16);
 
-    Ok(Inputs { descriptor, page })
+    Ok(WaterfallRequest { descriptor, page })
 }
 
 fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {
@@ -153,16 +153,31 @@ fn any_resp(
         .map_err(|_| Error::Other)?)
 }
 
-// TODO rename
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Output {
-    txs_seen: BTreeMap<String, Vec<Vec<TxSeen>>>,
-    page: u16,
+pub struct WaterfallResponse {
+    pub txs_seen: BTreeMap<String, Vec<Vec<TxSeen>>>,
+    pub page: u16,
+}
+
+impl WaterfallResponse {
+    pub fn is_empty(&self) -> bool {
+        self.txs_seen
+            .iter()
+            .flat_map(|(_, v)| v.iter())
+            .all(|a| a.is_empty())
+    }
+    pub fn count_non_empty(&self) -> usize {
+        self.txs_seen
+            .iter()
+            .flat_map(|(_, v)| v.iter())
+            .filter(|a| !a.is_empty())
+            .count()
+    }
 }
 
 async fn handle_waterfall_req(
     state: &Arc<State>,
-    inputs: &Inputs,
+    inputs: &WaterfallRequest,
     is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
     let desc_str = &inputs.descriptor;
@@ -209,16 +224,19 @@ async fn handle_waterfall_req(
                 for v in map.values_mut() {
                     for tx_seens in v.iter_mut() {
                         for tx_seen in tx_seens.iter_mut() {
-                            let (hash, ts) = blocks_hash_ts[tx_seen.height as usize];
-                            tx_seen.block_hash = Some(hash);
-                            tx_seen.block_timestamp = Some(ts);
+                            if tx_seen.height > 0 {
+                                // unconfirmed has height 0, we don't want to map those to the genesis block
+                                let (hash, ts) = blocks_hash_ts[tx_seen.height as usize];
+                                tx_seen.block_hash = Some(hash);
+                                tx_seen.block_timestamp = Some(ts);
+                            }
                         }
                     }
                 }
             }
 
             let elements: usize = map.iter().map(|(_, v)| v.len()).sum();
-            let result = serde_json::to_string(&Output {
+            let result = serde_json::to_string(&WaterfallResponse {
                 txs_seen: map,
                 page: inputs.page,
             })

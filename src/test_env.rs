@@ -10,7 +10,7 @@ use std::{
 use bitcoind::{bitcoincore_rpc::RpcApi, get_available_port, BitcoinD, Conf};
 use elements::{
     bitcoin::{Amount, Denomination},
-    Address,
+    Address, Txid,
 };
 use serde_json::Value;
 use tokio::sync::oneshot::{self, Receiver, Sender};
@@ -100,16 +100,15 @@ impl TestEnv {
         &self.base_url
     }
 
-    pub fn send_to(&self, address: &elements::Address, satoshis: u64) {
+    pub fn send_to(&self, address: &elements::Address, satoshis: u64) -> Txid {
         let amount = Amount::from_sat(satoshis);
         let btc = amount.to_string_in(Denomination::Bitcoin);
-
         let val = self
             .elementsd
             .client
             .call::<Value>("sendtoaddress", &[address.to_string().into(), btc.into()])
             .unwrap();
-        println!("{val:?}");
+        Txid::from_str(val.as_str().unwrap()).unwrap()
     }
 
     pub fn get_new_address(&self, kind: Option<&str>) -> Address {

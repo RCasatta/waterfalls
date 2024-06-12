@@ -50,3 +50,7 @@ Txs | First         | Following
 * The waterfall endpoint mirrors all the esplora endpoints (possibly via a web server like nginx) with the exception of the waterfall endpoint
 * The format of the data returned resembles what you have in Esplora with multiple `script_get_history` calls, to minimize client changes needed. The only exception is giving some extra information (block timestamp) to avoid even more requests.
 * Data returned in the endpoint mixes data in blocks and in mempool, since nature of the data differs (eg you could cache data coming from blocks for a minute) there could be some advantages in separating data returned in different endpoints, but we decided the gains are not worth the complexity
+
+## TODO
+
+- [ ] `WaterfallRequest` and `WaterfallResponse` should be handy in a separate crate so that client can use that

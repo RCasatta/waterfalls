@@ -90,14 +90,14 @@ impl Store for AnyStore {
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub(crate) struct TxSeen {
-    pub(crate) txid: Txid,
-    pub(crate) height: Height,
-    pub(crate) block_hash: Option<BlockHash>,
-    pub(crate) block_timestamp: Option<Timestamp>,
+pub struct TxSeen {
+    pub txid: Txid,
+    pub height: Height,
+    pub block_hash: Option<BlockHash>,
+    pub block_timestamp: Option<Timestamp>,
 }
 impl TxSeen {
-    pub(crate) fn new(txid: Txid, height: Height) -> Self {
+    pub fn new(txid: Txid, height: Height) -> Self {
         Self {
             txid,
             height,
@@ -106,7 +106,7 @@ impl TxSeen {
         }
     }
 
-    pub(crate) fn mempool(txid: Txid) -> TxSeen {
+    pub fn mempool(txid: Txid) -> TxSeen {
         TxSeen::new(txid, 0)
     }
 }
