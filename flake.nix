@@ -44,6 +44,9 @@
             ROCKSDB_INCLUDE_DIR = "${pkgs.rocksdb}/include";
             ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
 
+            ELEMENTSD_EXEC = "${pkgs.elementsd}/bin/elementsd";
+
+
           };
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
           bin = craneLib.buildPackage (commonArgs // {
