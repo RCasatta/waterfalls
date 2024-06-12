@@ -46,9 +46,9 @@ async fn do_test(test_env: waterfall::test_env::TestEnv) {
     let single_bitcoin_desc = bitcoin_desc.replace("<0;1>", "0");
     let blinding = "slip77(9c8e4f05c7711a98c838be228bcb84924d4570ca53f35fa1c793e58841d47023)";
     let desc_str = format!("ct({blinding},{single_bitcoin_desc})#qwqap8xk"); // we use a non-multipath to generate addresses
-    let base_url = test_env.base_url();
-    let client = reqwest::Client::new();
-    let result = make_waterfall_req(&client, &base_url, &bitcoin_desc).await;
+
+    let client = WaterfallClient::new(test_env.base_url().to_string());
+    let result = client.waterfall(&bitcoin_desc).await;
     assert_eq!(result.page, 0);
     assert_eq!(result.txs_seen.len(), 2);
     assert!(result.is_empty());
@@ -64,7 +64,7 @@ async fn do_test(test_env: waterfall::test_env::TestEnv) {
 
     tokio::time::sleep(std::time::Duration::from_secs(2)).await; // give some time to start the server, TODO should wait conditionally
 
-    let result = make_waterfall_req(&client, &base_url, &bitcoin_desc).await;
+    let result = client.waterfall(&bitcoin_desc).await;
     assert_eq!(result.page, 0);
     assert_eq!(result.txs_seen.len(), 2);
     assert!(!result.is_empty());
@@ -78,7 +78,7 @@ async fn do_test(test_env: waterfall::test_env::TestEnv) {
     test_env.node_generate(1);
     tokio::time::sleep(std::time::Duration::from_secs(2)).await; // give some time for scan to happen, TODO should wait conditionally
 
-    let result = make_waterfall_req(&client, &base_url, &bitcoin_desc).await;
+    let result = client.waterfall(&bitcoin_desc).await;
     assert_eq!(result.page, 0);
     assert_eq!(result.txs_seen.len(), 2);
     assert!(!result.is_empty());
@@ -93,22 +93,30 @@ async fn do_test(test_env: waterfall::test_env::TestEnv) {
     assert!(true);
 }
 
-async fn make_waterfall_req(
-    client: &reqwest::Client,
-    base_url: &str,
-    desc: &str,
-) -> WaterfallResponse {
-    let descriptor_url = format!("{}/v1/waterfall", base_url);
+struct WaterfallClient {
+    client: reqwest::Client,
+    base_url: String,
+}
 
-    let response = client
-        .get(&descriptor_url)
-        .query(&[("descriptor", desc)])
-        .send()
-        .await
-        .unwrap();
+impl WaterfallClient {
+    pub fn new(base_url: String) -> Self {
+        let client = reqwest::Client::new();
+        Self { client, base_url }
+    }
+    async fn waterfall(&self, desc: &str) -> WaterfallResponse {
+        let descriptor_url = format!("{}/v1/waterfall", self.base_url);
 
-    assert_eq!(response.status().as_u16(), 200);
-    let body = response.text().await.unwrap();
-    println!("{body}");
-    serde_json::from_str(&body).unwrap()
+        let response = self
+            .client
+            .get(&descriptor_url)
+            .query(&[("descriptor", desc)])
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status().as_u16(), 200);
+        let body = response.text().await.unwrap();
+        println!("{body}");
+        serde_json::from_str(&body).unwrap()
+    }
 }
