@@ -1,4 +1,4 @@
-use crate::{fetch::Client, server::State, Error};
+use crate::{fetch::Client, server::Error, server::State};
 use std::{collections::HashSet, sync::Arc};
 use tokio::time::sleep;
 

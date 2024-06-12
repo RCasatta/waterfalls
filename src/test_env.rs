@@ -1,4 +1,4 @@
-use crate::{inner_main, server::WaterfallResponse, Arguments};
+use crate::server::{inner_main, Arguments, WaterfallResponse};
 use std::{
     error::Error,
     ffi::OsStr,

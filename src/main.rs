@@ -1,6 +1,6 @@
 use clap::Parser;
 use env_logger::Env;
-use waterfall::{inner_main, Arguments};
+use waterfall::server::{inner_main, Arguments};
 
 #[tokio::main]
 async fn main() {

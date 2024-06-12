@@ -8,7 +8,7 @@ use hyper::body::Buf;
 use serde::Deserialize;
 use tokio::time::sleep;
 
-use crate::Arguments;
+use crate::server::Arguments;
 
 pub struct Client {
     client: reqwest::Client,
@@ -178,7 +178,7 @@ mod test {
 
     use elements::{BlockHash, Txid};
 
-    use crate::Arguments;
+    use crate::server::Arguments;
 
     use super::Client;
 
