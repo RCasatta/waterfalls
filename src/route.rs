@@ -15,7 +15,7 @@ use hyper::{
     header::{CACHE_CONTROL, CONTENT_TYPE},
     Method, Request, Response, StatusCode,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
     str::FromStr,
@@ -153,8 +153,9 @@ fn any_resp(
         .map_err(|_| Error::Other)?)
 }
 
-#[derive(Serialize)]
-struct Output {
+// TODO rename
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Output {
     txs_seen: BTreeMap<String, Vec<Vec<TxSeen>>>,
     page: u16,
 }

@@ -19,7 +19,7 @@ use tokio::sync::Mutex;
 mod fetch;
 mod mempool;
 mod preload;
-mod route;
+pub mod route;
 mod state;
 mod store;
 mod threads;

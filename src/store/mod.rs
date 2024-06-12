@@ -1,7 +1,7 @@
 use crate::{Height, ScriptHash, Timestamp};
 use anyhow::Result;
 use elements::{BlockHash, OutPoint, Script, Txid};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[cfg(feature = "db")]
@@ -89,7 +89,7 @@ impl Store for AnyStore {
     }
 }
 
-#[derive(Serialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub(crate) struct TxSeen {
     pub(crate) txid: Txid,
     pub(crate) height: Height,
