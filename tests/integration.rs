@@ -17,24 +17,24 @@ async fn integration_db() {
     let tempdir = tempfile::TempDir::new().unwrap();
     let path = tempdir.path().to_path_buf();
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
-    let test_env = waterfall::test_env::launch(exe, Some(path)).await;
+    let test_env = rust_waterfall::test_env::launch(exe, Some(path)).await;
     do_test(test_env).await;
 }
 
 #[cfg(all(feature = "test_env", feature = "db"))]
-async fn launch_memory() -> waterfall::test_env::TestEnv {
+async fn launch_memory() -> rust_waterfall::test_env::TestEnv {
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
-    waterfall::test_env::launch(exe, None).await
+    rust_waterfall::test_env::launch(exe, None).await
 }
 
 #[cfg(all(feature = "test_env", not(feature = "db")))]
-async fn launch_memory() -> waterfall::test_env::TestEnv {
+async fn launch_memory() -> rust_waterfall::test_env::TestEnv {
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
-    waterfall::test_env::launch(exe).await
+    rust_waterfall::test_env::launch(exe).await
 }
 
 #[cfg(feature = "test_env")]
-async fn do_test(test_env: waterfall::test_env::TestEnv) {
+async fn do_test(test_env: rust_waterfall::test_env::TestEnv) {
     use elements::{bitcoin::secp256k1, AddressParams};
     use elements_miniscript::{ConfidentialDescriptor, DescriptorPublicKey};
     use std::str::FromStr;

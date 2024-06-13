@@ -1283,6 +1283,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_waterfall"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoind",
+ "clap",
+ "elements",
+ "elements-miniscript",
+ "env_logger",
+ "form_urlencoded",
+ "fxhash",
+ "hex",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "log",
+ "reqwest",
+ "rocksdb",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1802,31 +1827,6 @@ name = "wasm-bindgen-shared"
 version = "0.2.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af190c94f2773fdb3729c55b007a722abb5384da03bc0986df4c289bf5567e96"
-
-[[package]]
-name = "waterfall"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bitcoind",
- "clap",
- "elements",
- "elements-miniscript",
- "env_logger",
- "form_urlencoded",
- "fxhash",
- "hex",
- "http-body-util",
- "hyper",
- "hyper-util",
- "log",
- "reqwest",
- "rocksdb",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
-]
 
 [[package]]
 name = "web-sys"

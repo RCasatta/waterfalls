@@ -168,6 +168,7 @@ async fn handle_waterfall_req(
                     for index in start..start + GAP_LIMIT {
                         let l = desc.at_derivation_index(index).unwrap();
                         let script_pubkey = l.script_pubkey();
+                        log::debug!("{}/{} {}", desc, index, script_pubkey);
                         scripts.push(db.hash(&script_pubkey));
                     }
                     let mut seen_blockchain = db.get_history(&scripts).unwrap();

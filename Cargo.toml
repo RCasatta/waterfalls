@@ -1,9 +1,9 @@
 [package]
-name = "waterfall"
+name = "rust_waterfall"
 version = "0.1.0"
 edition = "2021"
 authors = ["Riccardo Casatta <riccardo@casatta.it>"]
-description = "Waterfall provide blockchain data to liquid light-wallet client"
+description = "Waterfalls provide blockchain data to liquid light-wallet client"
 license = "MIT"
 repository = "https://github.com/RCasatta/waterfall"
 categories = ["cryptography::cryptocurrencies"]

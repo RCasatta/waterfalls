@@ -100,6 +100,7 @@ async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv
         "-chain=liquidregtest",
         "-initialfreecoins=2100000000",
         "-validatepegin=0",
+        "-txindex=1",
         "-rest=1",
     ];
     conf.args = args;
