@@ -38,21 +38,17 @@ pub async fn launch<S: AsRef<OsStr>>(exe: S) -> TestEnv {
     inner_launch(exe, None).await
 }
 
-async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv {
-    let mut conf = Conf::default();
-    let args = vec![
-        "-fallbackfee=0.0001",
-        "-dustrelayfee=0.00000001",
-        "-chain=liquidregtest",
-        "-initialfreecoins=2100000000",
-        "-validatepegin=0",
-        "-rest=1",
-    ];
-    conf.args = args;
-    conf.view_stdout = std::env::var("RUST_LOG").is_ok();
-    conf.network = "liquidregtest";
+#[cfg(feature = "db")]
+pub async fn launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> TestEnv {
+    inner_launch_with_node(elementsd, path).await
+}
 
-    let elementsd = BitcoinD::with_conf(exe, &conf).unwrap();
+#[cfg(not(feature = "db"))]
+pub async fn launch_with_node(elementsd: BitcoinD) -> TestEnv {
+    inner_launch_with_node(elementsd, None).await
+}
+
+async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> TestEnv {
     let mut args = Arguments::default();
     args.node_url = Some(elementsd.rpc_url());
     let available_port = get_available_port().unwrap();
@@ -94,6 +90,24 @@ async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv
     test_env.node_generate(1).await;
 
     test_env
+}
+
+async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv {
+    let mut conf = Conf::default();
+    let args = vec![
+        "-fallbackfee=0.0001",
+        "-dustrelayfee=0.00000001",
+        "-chain=liquidregtest",
+        "-initialfreecoins=2100000000",
+        "-validatepegin=0",
+        "-rest=1",
+    ];
+    conf.args = args;
+    conf.view_stdout = std::env::var("RUST_LOG").is_ok();
+    conf.network = "liquidregtest";
+
+    let elementsd = BitcoinD::with_conf(exe, &conf).unwrap();
+    inner_launch_with_node(elementsd, path).await
 }
 
 impl TestEnv {
