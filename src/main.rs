@@ -2,7 +2,7 @@ use clap::Parser;
 use env_logger::Env;
 use waterfalls::server::{inner_main, Arguments};
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let args = Arguments::parse();
