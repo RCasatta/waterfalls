@@ -28,13 +28,10 @@ const MAX_BATCH: u32 = 50;
 const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
 
 // needed endpoint to make this self-contained for testing, in prod they should probably be never hit cause proxied by nginx
-// https://waterfall.liquidwebwallet.org/liquidtestnet/api/blocks/tip/hash
-// https://waterfall.liquidwebwallet.org/liquidtestnet/api/block/bddf520b05c7552dca87289a035043a5c434133b3d1bb07b255fb1a30592b2d4/header
-// https://waterfall.liquidwebwallet.org/liquidtestnet/api/tx/3fb1f808534a881cc16c10745a2b861c7b33e13cfe2f5bf3fc872fd943d0bfca/raw
-// https://waterfall.liquidwebwallet.org/liquidtestnet/api/block-height/1424507
-
-// curl --request POST --data 'elwpkh(xpub6DLHCiTPg67KE9ksCjNVpVHTRDHzhCSmoBTKzp2K4FxLQwQvvdNzuqxhK2f9gFVCN6Dori7j2JMLeDoB4VqswG7Et9tjqauAvbDmzF8NEPH/<0;1>/*)' http://localhost:3000/descriptor
-// curl --request POST --data 'elsh(wpkh(xpub6BemYiVNp19ZzoiAAnu8oiwo7o4MGRDWgD55XFqSuQX9GJfsf4Y2Vq9Z1De1TEwEzqPyESUupP6EFy4daYGMHGb8kQXaYenREC88fHBkDR1/<0;1>/*))' http://waterfall.liquidwebwallet.org/liquid/descriptor | jq
+// https://waterfalls.liquidwebwallet.org/liquidtestnet/api/blocks/tip/hash
+// https://waterfalls.liquidwebwallet.org/liquidtestnet/api/block/bddf520b05c7552dca87289a035043a5c434133b3d1bb07b255fb1a30592b2d4/header
+// https://waterfalls.liquidwebwallet.org/liquidtestnet/api/tx/3fb1f808534a881cc16c10745a2b861c7b33e13cfe2f5bf3fc872fd943d0bfca/raw
+// https://waterfalls.liquidwebwallet.org/liquidtestnet/api/block-height/1424507
 pub async fn route(
     state: &Arc<State>,
     client: &Arc<Mutex<Client>>,
@@ -43,9 +40,9 @@ pub async fn route(
 ) -> Result<Response<Full<Bytes>>, Error> {
     log::debug!("---> {req:?}");
     let res = match (req.method(), req.uri().path(), req.uri().query()) {
-        (&Method::GET, "/v1/waterfall", Some(query)) => {
+        (&Method::GET, "/v1/waterfalls", Some(query)) => {
             let inputs = parse_query(query)?;
-            handle_waterfall_req(state, &inputs, is_testnet).await
+            handle_waterfalls_req(state, &inputs, is_testnet).await
         }
         (&Method::GET, "/blocks/tip/hash", None) => {
             let block_hash = state.tip_hash().await;
@@ -145,7 +142,7 @@ fn any_resp(
         .map_err(|_| Error::Other)?)
 }
 
-async fn handle_waterfall_req(
+async fn handle_waterfalls_req(
     state: &Arc<State>,
     inputs: &WaterfallRequest,
     is_testnet: bool,

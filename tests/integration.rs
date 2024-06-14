@@ -17,24 +17,24 @@ async fn integration_db() {
     let tempdir = tempfile::TempDir::new().unwrap();
     let path = tempdir.path().to_path_buf();
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
-    let test_env = rust_waterfall::test_env::launch(exe, Some(path)).await;
+    let test_env = waterfalls::test_env::launch(exe, Some(path)).await;
     do_test(test_env).await;
 }
 
 #[cfg(all(feature = "test_env", feature = "db"))]
-async fn launch_memory() -> rust_waterfall::test_env::TestEnv {
+async fn launch_memory() -> waterfalls::test_env::TestEnv {
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
-    rust_waterfall::test_env::launch(exe, None).await
+    waterfalls::test_env::launch(exe, None).await
 }
 
 #[cfg(all(feature = "test_env", not(feature = "db")))]
-async fn launch_memory() -> rust_waterfall::test_env::TestEnv {
+async fn launch_memory() -> waterfalls::test_env::TestEnv {
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
-    rust_waterfall::test_env::launch(exe).await
+    waterfalls::test_env::launch(exe).await
 }
 
 #[cfg(feature = "test_env")]
-async fn do_test(test_env: rust_waterfall::test_env::TestEnv) {
+async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     use elements::{bitcoin::secp256k1, AddressParams};
     use elements_miniscript::{ConfidentialDescriptor, DescriptorPublicKey};
     use std::str::FromStr;
@@ -46,7 +46,7 @@ async fn do_test(test_env: rust_waterfall::test_env::TestEnv) {
     let blinding = "slip77(9c8e4f05c7711a98c838be228bcb84924d4570ca53f35fa1c793e58841d47023)";
     let desc_str = format!("ct({blinding},{single_bitcoin_desc})#qwqap8xk"); // we use a non-multipath to generate addresses
 
-    let result = client.waterfall(&bitcoin_desc).await.unwrap();
+    let result = client.waterfalls(&bitcoin_desc).await.unwrap();
     assert_eq!(result.page, 0);
     assert_eq!(result.txs_seen.len(), 2);
     assert!(result.is_empty());
@@ -61,7 +61,7 @@ async fn do_test(test_env: rust_waterfall::test_env::TestEnv) {
     let txid = test_env.send_to(&addr, 10_000);
 
     let result = client
-        .wait_waterfall_non_empty(&bitcoin_desc)
+        .wait_waterfalls_non_empty(&bitcoin_desc)
         .await
         .unwrap();
     assert_eq!(result.page, 0);
@@ -76,7 +76,7 @@ async fn do_test(test_env: rust_waterfall::test_env::TestEnv) {
 
     test_env.node_generate(1).await;
 
-    let result = client.waterfall(&bitcoin_desc).await.unwrap();
+    let result = client.waterfalls(&bitcoin_desc).await.unwrap();
     assert_eq!(result.page, 0);
     assert_eq!(result.txs_seen.len(), 2);
     assert!(!result.is_empty());

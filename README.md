@@ -23,9 +23,9 @@ Txs | First          | Following
 
 ## New client
 
-Currently available at https://liquidwebwallet.org/waterfall
+Currently available at https://liquidwebwallet.org/waterfalls
 
-The new waterfall client avoids multiple requests by sending the bitcoin descriptor to the server.
+The new waterfalls client avoids multiple requests by sending the bitcoin descriptor to the server.
 This has privacy implications, but we argue it's not that different than sending all of our addresses separately to the server. Specifically in the latter case we are not sending the knowledge of future addresses that are derivable from the descriptor in the former case. The real privacy gain is moving to a self-hosted server or to a personal node.
 Moreover, liquid specifically has the advantage of having confidential transactions and the blinding key is not sent to the server, thus a malicious server would know about the transactions of the wallet, but nothing about the assets exchanged and the value transacted.
 
@@ -47,7 +47,7 @@ Txs | First         | Following
     * specific data model for the needed endpoint that doesn't fit in the current electrs data model. In particular:
         * in electrs is required to iterate values in the db, preventing the use of the "multi get" calls to speed up multiple row fetching, which is extremely needed to recover hundreds of script pubkeys
         * in electrs much more information is stored, by instead saving only the strictly needed more data can fit in memory
-* The waterfall endpoint mirrors all the esplora endpoints (possibly via a web server like nginx) with the exception of the waterfall endpoint
+* The waterfalls endpoint mirrors all the esplora endpoints (possibly via a web server like nginx) with the exception of the waterfall endpoint
 * The format of the data returned resembles what you have in Esplora with multiple `script_get_history` calls, to minimize client changes needed. The only exception is giving some extra information (block timestamp) to avoid even more requests.
 * Data returned in the endpoint mixes data in blocks and in mempool, since nature of the data differs (eg you could cache data coming from blocks for a minute) there could be some advantages in separating data returned in different endpoints, but we decided the gains are not worth the complexity
 

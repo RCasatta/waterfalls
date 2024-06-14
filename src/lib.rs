@@ -13,7 +13,7 @@ type ScriptHash = u64;
 type Height = u32;
 type Timestamp = u32;
 
-/// Request to the waterfall endpoint
+/// Request to the waterfalls endpoint
 pub struct WaterfallRequest {
     descriptor: String,
 
@@ -23,7 +23,7 @@ pub struct WaterfallRequest {
     page: u16,
 }
 
-/// Response from the waterfall endpoint
+/// Response from the waterfalls endpoint
 #[derive(Serialize, Deserialize, Debug)]
 pub struct WaterfallResponse {
     pub txs_seen: std::collections::BTreeMap<String, Vec<Vec<TxSeen>>>,

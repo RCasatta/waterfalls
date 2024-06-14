@@ -1,4 +1,4 @@
-//! Inside this module everything is needed to run the service providing the waterfall protocol
+//! Inside this module everything is needed to run the service providing the waterfalls protocol
 
 use std::future::Future;
 use std::net::SocketAddr;

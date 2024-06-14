@@ -146,7 +146,7 @@ impl TestEnv {
         Address::from_str(addr.as_str().unwrap()).unwrap()
     }
 
-    /// generate `block_num` blocks and wait the waterfall server had indexed them
+    /// generate `block_num` blocks and wait the waterfalls server had indexed them
     pub async fn node_generate(&self, block_num: u32) {
         let (prev_height, _) = self.client.wait_tip_height_hash(None).await.unwrap();
         let address = self.get_new_address(None).to_string();
@@ -175,8 +175,8 @@ impl WaterfallClient {
         let client = reqwest::Client::new();
         Self { client, base_url }
     }
-    pub async fn waterfall(&self, desc: &str) -> anyhow::Result<WaterfallResponse> {
-        let descriptor_url = format!("{}/v1/waterfall", self.base_url);
+    pub async fn waterfalls(&self, desc: &str) -> anyhow::Result<WaterfallResponse> {
+        let descriptor_url = format!("{}/v1/waterfalls", self.base_url);
 
         let response = self
             .client
@@ -189,12 +189,12 @@ impl WaterfallClient {
         Ok(serde_json::from_str(&body)?)
     }
 
-    pub async fn wait_waterfall_non_empty(
+    pub async fn wait_waterfalls_non_empty(
         &self,
         bitcoin_desc: &str,
     ) -> anyhow::Result<WaterfallResponse> {
         for _ in 0..50 {
-            if let Ok(res) = self.waterfall(&bitcoin_desc).await {
+            if let Ok(res) = self.waterfalls(&bitcoin_desc).await {
                 if !res.is_empty() {
                     return Ok(res);
                 }
