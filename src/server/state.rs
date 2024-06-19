@@ -1,18 +1,39 @@
+use std::str::FromStr;
+
 use crate::{
     server::Mempool,
     store::{AnyStore, BlockMeta},
     Timestamp,
 };
+use age::x25519::Identity;
 use elements::BlockHash;
 use tokio::sync::Mutex;
 
+use super::Error;
+
 pub struct State {
+    /// An asymmetric encryption key, the public key is used to optionally encrypt the descriptor field so that it's harder to leak it.
+    pub key: Identity,
+
     pub store: AnyStore,
     pub mempool: Mutex<Mempool>,
     pub blocks_hash_ts: Mutex<Vec<(BlockHash, Timestamp)>>, // TODO should be moved into the Store, but in memory for db
 }
 
 impl State {
+    pub fn new(store: AnyStore) -> Result<Self, Error> {
+        let key = match std::env::var("SERVER_KEY") {
+            Ok(s) => Identity::from_str(&s).map_err(|_| Error::CannotLoadEncryptionKey)?,
+            Err(_) => Identity::generate(),
+        };
+        Ok(State {
+            key,
+            store,
+            mempool: Mutex::new(Mempool::new()),
+            blocks_hash_ts: Mutex::new(Vec::new()),
+        })
+    }
+
     /// The tip of the blockchain, in other words the block with highest height
     /// It must be granted if returned tip is `Some(x)`, `self.block_hash_ts.get(x)` is some.
     pub async fn tip(&self) -> Option<u32> {

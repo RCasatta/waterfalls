@@ -62,6 +62,7 @@ pub enum Error {
     InvalidBlockHash,
     CannotFindBlockHeader,
     DBOpen,
+    CannotLoadEncryptionKey,
 }
 
 impl std::fmt::Display for Error {
@@ -102,11 +103,7 @@ pub async fn inner_main(
 
     let store = get_store(&args)?;
 
-    let state = Arc::new(State {
-        store,
-        mempool: Mutex::new(Mempool::new()),
-        blocks_hash_ts: Mutex::new(Vec::new()),
-    });
+    let state = Arc::new(State::new(store)?);
 
     {
         let state = state.clone();

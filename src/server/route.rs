@@ -40,6 +40,9 @@ pub async fn route(
 ) -> Result<Response<Full<Bytes>>, Error> {
     log::debug!("---> {req:?}");
     let res = match (req.method(), req.uri().path(), req.uri().query()) {
+        (&Method::GET, "/v1/server_key", None) => {
+            str_resp(state.key.to_public().to_string(), StatusCode::OK)
+        }
         (&Method::GET, "/v1/waterfalls", Some(query)) => {
             let inputs = parse_query(query)?;
             handle_waterfalls_req(state, &inputs, is_testnet).await
