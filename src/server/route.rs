@@ -24,7 +24,7 @@ use std::{
 use tokio::sync::Mutex;
 
 const GAP_LIMIT: u32 = 20;
-const MAX_BATCH: u32 = 50;
+const MAX_BATCH: u32 = 500; // TODO reduce to 50 and implement paging
 const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
 
 // needed endpoint to make this self-contained for testing, in prod they should probably be never hit cause proxied by nginx
