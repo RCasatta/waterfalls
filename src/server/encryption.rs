@@ -1,5 +1,5 @@
 use age::x25519::{Identity, Recipient};
-use base64::prelude::BASE64_STANDARD;
+use base64::prelude::BASE64_STANDARD_NO_PAD;
 use base64::Engine;
 use std::io::{Read, Write};
 
@@ -15,11 +15,11 @@ pub fn encrypt(plaintext: &str, recipient: Recipient) -> Result<String, Error> {
         .map_err(|_| Error::CannotEncrypt)?;
     writer.write_all(plaintext.as_ref()).unwrap();
     writer.finish().map_err(|_| Error::CannotEncrypt)?;
-    let result = BASE64_STANDARD.encode(encrypted);
+    let result = BASE64_STANDARD_NO_PAD.encode(encrypted);
     Ok(result)
 }
 pub fn decrypt(base64_encrypted: &str, key: &Identity) -> Result<String, Error> {
-    let encrypted = BASE64_STANDARD
+    let encrypted = BASE64_STANDARD_NO_PAD
         .decode(base64_encrypted)
         .map_err(|_| Error::CannotDecrypt)?;
 
