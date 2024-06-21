@@ -4,6 +4,7 @@ use crate::{
     store::Store,
     TxSeen, WaterfallRequest, WaterfallResponse,
 };
+use age::x25519::Identity;
 use elements::{
     encode::{serialize, serialize_hex},
     BlockHash, Txid,
@@ -22,6 +23,8 @@ use std::{
     time::Instant,
 };
 use tokio::sync::Mutex;
+
+use super::encryption;
 
 const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 500; // TODO reduce to 50 and implement paging
@@ -44,7 +47,7 @@ pub async fn route(
             str_resp(state.key.to_public().to_string(), StatusCode::OK)
         }
         (&Method::GET, "/v1/waterfalls", Some(query)) => {
-            let inputs = parse_query(query)?;
+            let inputs = parse_query(query, &state.key)?;
             handle_waterfalls_req(state, &inputs, is_testnet).await
         }
         (&Method::GET, "/blocks/tip/hash", None) => {
@@ -109,14 +112,14 @@ fn block_hash_resp(
     }
 }
 
-fn parse_query(query: &str) -> Result<WaterfallRequest, Error> {
+fn parse_query(query: &str, key: &Identity) -> Result<WaterfallRequest, Error> {
     let mut params = form_urlencoded::parse(query.as_bytes())
         .into_owned()
         .collect::<HashMap<String, String>>();
     let descriptor = params
         .remove("descriptor")
         .ok_or(Error::DescriptorFieldMandatory)?;
-    let descriptor = try_decrypt(&descriptor).unwrap_or(descriptor);
+    let descriptor = encryption::decrypt(&descriptor, key).unwrap_or(descriptor);
 
     let page = params
         .get("page")
@@ -124,10 +127,6 @@ fn parse_query(query: &str) -> Result<WaterfallRequest, Error> {
         .unwrap_or(0u16);
 
     Ok(WaterfallRequest { descriptor, page })
-}
-
-fn try_decrypt(_desc: &str) -> Result<String, Error> {
-    Err(Error::CannotDecrypt)
 }
 
 fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {

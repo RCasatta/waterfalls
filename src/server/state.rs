@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use crate::{
     server::Mempool,
     store::{AnyStore, BlockMeta},
@@ -21,11 +19,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(store: AnyStore) -> Result<Self, Error> {
-        let key = match std::env::var("SERVER_KEY") {
-            Ok(s) => Identity::from_str(&s).map_err(|_| Error::CannotLoadEncryptionKey)?,
-            Err(_) => Identity::generate(),
-        };
+    pub fn new(store: AnyStore, key: Identity) -> Result<Self, Error> {
         Ok(State {
             key,
             store,

@@ -10,12 +10,14 @@ use crate::store::memory::MemoryStore;
 use crate::store::AnyStore;
 use crate::threads::blocks::blocks_infallible;
 use crate::threads::mempool::mempool_sync_infallible;
+use age::x25519::Identity;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
+pub mod encryption;
 mod mempool;
 pub mod preload;
 pub mod route;
@@ -49,6 +51,11 @@ pub struct Arguments {
     #[cfg(feature = "db")]
     #[arg(long)]
     pub datadir: Option<std::path::PathBuf>,
+
+    /// An optional age server key to decrypt descriptor query string.
+    /// If not provided is randomly generated.
+    #[arg(long, env)]
+    pub server_key: Option<Identity>,
 }
 
 #[derive(Debug)]
@@ -64,6 +71,7 @@ pub enum Error {
     DBOpen,
     CannotLoadEncryptionKey,
     CannotDecrypt,
+    CannotEncrypt,
 }
 
 impl std::fmt::Display for Error {
@@ -104,7 +112,12 @@ pub async fn inner_main(
 
     let store = get_store(&args)?;
 
-    let state = Arc::new(State::new(store)?);
+    let key = args
+        .server_key
+        .clone()
+        .unwrap_or_else(|| Identity::generate());
+
+    let state = Arc::new(State::new(store, key)?);
 
     {
         let state = state.clone();
