@@ -116,12 +116,18 @@ fn parse_query(query: &str) -> Result<WaterfallRequest, Error> {
     let descriptor = params
         .remove("descriptor")
         .ok_or(Error::DescriptorFieldMandatory)?;
+    let descriptor = try_decrypt(&descriptor).unwrap_or(descriptor);
+
     let page = params
         .get("page")
         .map(|e| e.parse().unwrap_or(0))
         .unwrap_or(0u16);
 
     Ok(WaterfallRequest { descriptor, page })
+}
+
+fn try_decrypt(_desc: &str) -> Result<String, Error> {
+    Err(Error::CannotDecrypt)
 }
 
 fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {

@@ -63,6 +63,7 @@ pub enum Error {
     CannotFindBlockHeader,
     DBOpen,
     CannotLoadEncryptionKey,
+    CannotDecrypt,
 }
 
 impl std::fmt::Display for Error {
