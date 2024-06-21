@@ -10,6 +10,8 @@ use std::{
     str::FromStr,
 };
 
+use age::x25519::{Identity, Recipient};
+use anyhow::bail;
 use bitcoind::{bitcoincore_rpc::RpcApi, get_available_port, BitcoinD, Conf};
 use elements::{
     bitcoin::{Amount, Denomination},
@@ -26,6 +28,7 @@ pub struct TestEnv {
     tx: Sender<()>,
     client: WaterfallClient,
     base_url: String,
+    server_key: Identity,
 }
 
 #[cfg(feature = "db")]
@@ -56,6 +59,8 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
     let base_url = format!("http://{socket_addr}");
     args.listen = Some(socket_addr);
     args.testnet = true;
+    let server_key = Identity::generate();
+    args.server_key = Some(server_key.clone());
 
     #[cfg(feature = "db")]
     {
@@ -79,6 +84,7 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
         tx,
         client,
         base_url,
+        server_key,
     };
 
     test_env.node_generate(1).await;
@@ -119,6 +125,10 @@ impl TestEnv {
 
     pub fn client(&self) -> &WaterfallClient {
         &self.client
+    }
+
+    pub fn server_recipient(&self) -> Recipient {
+        self.server_key.to_public()
     }
 
     pub fn base_url(&self) -> &str {
@@ -249,5 +259,17 @@ impl WaterfallClient {
         let bytes = hex::decode(&text)?;
         let header = BlockHeader::consensus_decode(&bytes[..])?;
         Ok(header)
+    }
+
+    pub async fn server_recipient(&self) -> anyhow::Result<Recipient> {
+        let url = format!("{}/v1/server_recipient", self.base_url);
+        let response = self.client.get(&url).send().await?;
+        let status_code = response.status().as_u16();
+        if status_code != 200 {
+            bail!("server_recipient response is not 200 but: {}", status_code);
+        }
+        let text = response.text().await?;
+
+        Recipient::from_str(&text).or_else(|e| bail!("cannot parse recipient {}", e))
     }
 }

@@ -24,7 +24,7 @@ pub struct WaterfallRequest {
 }
 
 /// Response from the waterfalls endpoint
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct WaterfallResponse {
     pub txs_seen: std::collections::BTreeMap<String, Vec<Vec<TxSeen>>>,
     pub page: u16,

@@ -38,6 +38,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     use elements::{bitcoin::secp256k1, AddressParams};
     use elements_miniscript::{ConfidentialDescriptor, DescriptorPublicKey};
     use std::str::FromStr;
+    use waterfalls::server::encryption::encrypt;
     let secp = secp256k1::Secp256k1::new();
     let client = test_env.client();
 
@@ -86,6 +87,13 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert_eq!(first.height, 3);
     assert!(first.block_hash.is_some());
     assert!(first.block_timestamp.is_some());
+
+    // Try encrypted descriptor
+    let recipient = client.server_recipient().await.unwrap();
+    assert_eq!(recipient, test_env.server_recipient());
+    let encrypted_desc = encrypt(&bitcoin_desc, recipient).unwrap();
+    let result_from_encrypted = client.waterfalls(&encrypted_desc).await.unwrap();
+    assert_eq!(result, result_from_encrypted);
 
     test_env.shutdown().await;
     assert!(true);

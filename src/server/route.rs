@@ -43,7 +43,7 @@ pub async fn route(
 ) -> Result<Response<Full<Bytes>>, Error> {
     log::debug!("---> {req:?}");
     let res = match (req.method(), req.uri().path(), req.uri().query()) {
-        (&Method::GET, "/v1/server_key", None) => {
+        (&Method::GET, "/v1/server_recipient", None) => {
             str_resp(state.key.to_public().to_string(), StatusCode::OK)
         }
         (&Method::GET, "/v1/waterfalls", Some(query)) => {

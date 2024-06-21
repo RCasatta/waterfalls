@@ -37,7 +37,6 @@ pub fn decrypt(base64_encrypted: &str, key: &Identity) -> Result<String, Error> 
     let result = std::str::from_utf8(&decrypted)
         .map_err(|_| Error::CannotDecrypt)?
         .to_string();
-
     Ok(result)
 }
 
