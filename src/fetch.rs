@@ -4,7 +4,8 @@ use std::{
 };
 
 use elements::{
-    encode::Decodable, pset::serialize::Serialize, Block, BlockHash, Transaction, Txid,
+    encode::{serialize_hex, Decodable},
+    Block, BlockHash, Transaction, Txid,
 };
 use hyper::body::Buf;
 use serde::Deserialize;
@@ -148,11 +149,11 @@ impl Client {
         let url = format!("{}/tx", &self.esplora_url);
         log::info!("broadcasting to {}", url);
 
-        let tx_bytes = tx.serialize();
+        let tx_hex = serialize_hex(tx);
         let bytes = self
             .client
             .post(&url)
-            .body(tx_bytes)
+            .body(tx_hex)
             .send()
             .await?
             .bytes()

@@ -60,7 +60,11 @@ pub async fn route(
                 .await
                 .map_err(|e| Error::String(e.to_string()))?
                 .to_bytes();
-            let tx = Transaction::consensus_decode(&whole_body[..])
+            let result = std::str::from_utf8(&whole_body)
+                .map_err(|e| Error::String(e.to_string()))?
+                .to_string();
+            let tx_bytes = hex::decode(result).map_err(|e| Error::String(e.to_string()))?;
+            let tx = Transaction::consensus_decode(&tx_bytes[..])
                 .map_err(|e| Error::String(e.to_string()))?;
             client
                 .lock()
