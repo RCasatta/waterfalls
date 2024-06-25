@@ -139,10 +139,7 @@ impl Client {
     /// POST /tx
     ///
     /// Must use esplora because we can't broadcast using node's REST API
-    pub async fn broadcast(
-        &self,
-        tx: &Transaction,
-    ) -> Result<Txid, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn broadcast(&self, tx: &Transaction) -> Result<Txid, anyhow::Error> {
         // TODO this should use the node if use_esplora is false
         // but as written this is not possible by using only the REST API
         // but it needs to be done via rpc or p2p
@@ -154,8 +151,7 @@ impl Client {
         let status = response.status();
         let text = response.text().await?;
         if status != 200 {
-            log::warn!("Returning non 200, body is {}", text);
-            // TODO
+            anyhow::bail!("Returning non 200, body is {}", text);
         }
         let txid = Txid::from_str(&text)?;
         assert_eq!(txid, tx.txid());
