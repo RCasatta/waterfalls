@@ -142,7 +142,7 @@ impl Client {
     pub async fn broadcast(
         &self,
         tx: &Transaction,
-    ) -> Result<Transaction, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Txid, Box<dyn std::error::Error + Send + Sync>> {
         // TODO this should use the node if use_esplora is false
         // but as written this is not possible by using only the REST API
         // but it needs to be done via rpc or p2p
@@ -159,8 +159,10 @@ impl Client {
             .bytes()
             .await?;
 
-        let tx = Transaction::consensus_decode(bytes.as_ref())?;
-        Ok(tx)
+        let result = std::str::from_utf8(&bytes)?;
+        let txid = Txid::from_str(result)?;
+        assert_eq!(txid, tx.txid());
+        Ok(txid)
     }
 
     pub(crate) async fn block_or_wait(&self, block_hash: BlockHash) -> Block {
