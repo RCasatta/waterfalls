@@ -58,16 +58,16 @@ pub async fn route(
             let whole_body = req
                 .collect()
                 .await
-                .map_err(|_| Error::InvalidTx)?
+                .map_err(|e| Error::String(e.to_string()))?
                 .to_bytes();
-            let tx =
-                Transaction::consensus_decode(&whole_body[..]).map_err(|_| Error::InvalidTx)?;
+            let tx = Transaction::consensus_decode(&whole_body[..])
+                .map_err(|e| Error::String(e.to_string()))?;
             client
                 .lock()
                 .await
                 .broadcast(&tx)
                 .await
-                .map_err(|_| Error::InvalidTx)?;
+                .map_err(|e| Error::String(e.to_string()))?;
             str_resp(tx.txid().to_string(), StatusCode::OK)
         }
         (&Method::GET, path, None) => {

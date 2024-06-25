@@ -146,6 +146,7 @@ impl Client {
         // but as written this is not possible by using only the REST API
         // but it needs to be done via rpc or p2p
         let url = format!("{}/tx", &self.esplora_url);
+        log::info!("broadcasting to {}", url);
 
         let tx_bytes = tx.serialize();
         let bytes = self

@@ -73,6 +73,7 @@ pub enum Error {
     CannotDecrypt,
     CannotEncrypt,
     InvalidTx,
+    String(String),
 }
 
 impl std::fmt::Display for Error {
