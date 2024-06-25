@@ -3,7 +3,9 @@ use std::{
     str::FromStr,
 };
 
-use elements::{encode::Decodable, Block, BlockHash, Transaction, Txid};
+use elements::{
+    encode::Decodable, pset::serialize::Serialize, Block, BlockHash, Transaction, Txid,
+};
 use hyper::body::Buf;
 use serde::Deserialize;
 use tokio::time::sleep;
@@ -14,6 +16,9 @@ pub struct Client {
     client: reqwest::Client,
     use_esplora: bool,
     base_url: String,
+
+    /// even when `use_esplora` is false we use this for broadcasting because local node doesn't expose broadcasting via REST interface
+    esplora_url: String,
 }
 
 const BS: &str = "https://blockstream.info";
@@ -21,14 +26,18 @@ const LOCAL: &str = "http://127.0.0.1";
 
 impl Client {
     pub fn new(args: &Arguments) -> Client {
+        let esplora_url = if args.testnet {
+            args.esplora_url
+                .clone()
+                .unwrap_or(format!("{BS}/liquidtestnet/api"))
+        } else {
+            args.esplora_url
+                .clone()
+                .unwrap_or(format!("{BS}/liquid/api"))
+        };
         let use_esplora = args.use_esplora;
         let base_url = if use_esplora {
-            let esplora_url = args.esplora_url.clone();
-            if args.testnet {
-                esplora_url.unwrap_or(format!("{BS}/liquidtestnet/api"))
-            } else {
-                esplora_url.unwrap_or(format!("{BS}/liquid/api"))
-            }
+            esplora_url.clone()
         } else {
             let node_url = args.node_url.clone();
             if args.testnet {
@@ -42,6 +51,7 @@ impl Client {
             client: reqwest::Client::new(),
             use_esplora,
             base_url,
+            esplora_url,
         }
     }
 
@@ -120,6 +130,32 @@ impl Client {
         };
 
         let bytes = self.client.get(&url).send().await?.bytes().await?;
+
+        let tx = Transaction::consensus_decode(bytes.as_ref())?;
+        Ok(tx)
+    }
+
+    /// POST /tx
+    ///
+    /// Must use esplora because we can't broadcast using node's REST API
+    pub async fn broadcast(
+        &self,
+        tx: &Transaction,
+    ) -> Result<Transaction, Box<dyn std::error::Error + Send + Sync>> {
+        // TODO this should use the node if use_esplora is false
+        // but as written this is not possible by using only the REST API
+        // but it needs to be done via rpc or p2p
+        let url = format!("{}/tx", &self.esplora_url);
+
+        let tx_bytes = tx.serialize();
+        let bytes = self
+            .client
+            .post(&url)
+            .body(tx_bytes)
+            .send()
+            .await?
+            .bytes()
+            .await?;
 
         let tx = Transaction::consensus_decode(bytes.as_ref())?;
         Ok(tx)

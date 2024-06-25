@@ -72,6 +72,7 @@ pub enum Error {
     CannotLoadEncryptionKey,
     CannotDecrypt,
     CannotEncrypt,
+    InvalidTx,
 }
 
 impl std::fmt::Display for Error {

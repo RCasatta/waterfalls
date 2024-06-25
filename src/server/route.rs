@@ -6,11 +6,11 @@ use crate::{
 };
 use age::x25519::Identity;
 use elements::{
-    encode::{serialize, serialize_hex},
-    BlockHash, Txid,
+    encode::{serialize, serialize_hex, Decodable},
+    BlockHash, Transaction, Txid,
 };
 use elements_miniscript::DescriptorPublicKey;
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::{
     body::{Bytes, Incoming},
     header::{CACHE_CONTROL, CONTENT_TYPE},
@@ -53,6 +53,22 @@ pub async fn route(
         (&Method::GET, "/blocks/tip/hash", None) => {
             let block_hash = state.tip_hash().await;
             block_hash_resp(block_hash)
+        }
+        (&Method::POST, "/tx", None) => {
+            let whole_body = req
+                .collect()
+                .await
+                .map_err(|_| Error::InvalidTx)?
+                .to_bytes();
+            let tx =
+                Transaction::consensus_decode(&whole_body[..]).map_err(|_| Error::InvalidTx)?;
+            client
+                .lock()
+                .await
+                .broadcast(&tx)
+                .await
+                .map_err(|_| Error::InvalidTx)?;
+            str_resp(tx.txid().to_string(), StatusCode::OK)
         }
         (&Method::GET, path, None) => {
             let mut s = path.split('/');
