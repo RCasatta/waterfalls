@@ -185,6 +185,11 @@ impl WaterfallClient {
         let client = reqwest::Client::new();
         Self { client, base_url }
     }
+
+    /// Call the waterfalls endpoint
+    ///
+    /// it can accept the bitcoin descriptor part of the ct descriptor in plaintext
+    /// or encrypted with the server key
     pub async fn waterfalls(&self, desc: &str) -> anyhow::Result<WaterfallResponse> {
         let descriptor_url = format!("{}/v1/waterfalls", self.base_url);
 
