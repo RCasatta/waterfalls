@@ -150,17 +150,14 @@ impl Client {
         log::info!("broadcasting to {}", url);
 
         let tx_hex = serialize_hex(tx);
-        let bytes = self
-            .client
-            .post(&url)
-            .body(tx_hex)
-            .send()
-            .await?
-            .bytes()
-            .await?;
-
-        let result = std::str::from_utf8(&bytes)?;
-        let txid = Txid::from_str(result)?;
+        let response = self.client.post(&url).body(tx_hex).send().await?;
+        let status = response.status();
+        let text = response.text().await?;
+        if status != 200 {
+            log::warn!("Returning non 200, body is {}", text);
+            // TODO
+        }
+        let txid = Txid::from_str(&text)?;
         assert_eq!(txid, tx.txid());
         Ok(txid)
     }
