@@ -7,7 +7,7 @@ use crate::{
 use age::x25519::Identity;
 use elements::{
     encode::{serialize, serialize_hex, Decodable},
-    BlockHash, Transaction, Txid,
+    Address, AddressParams, BlockHash, Transaction, Txid,
 };
 use elements_miniscript::DescriptorPublicKey;
 use http_body_util::{BodyExt, Full};
@@ -82,6 +82,13 @@ pub async fn route(
                     let block_hash = state.block_hash(height).await;
                     block_hash_resp(block_hash)
                 }
+                //address/ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh/txs
+                (Some(""), Some("address"), Some(addr), Some("txs"), None) => {
+                    let addr = Address::from_str(addr).map_err(|_| Error::InvalidAddress)?;
+
+                    handle_single_address(&state, &addr, is_testnet).await
+                }
+
                 (Some(""), Some("tx"), Some(v), Some("raw"), None) => {
                     let txid = Txid::from_str(v).map_err(|_| Error::InvalidTxid)?;
                     let tx = client
@@ -168,6 +175,46 @@ fn any_resp(
     Ok(builder
         .body(Full::new(bytes.into()))
         .map_err(|_| Error::Other)?)
+}
+
+async fn handle_single_address(
+    state: &Arc<State>,
+    address: &Address,
+    is_testnet: bool,
+) -> Result<Response<Full<Bytes>>, Error> {
+    if is_testnet && address.params == &AddressParams::LIQUID {
+        return Err(Error::WrongNetwork);
+    }
+    if !is_testnet && address.params != &AddressParams::LIQUID {
+        return Err(Error::WrongNetwork);
+    }
+    let db = &state.store;
+    let script_pubkey = address.script_pubkey();
+
+    let script_hash = [db.hash(&script_pubkey)];
+    let mut seen_blockchain = db.get_history(&script_hash).unwrap().remove(0);
+    let seen_mempool = state.mempool.lock().await.seen(&script_hash).remove(0);
+    seen_blockchain.extend(seen_mempool.iter().map(|txid| TxSeen::mempool(*txid)));
+
+    {
+        let blocks_hash_ts = state.blocks_hash_ts.lock().await;
+        for tx_seen in seen_blockchain.iter_mut() {
+            if tx_seen.height > 0 {
+                if let Some((block_hash, _)) = blocks_hash_ts.get(tx_seen.height as usize) {
+                    tx_seen.block_hash = Some(*block_hash)
+                }
+            }
+        }
+    }
+
+    let result = serde_json::to_string(&seen_blockchain).unwrap();
+
+    any_resp(
+        result.into_bytes(),
+        hyper::StatusCode::OK,
+        Some("application/json"),
+        Some(5),
+    )
 }
 
 async fn handle_waterfalls_req(

@@ -74,6 +74,7 @@ pub enum Error {
     CannotEncrypt,
     InvalidTx,
     String(String),
+    InvalidAddress,
 }
 
 impl std::fmt::Display for Error {
