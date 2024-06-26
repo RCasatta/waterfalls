@@ -16,6 +16,7 @@ use hyper::{
     header::{CACHE_CONTROL, CONTENT_TYPE},
     Method, Request, Response, StatusCode,
 };
+use serde::Serialize;
 use std::{
     collections::{BTreeMap, HashMap},
     str::FromStr,
@@ -182,6 +183,18 @@ async fn handle_single_address(
     address: &Address,
     is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
+    #[derive(Serialize)]
+    struct EsploraTx {
+        txid: elements::Txid,
+        status: Status,
+    }
+
+    #[derive(Serialize)]
+    struct Status {
+        block_height: Option<i32>,
+        block_hash: Option<BlockHash>,
+    }
+
     if is_testnet && address.params == &AddressParams::LIQUID {
         return Err(Error::WrongNetwork);
     }
@@ -192,22 +205,43 @@ async fn handle_single_address(
     let script_pubkey = address.script_pubkey();
 
     let script_hash = [db.hash(&script_pubkey)];
-    let mut seen_blockchain = db.get_history(&script_hash).unwrap().remove(0);
+    let mut result: Vec<_> = db
+        .get_history(&script_hash)
+        .unwrap()
+        .remove(0)
+        .iter()
+        .map(|e| EsploraTx {
+            txid: e.txid,
+            status: Status {
+                block_height: Some(e.height as i32),
+                block_hash: None,
+            },
+        })
+        .collect();
+
     let seen_mempool = state.mempool.lock().await.seen(&script_hash).remove(0);
-    seen_blockchain.extend(seen_mempool.iter().map(|txid| TxSeen::mempool(*txid)));
+    result.extend(seen_mempool.iter().map(|e| EsploraTx {
+        txid: *e,
+        status: Status {
+            block_height: Some(-1),
+            block_hash: None,
+        },
+    }));
 
     {
         let blocks_hash_ts = state.blocks_hash_ts.lock().await;
-        for tx_seen in seen_blockchain.iter_mut() {
-            if tx_seen.height > 0 {
-                if let Some((block_hash, _)) = blocks_hash_ts.get(tx_seen.height as usize) {
-                    tx_seen.block_hash = Some(*block_hash)
+        for esplora_tx in result.iter_mut() {
+            if let Some(h) = esplora_tx.status.block_height {
+                if h > 0 {
+                    if let Some((block_hash, _)) = blocks_hash_ts.get(h as usize) {
+                        esplora_tx.status.block_hash = Some(*block_hash)
+                    }
                 }
             }
         }
     }
 
-    let result = serde_json::to_string(&seen_blockchain).unwrap();
+    let result = serde_json::to_string(&result).unwrap();
 
     any_resp(
         result.into_bytes(),

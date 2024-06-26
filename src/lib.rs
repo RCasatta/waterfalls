@@ -50,7 +50,11 @@ impl WaterfallResponse {
 pub struct TxSeen {
     pub txid: Txid,
     pub height: Height,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub block_hash: Option<BlockHash>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub block_timestamp: Option<Timestamp>,
 }
 impl TxSeen {
