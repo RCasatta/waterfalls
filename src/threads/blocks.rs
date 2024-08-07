@@ -43,7 +43,7 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
             txs_count += 1;
             let txid = tx.txid();
             for (j, output) in tx.output.iter().enumerate() {
-                if output.is_null_data() || output.is_fee() {
+                if output.is_null_data() || output.is_fee() || output.script_pubkey.is_empty() {
                     continue;
                 }
                 let script_hash = db.hash(&output.script_pubkey);
