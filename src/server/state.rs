@@ -39,6 +39,11 @@ impl State {
         blocks_hash_ts.last().map(|e| e.0)
     }
 
+    pub async fn tip_timestamp(&self) -> Option<Timestamp> {
+        let blocks_hash_ts = self.blocks_hash_ts.lock().await;
+        blocks_hash_ts.last().map(|e| e.1)
+    }
+
     pub async fn block_hash(&self, height: u32) -> Option<BlockHash> {
         let blocks_hash_ts = self.blocks_hash_ts.lock().await;
         blocks_hash_ts.get(height as usize).map(|e| e.0)

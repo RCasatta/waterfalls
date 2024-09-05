@@ -21,7 +21,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     str::FromStr,
     sync::Arc,
-    time::Instant,
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::Mutex;
 
@@ -50,6 +50,24 @@ pub async fn route(
         (&Method::GET, "/v1/waterfalls", Some(query)) => {
             let inputs = parse_query(query, &state.key)?;
             handle_waterfalls_req(state, &inputs, is_testnet).await
+        }
+        (&Method::GET, "/v1/time_since_last_block", None) => {
+            let ts = state.tip_timestamp().await;
+            let s = match ts {
+                Some(ts) => {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map_err(|e| Error::String(e.to_string()))?;
+                    let delta = now.as_secs().saturating_sub(ts as u64);
+                    if delta > 600 {
+                        "more than 10 minutes"
+                    } else {
+                        "less than 10 minutes"
+                    }
+                }
+                None => "unknown",
+            };
+            str_resp(s.to_string(), StatusCode::OK)
         }
         (&Method::GET, "/blocks/tip/hash", None) => {
             let block_hash = state.tip_hash().await;
