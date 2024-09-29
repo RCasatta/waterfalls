@@ -38,6 +38,14 @@ Txs | First         | Following
  80 | 22s (85 reqs) | 1s (5 reqs)
   3 | 2s (11 reqs)  | 1s (5 reqs)
 
+## Bench
+
+`criterion` is used and nightly is not needed for benching, just do:
+
+```
+cargo bench
+```
+
 
 ## ADR
 

@@ -35,9 +35,14 @@ base64 = "0.21"
 
 
 [dev-dependencies]
+criterion = "0.5.1"
 tempfile = "3.10.1"
 
 [features]
 default = ["test_env", "db"]
 db = ["rocksdb"]
 test_env = ["bitcoind"]
+
+[[bench]]
+name = "benches"
+harness = false
