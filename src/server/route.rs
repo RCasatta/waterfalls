@@ -16,6 +16,7 @@ use hyper::{
     header::{CACHE_CONTROL, CONTENT_TYPE},
     Method, Request, Response, StatusCode,
 };
+use prometheus::Encoder;
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -93,6 +94,16 @@ pub async fn route(
                 .map_err(|e| Error::String(e.to_string()))?;
             str_resp(tx.txid().to_string(), StatusCode::OK)
         }
+        (&Method::GET, "/metrics", None) => {
+            let encoder = prometheus::TextEncoder::new();
+
+            let metric_families = prometheus::gather();
+            let mut buffer = vec![];
+            encoder
+                .encode(&metric_families, &mut buffer)
+                .map_err(|e| Error::String(format!("{e:?}")))?;
+            any_resp(buffer, StatusCode::OK, Some("text/plain"), Some(5))
+        }
         (&Method::GET, path, None) => {
             let mut s = path.split('/');
             match (s.next(), s.next(), s.next(), s.next(), s.next()) {
@@ -143,6 +154,7 @@ pub async fn route(
                 _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),
             }
         }
+
         _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),
     };
     log::debug!("<--- {res:?}");
@@ -277,6 +289,12 @@ async fn handle_waterfalls_req(
     let desc_str = &inputs.descriptor;
     let db = &state.store;
     let start = Instant::now();
+
+    // TODO add label with batches?
+    let timer = crate::WATERFALLS_HISTOGRAM
+        .with_label_values(&["all"])
+        .start_timer();
+
     match desc_str.parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>() {
         Ok(desc) => {
             if is_testnet == desc_str.contains("xpub") {
@@ -340,6 +358,8 @@ async fn handle_waterfalls_req(
                 "returning: {elements} elements, elapsed: {}ms",
                 start.elapsed().as_millis()
             );
+            crate::WATERFALLS_COUNTER.inc();
+            timer.observe_duration();
             any_resp(
                 result.into_bytes(),
                 hyper::StatusCode::OK,

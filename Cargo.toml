@@ -32,6 +32,8 @@ form_urlencoded = "1.2.1"
 bitcoind = { version = "0.36", optional = true } # it's used instead of elementsd because we don't use autodownload, neither validatepegin and we also have to specify custom args (rest=1)
 age = { version = "0.10.0", features = ["armor"] }
 base64 = "0.21"
+prometheus = { version = "0.13.4", features = ["process"] }
+lazy_static = "1.5.0"
 
 
 [dev-dependencies]

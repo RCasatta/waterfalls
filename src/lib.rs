@@ -1,4 +1,6 @@
 use elements::{BlockHash, Txid};
+use lazy_static::lazy_static;
+use prometheus::{labels, opts, register_counter, register_histogram_vec, Counter, HistogramVec};
 use serde::{Deserialize, Serialize};
 
 mod fetch;
@@ -70,4 +72,19 @@ impl TxSeen {
     pub fn mempool(txid: Txid) -> TxSeen {
         TxSeen::new(txid, 0)
     }
+}
+
+lazy_static! {
+    pub(crate) static ref WATERFALLS_COUNTER: Counter = register_counter!(opts!(
+        "waterfalls_requests_total",
+        "Number of waterfalls requests made.",
+        labels! {"handler" => "all",}
+    ))
+    .unwrap();
+    pub(crate) static ref WATERFALLS_HISTOGRAM: HistogramVec = register_histogram_vec!(
+        "waterfalls_request_duration_seconds",
+        "The waterfalls request latencies in seconds.",
+        &["handler"]
+    )
+    .unwrap();
 }
