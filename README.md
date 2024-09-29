@@ -4,9 +4,7 @@
 
 Waterfall is a proposed new scanning mechanism for web light-clients wallets that leverages a new server endpoint.
 
-## Current client
-
-Currently used in https://liquidwebwallet.org/
+## Old client
 
 Due to browser limitations the web wallet must use HTTP esplora API. 
 
@@ -23,7 +21,7 @@ Txs | First          | Following
 
 ## New client
 
-Currently available at https://liquidwebwallet.org/waterfalls
+Currently used at https://liquidwebwallet.org
 
 The new waterfalls client avoids multiple requests by sending the bitcoin descriptor to the server.
 This has privacy implications, but we argue it's not that different than sending all of our addresses separately to the server. Specifically in the latter case we are not sending the knowledge of future addresses that are derivable from the descriptor in the former case. The real privacy gain is moving to a self-hosted server or to a personal node.
@@ -49,7 +47,7 @@ cargo bench
 
 ## ADR
 
-* The endpoint is GET, allowing requests to be cached for a minimum amount of time (even 5s) to prevent DOS. GET endpoint requires extra care for privacy and must be performed only via HTTPS and the server must not save server logs.
+* The endpoint is GET, allowing requests to be cached for a minimum amount of time (even 5s) to prevent DOS. It's possible to encrypt the descriptor with the server key. The server is going to know it anyway, but it's a measure to minimize the probability to have it in server and browser logs.
 * Instead of developing the new endpoint in electrs, a separate executable has been created for this reasons:
     * speed of development (we may decide to do it in electrs in the future)
     * specific data model for the needed endpoint that doesn't fit in the current electrs data model. In particular:
