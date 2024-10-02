@@ -7,6 +7,8 @@
 #[cfg(feature = "test_env")]
 #[tokio::test]
 async fn integration_memory() {
+    let _ = env_logger::try_init();
+
     let test_env = launch_memory().await;
     do_test(test_env).await;
 }
@@ -14,6 +16,8 @@ async fn integration_memory() {
 #[cfg(all(feature = "test_env", feature = "db"))]
 #[tokio::test]
 async fn integration_db() {
+    let _ = env_logger::try_init();
+
     let tempdir = tempfile::TempDir::new().unwrap();
     let path = tempdir.path().to_path_buf();
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
@@ -94,6 +98,15 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let encrypted_desc = encrypt(&bitcoin_desc, recipient).unwrap();
     let result_from_encrypted = client.waterfalls(&encrypted_desc).await.unwrap();
     assert_eq!(result, result_from_encrypted);
+
+    // Test broadcast is working
+    let unspent = test_env.list_unspent();
+    assert_eq!(unspent.len(), 1);
+    let tx_unblind = test_env.create_self_transanction();
+    let tx_blind = test_env.blind_raw_transanction(&tx_unblind);
+    let tx_sign = test_env.sign_raw_transanction_with_wallet(&tx_blind);
+    let txid = client.broadcast(&tx_sign).await.unwrap();
+    assert_eq!(txid, tx_blind.txid());
 
     test_env.shutdown().await;
     assert!(true);

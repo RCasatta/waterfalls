@@ -12,12 +12,16 @@ use std::{
 
 use age::x25519::{Identity, Recipient};
 use anyhow::bail;
-use bitcoind::{bitcoincore_rpc::RpcApi, get_available_port, BitcoinD, Conf};
+use bitcoind::{
+    bitcoincore_rpc::{bitcoin::hex::FromHex, RpcApi},
+    get_available_port, BitcoinD, Conf,
+};
 use elements::{
     bitcoin::{Amount, Denomination},
-    encode::Decodable,
+    encode::{serialize_hex, Decodable},
     Address, BlockHash, BlockHeader, Txid,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::oneshot::{self, Receiver, Sender};
 
@@ -172,10 +176,75 @@ impl TestEnv {
             .await
             .unwrap();
     }
+
+    pub fn list_unspent(&self) -> Vec<Input> {
+        let val = self.elementsd.client.call("listunspent", &[]).unwrap();
+        serde_json::from_value(val).unwrap()
+    }
+
+    pub fn create_self_transanction(&self) -> elements::Transaction {
+        let inputs = self.list_unspent();
+        let inputs_sum: f64 = inputs.iter().map(|i| i.amount).sum();
+        let change = self.get_new_address(None);
+        let fee = 0.00001000;
+        let to_send = inputs_sum - fee;
+
+        let param1 = serde_json::to_value(inputs).unwrap();
+        let param2 = serde_json::json!([{change.to_string(): to_send},{"fee": fee}]);
+
+        let val = self
+            .elementsd
+            .client
+            .call::<Value>("createrawtransaction", &[param1, param2])
+            .unwrap();
+        let tx_hex = val.as_str().unwrap();
+        let bytes = Vec::<u8>::from_hex(&tx_hex).unwrap();
+        elements::Transaction::consensus_decode(&bytes[..]).unwrap()
+    }
+
+    pub fn blind_raw_transanction(&self, tx: &elements::Transaction) -> elements::Transaction {
+        let hex = serialize_hex(tx);
+        let val = self
+            .elementsd
+            .client
+            .call::<Value>(
+                "blindrawtransaction",
+                &[serde_json::Value::String(hex), false.into()],
+            )
+            .unwrap();
+        let tx_hex = val.as_str().unwrap();
+        let bytes = Vec::<u8>::from_hex(&tx_hex).unwrap();
+        elements::Transaction::consensus_decode(&bytes[..]).unwrap()
+    }
+
+    pub fn sign_raw_transanction_with_wallet(
+        &self,
+        tx: &elements::Transaction,
+    ) -> elements::Transaction {
+        let hex = serialize_hex(tx);
+        let val = self
+            .elementsd
+            .client
+            .call::<Value>(
+                "signrawtransactionwithwallet",
+                &[serde_json::Value::String(hex)],
+            )
+            .unwrap();
+        let tx_hex = val.get("hex").unwrap().as_str().unwrap();
+        let bytes = Vec::<u8>::from_hex(&tx_hex).unwrap();
+        elements::Transaction::consensus_decode(&bytes[..]).unwrap()
+    }
 }
 
 async fn shutdown_signal(rx: Receiver<()>) {
     rx.await.unwrap()
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Input {
+    pub txid: String,
+    pub vout: u32,
+    pub amount: f64,
 }
 
 pub struct WaterfallClient {
@@ -279,5 +348,14 @@ impl WaterfallClient {
         let text = response.text().await?;
 
         Recipient::from_str(&text).or_else(|e| bail!("cannot parse recipient {}", e))
+    }
+
+    pub async fn broadcast(&self, tx: &elements::Transaction) -> anyhow::Result<Txid> {
+        let url = format!("{}/tx", self.base_url);
+        let tx_hex = serialize_hex(tx);
+        let response = self.client.post(&url).body(tx_hex).send().await?;
+        let text = response.text().await?;
+        let txid = Txid::from_str(&text)?;
+        Ok(txid)
     }
 }
