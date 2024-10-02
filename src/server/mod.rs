@@ -191,7 +191,7 @@ pub async fn inner_main(
             },
 
             _ = &mut signal => {
-                log::error!("graceful shutdown signal received");
+                log::info!("graceful shutdown signal received");
                 // stop the accept loop
                 break;
             }
