@@ -7,9 +7,7 @@ async fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let args = Arguments::parse();
 
-    if let Err(e) = inner_main(args, shutdown_signal()).await {
-        log::error!("{:?}", e);
-    }
+    inner_main(args, shutdown_signal()).await.unwrap(); // we want to panic in case of error so that the process exit with non-zero value
 }
 
 async fn shutdown_signal() {
