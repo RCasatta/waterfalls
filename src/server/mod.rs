@@ -61,6 +61,7 @@ pub struct Arguments {
     ///
     /// RPC connection is needed for broadcasting transaction via the `sendrawtransaction` call which is not present in the REST interface.
     /// It's an error if `use_esplora` is false and this is missing.
+    #[arg(long, env)]
     pub rpc_user_password: Option<String>,
 }
 
