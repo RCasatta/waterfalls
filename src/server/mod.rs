@@ -56,6 +56,24 @@ pub struct Arguments {
     /// If not provided is randomly generated.
     #[arg(long, env)]
     pub server_key: Option<Identity>,
+
+    /// Elements node rpc user and password, separated by ':' (same as the content of the cookie file)
+    ///
+    /// RPC connection is needed for broadcasting transaction via the `sendrawtransaction` call which is not present in the REST interface.
+    /// It's an error if `use_esplora` is false and this is missing.
+    pub rpc_user_password: Option<String>,
+}
+
+impl Arguments {
+    pub fn is_valid(&self) -> Result<(), Error> {
+        if !self.use_esplora && self.rpc_user_password.is_none() {
+            Err(Error::String(
+                "When using the node you must specify user and password".to_string(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -111,6 +129,8 @@ pub async fn inner_main(
     args: Arguments,
     shutdown_signal: impl Future<Output = ()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    args.is_valid()?;
+
     // TODO test rest connection to the node
 
     let store = get_store(&args)?;

@@ -62,6 +62,9 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
     let server_key = Identity::generate();
     args.server_key = Some(server_key.clone());
 
+    let cookie = std::fs::read_to_string(&elementsd.params.cookie_file).unwrap();
+    args.rpc_user_password = Some(cookie);
+
     #[cfg(feature = "db")]
     {
         args.datadir = path;

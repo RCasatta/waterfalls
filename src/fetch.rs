@@ -3,12 +3,14 @@ use std::{
     str::FromStr,
 };
 
+use anyhow::anyhow;
 use elements::{
     encode::{serialize_hex, Decodable},
     Block, BlockHash, Transaction, Txid,
 };
 use hyper::body::Buf;
 use serde::Deserialize;
+use serde_json::json;
 use tokio::time::sleep;
 
 use crate::server::Arguments;
@@ -20,6 +22,8 @@ pub struct Client {
 
     /// even when `use_esplora` is false we use this for broadcasting because local node doesn't expose broadcasting via REST interface
     esplora_url: String,
+
+    rpc_user_password: Option<String>,
 }
 
 const BS: &str = "https://blockstream.info";
@@ -53,6 +57,7 @@ impl Client {
             use_esplora,
             base_url,
             esplora_url,
+            rpc_user_password: args.rpc_user_password.clone(),
         }
     }
 
@@ -140,20 +145,47 @@ impl Client {
     ///
     /// Must use esplora because we can't broadcast using node's REST API
     pub async fn broadcast(&self, tx: &Transaction) -> Result<Txid, anyhow::Error> {
-        // TODO this should use the node if use_esplora is false
-        // but as written this is not possible by using only the REST API
-        // but it needs to be done via rpc or p2p
-        let url = format!("{}/tx", &self.esplora_url);
-        log::info!("broadcasting to {}", url);
-
         let tx_hex = serialize_hex(tx);
-        let response = self.client.post(&url).body(tx_hex).send().await?;
+
+        let response = if self.use_esplora {
+            let url = format!("{}/tx", &self.esplora_url);
+            log::info!("broadcasting to {}", url);
+
+            self.client.post(&url).body(tx_hex).send().await?
+        } else {
+            let rpc_auth = self
+                .rpc_user_password
+                .as_ref()
+                .expect("validated by Arguments");
+            let url = self
+                .base_url
+                .replace("http://", &format!("http://{rpc_auth}@",));
+            log::info!("broadcasting to url {url}");
+
+            let data = json!({
+                "jsonrpc":"1.0",
+                "id": tx.txid(),
+                "method": "sendrawtransaction",
+                "params": [tx_hex],
+            });
+            log::trace!("data {data:?}");
+            let data = serde_json::to_string(&data)?;
+
+            self.client.post(&url).body(data).send().await?
+        };
         let status = response.status();
         let text = response.text().await?;
         if status != 200 {
             anyhow::bail!("Returning non 200, body is {}", text);
         }
-        let txid = Txid::from_str(&text)?;
+        let value: serde_json::Value = serde_json::from_str(&text)?;
+        let txid_text = value
+            .get("result")
+            .ok_or(anyhow!("unexpected json without result"))?
+            .as_str()
+            .ok_or(anyhow!("unexpected non-string result"))?;
+
+        let txid = Txid::from_str(&txid_text)?;
         assert_eq!(txid, tx.txid());
         Ok(txid)
     }
