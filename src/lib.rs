@@ -1,3 +1,5 @@
+use std::hash::Hasher;
+
 use elements::{BlockHash, Txid};
 use lazy_static::lazy_static;
 use prometheus::{labels, opts, register_counter, register_histogram_vec, Counter, HistogramVec};
@@ -87,4 +89,10 @@ lazy_static! {
         &["handler"]
     )
     .unwrap();
+}
+
+fn hash_str(s: &str) -> u64 {
+    let mut hasher = fxhash::FxHasher::default();
+    hasher.write(s.as_bytes());
+    hasher.finish()
 }

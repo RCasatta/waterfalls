@@ -1,5 +1,6 @@
 use crate::{
     fetch::Client,
+    hash_str,
     server::{Error, State},
     store::Store,
     TxSeen, WaterfallRequest, WaterfallResponse,
@@ -353,9 +354,12 @@ async fn handle_waterfalls_req(
                 txs_seen: map,
                 page: inputs.page,
             })
-            .unwrap();
+            .expect("does not contain a map with non-string keys");
+
+            let desc_hash = hash_str(desc_str);
+
             log::info!(
-                "returning: {elements} elements, elapsed: {}ms",
+                "returning: {elements} elements for #{desc_hash}, elapsed: {}ms",
                 start.elapsed().as_millis()
             );
             crate::WATERFALLS_COUNTER.inc();
