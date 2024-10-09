@@ -22,12 +22,15 @@ pub struct DBStore {
     salt: u64,
 }
 
-const UTXO_CF: &str = "utxo"; // OutPoint -> ScriptHash
+const UTXO_CF: &str = "utxo"; // OutPoint -> ScriptHash // this is needed for index building, not used on waterfall request
+
+// TODO this can become ScriptHash -> Vec<(u32, Height)>  with another table Txid -> u32 would save on space but require 2 db access with multiget versus current 1
 const HISTORY_CF: &str = "history"; // ScriptHash -> Vec<(Txid, Height)>
+
 const OTHER_CF: &str = "other";
 
 // when height exists, it also mean the indexing happened up to that height included
-const HASHES_CF: &str = "hashesv2"; // Height -> (BlockHash, Timestamp)
+const HASHES_CF: &str = "hashesv2"; // Height -> (BlockHash, Timestamp) // This is used on startup to load data into memory, not used on waterfall request
 
 const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF];
 
