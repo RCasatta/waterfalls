@@ -176,7 +176,7 @@ impl Client {
         let status = response.status();
         let text = response.text().await?;
         if status != 200 {
-            anyhow::bail!("Returning non 200, body is {}", text);
+            anyhow::bail!("Returning ({status}) not 200, body is {text}");
         }
         let value: serde_json::Value = serde_json::from_str(&text)?;
         let txid_text = value
