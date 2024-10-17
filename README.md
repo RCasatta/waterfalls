@@ -44,6 +44,13 @@ Txs | First         | Following
 cargo bench
 ```
 
+## Curl
+
+Try with curl
+
+```
+curl -s "https://waterfalls.liquidwebwallet.org/liquid/api/v1/waterfalls?descriptor=$(urlencode 'elwpkh(xpub6BemYiVNp19a1eGXYz87DQAbhWRj1UFE3PMz5YJMcvcyneZdLz7a69zDfq4cVFjYs6dxKhsngEnuwo5mbhoMFA8iVTK45sKcmFNwzupPtVC/<0;1>/*)')" | jq
+```
 
 ## ADR
 
