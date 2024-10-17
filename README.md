@@ -52,6 +52,12 @@ Try with curl
 curl -s "https://waterfalls.liquidwebwallet.org/liquid/api/v1/waterfalls?descriptor=$(urlencode 'elwpkh(xpub6BemYiVNp19a1eGXYz87DQAbhWRj1UFE3PMz5YJMcvcyneZdLz7a69zDfq4cVFjYs6dxKhsngEnuwo5mbhoMFA8iVTK45sKcmFNwzupPtVC/<0;1>/*)')" | jq
 ```
 
+Using encrypted descriptor (the server is able to decrypt but harder to be shown in logs)
+
+```
+curl 'https://waterfalls.liquidwebwallet.org/liquid/api/v1/waterfalls?descriptor=YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0%2BIFgyNTUxOSBWQVFobnZlaWFreHp3NVNjd3V0dHVrVkFBTDBrT3RjQmg5WWp3MWxmaEdBCjhjVTVEVmlGTUxhVDBRZyt6TStDeUFrUThwSEZ0OWhCcjdGYlAzTU93WnMKLT4gNS1ncmVhc2UgSEYyJ3xOXCEgNysgdy1SNyB0NgpMSmpkbDBSbHpVRWVPa2NRK25ZSXFicWZtQUVlTXc0K2FQVDlrWS8vaW9xNzNyNm1JR1NwbHN2U3lrYURhMXNGCitTVk5hOEd3Ci0tLSBnd1Y4cWJXZmhHWmJMcHRkUjhiMmxuK0JBT3daSnhQOHZoOEY2em0rS2tnCrZd9P7B4qrMveFcDGAy%2B%2BXscw2QMpQ0c1auUwyjZCOnp3pJVZbsXsHISqatHGRfII6aY35Vn17KjNEbyW8HA8KhO2QL2sQYVQY3A1UMshk7vTbu1%2BrFNjHy0%2B4jXFSEU00sVumhrmdrq3cr9QmE2704DHnTq0cgmBcgOig3tf0XQpVgzxmEv0BsdIMhzjj%2FXkzjZiGpwf0iQ4U1LYLnQQ' | jq
+```
+
 ## ADR
 
 * The endpoint is GET, allowing requests to be cached for a minimum amount of time (even 5s) to prevent DOS. It's possible to encrypt the descriptor with the server key. The server is going to know it anyway, but it's a measure to minimize the probability to have it in server and browser logs.
