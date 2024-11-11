@@ -6,8 +6,9 @@ use std::io::{Read, Write};
 use super::Error;
 
 pub fn encrypt(plaintext: &str, recipient: Recipient) -> Result<String, Error> {
-    let encryptor = age::Encryptor::with_recipients(vec![Box::new(recipient)])
-        .expect("we provided a recipient");
+    let encryptor =
+        age::Encryptor::with_recipients(vec![recipient].iter().map(|e| e as &dyn age::Recipient))
+            .expect("we provided a recipient");
 
     let mut encrypted = vec![];
     let mut writer = encryptor
@@ -23,10 +24,7 @@ pub fn decrypt(base64_encrypted: &str, key: &Identity) -> Result<String, Error> 
         .decode(base64_encrypted)
         .map_err(|_| Error::CannotDecrypt)?;
 
-    let decryptor = match age::Decryptor::new(&encrypted[..]).map_err(|_| Error::CannotDecrypt)? {
-        age::Decryptor::Recipients(d) => d,
-        _ => unreachable!(),
-    };
+    let decryptor = age::Decryptor::new(&encrypted[..]).map_err(|_| Error::CannotDecrypt)?;
 
     let mut decrypted = vec![];
     let mut reader = decryptor
