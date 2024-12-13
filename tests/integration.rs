@@ -55,6 +55,9 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert_eq!(result.page, 0);
     assert_eq!(result.txs_seen.len(), 2);
     assert!(result.is_empty());
+    assert!(result.tip.is_some());
+    let result = client.waterfalls_v1(&bitcoin_desc).await.unwrap();
+    assert!(result.tip.is_none());
 
     let desc = ConfidentialDescriptor::<DescriptorPublicKey>::from_str(&desc_str).unwrap();
     let addr = desc
@@ -86,6 +89,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert_eq!(result.txs_seen.len(), 2);
     assert!(!result.is_empty());
     assert_eq!(result.count_non_empty(), 1);
+    assert!(result.tip.is_some());
     let first = &result.txs_seen.iter().next().unwrap().1[0][0];
     assert_eq!(first.txid, txid);
     assert_eq!(first.height, 3);

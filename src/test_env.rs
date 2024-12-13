@@ -263,7 +263,19 @@ impl WaterfallClient {
     /// it can accept the bitcoin descriptor part of the ct descriptor in plaintext
     /// or encrypted with the server key
     pub async fn waterfalls(&self, desc: &str) -> anyhow::Result<WaterfallResponse> {
-        let descriptor_url = format!("{}/v1/waterfalls", self.base_url);
+        self.waterfalls_version(desc, 2).await
+    }
+
+    pub async fn waterfalls_v1(&self, desc: &str) -> anyhow::Result<WaterfallResponse> {
+        self.waterfalls_version(desc, 1).await
+    }
+
+    async fn waterfalls_version(
+        &self,
+        desc: &str,
+        version: u8,
+    ) -> anyhow::Result<WaterfallResponse> {
+        let descriptor_url = format!("{}/v{}/waterfalls", self.base_url, version);
 
         let response = self
             .client

@@ -51,7 +51,11 @@ pub async fn route(
         }
         (&Method::GET, "/v1/waterfalls", Some(query)) => {
             let inputs = parse_query(query, &state.key)?;
-            handle_waterfalls_req(state, &inputs, is_testnet).await
+            handle_waterfalls_req(state, &inputs, is_testnet, false).await
+        }
+        (&Method::GET, "/v2/waterfalls", Some(query)) => {
+            let inputs = parse_query(query, &state.key)?;
+            handle_waterfalls_req(state, &inputs, is_testnet, true).await
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {
             let ts = state.tip_timestamp().await;
@@ -286,6 +290,7 @@ async fn handle_waterfalls_req(
     state: &Arc<State>,
     inputs: &WaterfallRequest,
     is_testnet: bool,
+    with_tip: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
     let desc_str = &inputs.descriptor;
     let db = &state.store;
@@ -350,9 +355,16 @@ async fn handle_waterfalls_req(
             }
 
             let elements: usize = map.iter().map(|(_, v)| v.len()).sum();
+            let tip = if with_tip {
+                state.tip_hash().await
+            } else {
+                None
+            };
+
             let result = serde_json::to_string(&WaterfallResponse {
                 txs_seen: map,
                 page: inputs.page,
+                tip,
             })
             .expect("does not contain a map with non-string keys");
 

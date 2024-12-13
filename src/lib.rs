@@ -32,6 +32,9 @@ pub struct WaterfallRequest {
 pub struct WaterfallResponse {
     pub txs_seen: std::collections::BTreeMap<String, Vec<Vec<TxSeen>>>,
     pub page: u16,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<BlockHash>,
 }
 
 impl WaterfallResponse {
