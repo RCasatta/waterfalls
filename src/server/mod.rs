@@ -45,12 +45,14 @@ pub struct Arguments {
     #[arg(long)]
     pub node_url: Option<String>,
 
+    /// Socket address where to listen to serve requests
     #[arg(long)]
     pub listen: Option<SocketAddr>,
 
+    /// Directory where to save the database
     #[cfg(feature = "db")]
     #[arg(long)]
-    pub datadir: Option<std::path::PathBuf>,
+    pub db_dir: Option<std::path::PathBuf>,
 
     /// An optional age server key to decrypt descriptor query string.
     /// If not provided is randomly generated.
