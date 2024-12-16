@@ -87,7 +87,7 @@ pub enum Error {
     CannotFindTx,
     InvalidBlockHash,
     CannotFindBlockHeader,
-    DBOpen,
+    DBOpen(String),
     CannotLoadEncryptionKey,
     CannotDecrypt,
     CannotEncrypt,
@@ -120,7 +120,9 @@ fn get_store(args: &Arguments) -> Result<AnyStore, Error> {
             } else {
                 path.push("mainnet");
             }
-            AnyStore::Db(store::db::DBStore::open(&path).map_err(|_| Error::DBOpen)?)
+            AnyStore::Db(
+                store::db::DBStore::open(&path).map_err(|e| Error::DBOpen(format!("{e:?}")))?,
+            )
         }
         None => AnyStore::Mem(MemoryStore::new()),
     })
