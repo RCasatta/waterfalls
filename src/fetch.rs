@@ -73,12 +73,26 @@ impl Client {
         } else {
             format!("{base}/rest/blockhashbyheight/{height}.hex",)
         };
-        let response = self.client.get(&url).send().await?;
-        if response.status() == 200 {
-            let hex = response.text().await?;
-            Ok(Some(BlockHash::from_str(hex.trim())?))
-        } else {
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("failing for {url}"))?;
+        let status = response.status();
+        if status == 200 {
+            let hex = response
+                .text()
+                .await
+                .with_context(|| format!("failing converting body to text for {url}"))?;
+            let hex = hex.trim();
+            Ok(Some(BlockHash::from_str(hex).with_context(|| {
+                format!("failing converting {hex} to BlockHash")
+            })?))
+        } else if response.status() == 404 {
             Ok(None)
+        } else {
+            panic!("{url} return unexpected status {status} for block_hash");
         }
     }
 
@@ -222,15 +236,18 @@ impl Client {
                 Ok(Some(b)) => {
                     return b;
                 }
-                _ => {
+                Ok(None) => {
                     if i > 100 {
                         // when waiting for a new block, 60 fails are expected
-                        log::warn!("Failing for blockhash({height})");
+                        log::warn!("waiting for blockhash({height}) for more than 100 secs");
                     }
-                    i += 1;
-                    sleep(std::time::Duration::from_secs(1)).await
+                }
+                Err(e) => {
+                    log::warn!("Failing for blockhash({height}) with err {e:?}");
                 }
             }
+            i += 1;
+            sleep(std::time::Duration::from_secs(1)).await
         }
     }
 
