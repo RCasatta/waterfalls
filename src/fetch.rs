@@ -3,7 +3,7 @@ use std::{
     str::FromStr,
 };
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use elements::{
     encode::{serialize_hex, Decodable},
     Block, BlockHash, Transaction, Txid,
@@ -111,14 +111,27 @@ impl Client {
             format!("{base}/rest/mempool/contents.json")
         };
 
-        let resp = self.client.get(url).send().await?;
-        let body_bytes = resp.bytes().await?;
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("failure while opening {url}"))?;
+        let body_bytes = resp
+            .bytes()
+            .await
+            .with_context(|| format!("failure reading {url} body in bytes"))?;
 
         Ok(if self.use_esplora {
-            let content: HashSet<Txid> = serde_json::from_reader(body_bytes.reader())?;
+            let content: HashSet<Txid> = serde_json::from_reader(body_bytes.reader())
+                .with_context(|| format!("failure converting {url} body in HashSet<Txid>"))?;
             content
         } else {
-            let content: HashMap<Txid, Empty> = serde_json::from_reader(body_bytes.reader())?;
+            let content: HashMap<Txid, Empty> = serde_json::from_reader(body_bytes.reader())
+                .with_context(|| {
+                    format!("failure converting {url} body in HashMap<Txid, Empty> ")
+                })?;
+
             content.into_keys().collect()
         })
     }
