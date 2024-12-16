@@ -71,7 +71,7 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
 
     #[cfg(feature = "db")]
     {
-        args.datadir = path;
+        args.db_dir = path;
     }
     #[cfg(not(feature = "db"))]
     {

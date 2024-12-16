@@ -113,7 +113,7 @@ fn get_store(_args: &Arguments) -> Result<AnyStore, Error> {
 fn get_store(args: &Arguments) -> Result<AnyStore, Error> {
     use crate::store;
 
-    Ok(match args.datadir.as_ref() {
+    Ok(match args.db_dir.as_ref() {
         Some(p) => {
             let mut path = p.clone();
             path.push("db");
