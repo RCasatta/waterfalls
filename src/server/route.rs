@@ -126,12 +126,15 @@ pub async fn route(
 
                 (Some(""), Some("tx"), Some(v), Some("raw"), None) => {
                     let txid = Txid::from_str(v).map_err(|_| Error::InvalidTxid)?;
-                    let tx = client
-                        .lock()
-                        .await
-                        .tx(txid)
-                        .await
-                        .map_err(|_| Error::CannotFindTx)?;
+                    let tx = match client.lock().await.tx(txid).await {
+                        Ok(tx) => tx,
+                        Err(e) => {
+                            log::warn!(
+                                "Cannot find tx, is the node running and txindex=1 ?\n{e:?}"
+                            );
+                            return Err(Error::CannotFindTx);
+                        }
+                    };
                     let result = serialize(&tx);
                     any_resp(
                         result,

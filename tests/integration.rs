@@ -144,3 +144,34 @@ async fn test_no_rest() {
     let elementsd = bitcoind::BitcoinD::with_conf(exe, &conf).unwrap();
     let _test_env = waterfalls::test_env::launch_with_node(elementsd, None).await;
 }
+
+#[ignore = "Test to examine the log manually"]
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn test_no_txindex() {
+    use std::str::FromStr;
+    let _ = env_logger::try_init();
+
+    // CODE duplicated from inner_launch, with rest=1 commented
+    let mut conf = bitcoind::Conf::default();
+    let args = vec![
+        "-fallbackfee=0.0001",
+        "-dustrelayfee=0.00000001",
+        "-chain=liquidregtest",
+        "-initialfreecoins=2100000000",
+        "-validatepegin=0",
+        // "-txindex=1",
+        "-rest=1",
+    ];
+    conf.args = args;
+    conf.view_stdout = std::env::var("RUST_LOG").is_ok();
+    conf.network = "liquidregtest";
+    let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
+    let elementsd = bitcoind::BitcoinD::with_conf(exe, &conf).unwrap();
+    let test_env = waterfalls::test_env::launch_with_node(elementsd, None).await;
+    let txid = elements::Txid::from_str(
+        "0000000000000000000000000000000000000000000000000000000000000000",
+    )
+    .unwrap();
+    let _tx = test_env.client().tx(txid).await.unwrap();
+}
