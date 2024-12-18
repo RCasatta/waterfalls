@@ -125,12 +125,9 @@ impl Client {
             format!("{base}/rest/mempool/contents.json")
         };
 
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .with_context(|| format!("failure while opening {url}"))?;
+        let resp = self.client.get(&url).send().await.with_context(|| {
+            format!("failure opening {url}, is it correct and rest flag enabled in the node?")
+        })?;
         let body_bytes = resp
             .bytes()
             .await

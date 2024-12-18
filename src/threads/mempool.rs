@@ -36,7 +36,9 @@ async fn mempool_sync(state: Arc<State>, client: Client) -> Result<(), Error> {
                     mempool_txids = m.txids();
                 }
             }
-            Err(e) => log::warn!("mempool sync {e:?}"),
+            Err(e) => {
+                log::warn!("mempool sync error, is the node running and has rest=1 ?\n{e:?}")
+            }
         }
         sleep(std::time::Duration::from_secs(1)).await;
     }
