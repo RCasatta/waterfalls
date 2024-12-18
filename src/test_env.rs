@@ -19,7 +19,7 @@ use bitcoind::{
 use elements::{
     bitcoin::{Amount, Denomination},
     encode::{serialize_hex, Decodable},
-    Address, BlockHash, BlockHeader, Txid,
+    Address, BlockHash, BlockHeader, Transaction, Txid,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -360,6 +360,18 @@ impl WaterfallClient {
         let text = response.text().await?;
 
         Recipient::from_str(&text).or_else(|e| bail!("cannot parse recipient {}", e))
+    }
+
+    pub async fn tx(&self, txid: Txid) -> anyhow::Result<Transaction> {
+        let url = format!("{}/tx/{}/raw", self.base_url, txid);
+        let response = self.client.get(&url).send().await?;
+        let status_code = response.status().as_u16();
+        if status_code != 200 {
+            bail!("tx response for {url} is not 200 but: {status_code}");
+        }
+        let bytes = response.bytes().await?;
+
+        Transaction::consensus_decode(bytes.as_ref()).or_else(|e| bail!("cannot parse tx {}", e))
     }
 
     pub async fn broadcast(&self, tx: &elements::Transaction) -> anyhow::Result<Txid> {

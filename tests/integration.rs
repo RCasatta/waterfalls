@@ -112,6 +112,10 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let txid = client.broadcast(&tx_sign).await.unwrap();
     assert_eq!(txid, tx_blind.txid());
 
+    // Test getting tx
+    let tx = client.tx(txid).await.unwrap();
+    assert_eq!(tx.txid(), txid);
+
     test_env.shutdown().await;
     assert!(true);
 }
