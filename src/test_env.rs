@@ -378,8 +378,13 @@ impl WaterfallClient {
         let url = format!("{}/tx", self.base_url);
         let tx_hex = serialize_hex(tx);
         let response = self.client.post(&url).body(tx_hex).send().await?;
+        let status_code = response.status().as_u16();
         let text = response.text().await?;
-        let txid = Txid::from_str(&text)?;
-        Ok(txid)
+        if status_code == 200 {
+            let txid = Txid::from_str(&text)?;
+            Ok(txid)
+        } else {
+            bail!("broadcast response is not 200 but: {status_code} text: {text}");
+        }
     }
 }

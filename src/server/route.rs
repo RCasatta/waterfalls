@@ -91,13 +91,14 @@ pub async fn route(
             let tx_bytes = hex::decode(result).map_err(|e| Error::String(e.to_string()))?;
             let tx = Transaction::consensus_decode(&tx_bytes[..])
                 .map_err(|e| Error::String(e.to_string()))?;
-            client
-                .lock()
-                .await
-                .broadcast(&tx)
-                .await
-                .map_err(|e| Error::String(e.to_string()))?;
-            str_resp(tx.txid().to_string(), StatusCode::OK)
+            let result = client.lock().await.broadcast(&tx).await;
+            match result {
+                Ok(txid) => str_resp(txid.to_string(), StatusCode::OK),
+                Err(e) => {
+                    log::warn!("broadcast failed: {e:?}");
+                    str_resp(e.to_string(), StatusCode::BAD_REQUEST)
+                }
+            }
         }
         (&Method::GET, "/metrics", None) => {
             let encoder = prometheus::TextEncoder::new();

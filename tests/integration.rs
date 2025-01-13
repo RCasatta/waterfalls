@@ -107,7 +107,11 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let unspent = test_env.list_unspent();
     assert_eq!(unspent.len(), 1);
     let tx_unblind = test_env.create_self_transanction();
+
     let tx_blind = test_env.blind_raw_transanction(&tx_unblind);
+    let err = client.broadcast(&tx_blind).await.unwrap_err();
+    assert!(err.to_string().contains("non-mandatory-script-verify-flag"));
+
     let tx_sign = test_env.sign_raw_transanction_with_wallet(&tx_blind);
     let txid = client.broadcast(&tx_sign).await.unwrap();
     assert_eq!(txid, tx_blind.txid());

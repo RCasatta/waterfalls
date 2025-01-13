@@ -167,7 +167,9 @@ impl Client {
 
     /// POST /tx
     ///
-    /// Must use esplora because we can't broadcast using node's REST API
+    /// When using the node it must go through RPC interface because the node doesn't support broadcasting via REST
+    /// We can't go full RPC for other methods because RPC doesn't return binary data
+    ///
     pub async fn broadcast(&self, tx: &Transaction) -> Result<Txid, anyhow::Error> {
         let tx_hex = serialize_hex(tx);
 
