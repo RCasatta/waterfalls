@@ -22,7 +22,7 @@ pub mod encryption;
 mod mempool;
 pub mod preload;
 pub mod route;
-pub(crate) mod sign;
+pub mod sign;
 mod state;
 
 pub use mempool::Mempool;

@@ -28,16 +28,16 @@ pub(crate) fn sign_response(
 
 #[allow(dead_code)]
 // TODO accept response as &[u8]
-pub(crate) fn verify_response(
+pub fn verify_response(
     secp: &Secp256k1<All>,
-    address: bitcoin::Address,
+    address: &bitcoin::Address,
     response: &str,
     signature: &MessageSignature,
 ) -> bool {
     let msg_hash = bitcoin::sign_message::signed_msg_hash(response);
 
     signature
-        .is_signed_by_address(&secp, &address, msg_hash)
+        .is_signed_by_address(&secp, address, msg_hash)
         .unwrap()
 }
 
@@ -61,7 +61,7 @@ mod tests {
 
         let m = sign_response(&secp, &private_key, response);
 
-        let result = verify_response(&secp, address, response, &m.signature);
+        let result = verify_response(&secp, &address, response, &m.signature);
         assert!(result);
     }
 }

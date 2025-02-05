@@ -22,6 +22,7 @@ use elements::{
     encode::{serialize_hex, Decodable},
     Address, BlockHash, BlockHeader, Transaction, Txid,
 };
+use hyper::HeaderMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::oneshot::{self, Receiver, Sender};
@@ -275,11 +276,14 @@ impl WaterfallClient {
     ///
     /// it can accept the bitcoin descriptor part of the ct descriptor in plaintext
     /// or encrypted with the server key
-    pub async fn waterfalls(&self, desc: &str) -> anyhow::Result<WaterfallResponse> {
+    pub async fn waterfalls(&self, desc: &str) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         self.waterfalls_version(desc, 2).await
     }
 
-    pub async fn waterfalls_v1(&self, desc: &str) -> anyhow::Result<WaterfallResponse> {
+    pub async fn waterfalls_v1(
+        &self,
+        desc: &str,
+    ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         self.waterfalls_version(desc, 1).await
     }
 
@@ -287,7 +291,7 @@ impl WaterfallClient {
         &self,
         desc: &str,
         version: u8,
-    ) -> anyhow::Result<WaterfallResponse> {
+    ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         let descriptor_url = format!("{}/v{}/waterfalls", self.base_url, version);
 
         let response = self
@@ -297,8 +301,10 @@ impl WaterfallClient {
             .send()
             .await?;
 
+        let headers = response.headers().clone();
+
         let body = response.text().await?;
-        Ok(serde_json::from_str(&body)?)
+        Ok((serde_json::from_str(&body)?, headers))
     }
 
     pub async fn wait_waterfalls_non_empty(
@@ -307,8 +313,8 @@ impl WaterfallClient {
     ) -> anyhow::Result<WaterfallResponse> {
         for _ in 0..50 {
             if let Ok(res) = self.waterfalls(&bitcoin_desc).await {
-                if !res.is_empty() {
-                    return Ok(res);
+                if !res.0.is_empty() {
+                    return Ok(res.0);
                 }
             }
 
