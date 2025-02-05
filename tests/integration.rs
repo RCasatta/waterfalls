@@ -132,7 +132,8 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let signature = headers.get("X-Content-Signature").unwrap();
     let signature = MessageSignature::from_str(signature.to_str().unwrap()).unwrap();
     let result =
-        waterfalls::server::sign::verify_response(&secp, &server_address, &message, &signature);
+        waterfalls::server::sign::verify_response(&secp, &server_address, &message, &signature)
+            .unwrap();
     assert!(result);
 
     test_env.shutdown().await;
