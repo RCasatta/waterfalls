@@ -11,6 +11,7 @@ use crate::store::AnyStore;
 use crate::threads::blocks::blocks_infallible;
 use crate::threads::mempool::mempool_sync_infallible;
 use age::x25519::Identity;
+use bitcoin::{NetworkKind, PrivateKey};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
@@ -21,6 +22,7 @@ pub mod encryption;
 mod mempool;
 pub mod preload;
 pub mod route;
+pub mod sign;
 mod state;
 
 pub use mempool::Mempool;
@@ -58,6 +60,11 @@ pub struct Arguments {
     /// If not provided is randomly generated.
     #[arg(long, env)]
     pub server_key: Option<Identity>,
+
+    /// An optional server private key in WIF format to sign responses using the bitcoin sign message standard (same as `bitcoin-cli signmessage`).
+    /// If not provided is randomly generated.
+    #[arg(long, env)]
+    pub wif_key: Option<PrivateKey>,
 
     /// Elements node rpc user and password, separated by ':' (same as the content of the cookie file)
     ///
@@ -145,7 +152,27 @@ pub async fn inner_main(
         .clone()
         .unwrap_or_else(|| Identity::generate());
 
-    let state = Arc::new(State::new(store, key)?);
+    let network_kind = if args.testnet {
+        NetworkKind::Test
+    } else {
+        NetworkKind::Main
+    };
+
+    if let Some(wif_key) = args.wif_key.as_ref() {
+        if wif_key.network != network_kind {
+            panic!(
+                "WIF key network {:?} does not match network kind {:?}",
+                wif_key.network, network_kind
+            );
+        }
+    }
+
+    let wif_key = args
+        .wif_key
+        .clone()
+        .unwrap_or_else(|| PrivateKey::generate(network_kind));
+
+    let state = Arc::new(State::new(store, key, wif_key)?);
 
     {
         let state = state.clone();

@@ -1,5 +1,5 @@
 use crate::{
-    server::{inner_main, Arguments},
+    server::{inner_main, sign::p2pkh, Arguments},
     WaterfallResponse,
 };
 use std::{
@@ -12,6 +12,7 @@ use std::{
 
 use age::x25519::{Identity, Recipient};
 use anyhow::bail;
+use bitcoin::{key::Secp256k1, secp256k1::All, NetworkKind, PrivateKey};
 use bitcoind::{
     bitcoincore_rpc::{bitcoin::hex::FromHex, RpcApi},
     get_available_port, BitcoinD, Conf,
@@ -21,6 +22,7 @@ use elements::{
     encode::{serialize_hex, Decodable},
     Address, BlockHash, BlockHeader, Transaction, Txid,
 };
+use hyper::HeaderMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::oneshot::{self, Receiver, Sender};
@@ -33,6 +35,8 @@ pub struct TestEnv {
     client: WaterfallClient,
     base_url: String,
     server_key: Identity,
+    wif_key: PrivateKey,
+    secp: Secp256k1<All>,
 }
 
 #[cfg(feature = "db")]
@@ -65,6 +69,8 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
     args.testnet = true;
     let server_key = Identity::generate();
     args.server_key = Some(server_key.clone());
+    let wif_key = PrivateKey::generate(NetworkKind::Test);
+    args.wif_key = Some(wif_key);
 
     let cookie = std::fs::read_to_string(&elementsd.params.cookie_file).unwrap();
     args.rpc_user_password = Some(cookie);
@@ -84,6 +90,7 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
     let handle = tokio::spawn(inner_main(args, shutdown_signal(rx)));
 
     let client = WaterfallClient::new(base_url.to_string());
+    let secp = Secp256k1::new();
 
     let test_env = TestEnv {
         elementsd,
@@ -92,6 +99,8 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
         client,
         base_url,
         server_key,
+        wif_key,
+        secp,
     };
 
     test_env.node_generate(1).await;
@@ -137,6 +146,10 @@ impl TestEnv {
 
     pub fn server_recipient(&self) -> Recipient {
         self.server_key.to_public()
+    }
+
+    pub fn server_address(&self) -> bitcoin::Address {
+        p2pkh(&self.secp, &self.wif_key)
     }
 
     pub fn base_url(&self) -> &str {
@@ -263,11 +276,14 @@ impl WaterfallClient {
     ///
     /// it can accept the bitcoin descriptor part of the ct descriptor in plaintext
     /// or encrypted with the server key
-    pub async fn waterfalls(&self, desc: &str) -> anyhow::Result<WaterfallResponse> {
+    pub async fn waterfalls(&self, desc: &str) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         self.waterfalls_version(desc, 2).await
     }
 
-    pub async fn waterfalls_v1(&self, desc: &str) -> anyhow::Result<WaterfallResponse> {
+    pub async fn waterfalls_v1(
+        &self,
+        desc: &str,
+    ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         self.waterfalls_version(desc, 1).await
     }
 
@@ -275,7 +291,7 @@ impl WaterfallClient {
         &self,
         desc: &str,
         version: u8,
-    ) -> anyhow::Result<WaterfallResponse> {
+    ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         let descriptor_url = format!("{}/v{}/waterfalls", self.base_url, version);
 
         let response = self
@@ -285,8 +301,10 @@ impl WaterfallClient {
             .send()
             .await?;
 
+        let headers = response.headers().clone();
+
         let body = response.text().await?;
-        Ok(serde_json::from_str(&body)?)
+        Ok((serde_json::from_str(&body)?, headers))
     }
 
     pub async fn wait_waterfalls_non_empty(
@@ -295,8 +313,8 @@ impl WaterfallClient {
     ) -> anyhow::Result<WaterfallResponse> {
         for _ in 0..50 {
             if let Ok(res) = self.waterfalls(&bitcoin_desc).await {
-                if !res.is_empty() {
-                    return Ok(res);
+                if !res.0.is_empty() {
+                    return Ok(res.0);
                 }
             }
 
@@ -361,6 +379,20 @@ impl WaterfallClient {
         let text = response.text().await?;
 
         Recipient::from_str(&text).or_else(|e| bail!("cannot parse recipient {}", e))
+    }
+
+    pub async fn server_address(&self) -> anyhow::Result<bitcoin::Address> {
+        let url = format!("{}/v1/server_address", self.base_url);
+        let response = self.client.get(&url).send().await?;
+        let status_code = response.status().as_u16();
+        if status_code != 200 {
+            bail!("server_address response is not 200 but: {}", status_code);
+        }
+        let text = response.text().await?;
+
+        bitcoin::Address::from_str(&text)
+            .or_else(|e| bail!("cannot parse address {}", e))
+            .map(|a| a.assume_checked())
     }
 
     pub async fn tx(&self, txid: Txid) -> anyhow::Result<Transaction> {

@@ -39,6 +39,7 @@ async fn launch_memory() -> waterfalls::test_env::TestEnv {
 
 #[cfg(feature = "test_env")]
 async fn do_test(test_env: waterfalls::test_env::TestEnv) {
+    use bitcoin::sign_message::MessageSignature;
     use elements::{bitcoin::secp256k1, AddressParams};
     use elements_miniscript::{ConfidentialDescriptor, DescriptorPublicKey};
     use std::str::FromStr;
@@ -51,12 +52,12 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let blinding = "slip77(9c8e4f05c7711a98c838be228bcb84924d4570ca53f35fa1c793e58841d47023)";
     let desc_str = format!("ct({blinding},{single_bitcoin_desc})#qwqap8xk"); // we use a non-multipath to generate addresses
 
-    let result = client.waterfalls(&bitcoin_desc).await.unwrap();
+    let result = client.waterfalls(&bitcoin_desc).await.unwrap().0;
     assert_eq!(result.page, 0);
     assert_eq!(result.txs_seen.len(), 2);
     assert!(result.is_empty());
     assert!(result.tip.is_some());
-    let result = client.waterfalls_v1(&bitcoin_desc).await.unwrap();
+    let result = client.waterfalls_v1(&bitcoin_desc).await.unwrap().0;
     assert!(result.tip.is_none());
 
     let desc = ConfidentialDescriptor::<DescriptorPublicKey>::from_str(&desc_str).unwrap();
@@ -84,7 +85,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
 
     test_env.node_generate(1).await;
 
-    let result = client.waterfalls(&bitcoin_desc).await.unwrap();
+    let result = client.waterfalls(&bitcoin_desc).await.unwrap().0;
     assert_eq!(result.page, 0);
     assert_eq!(result.txs_seen.len(), 2);
     assert!(!result.is_empty());
@@ -100,7 +101,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let recipient = client.server_recipient().await.unwrap();
     assert_eq!(recipient, test_env.server_recipient());
     let encrypted_desc = encrypt(&bitcoin_desc, recipient).unwrap();
-    let result_from_encrypted = client.waterfalls(&encrypted_desc).await.unwrap();
+    let result_from_encrypted = client.waterfalls(&encrypted_desc).await.unwrap().0;
     assert_eq!(result, result_from_encrypted);
 
     // Test broadcast is working
@@ -119,6 +120,21 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     // Test getting tx
     let tx = client.tx(txid).await.unwrap();
     assert_eq!(tx.txid(), txid);
+
+    // Test server_address
+    let server_address = test_env.server_address();
+    let address = client.server_address().await.unwrap();
+    assert_eq!(address, server_address);
+
+    // Verify signature
+    let (result, headers) = client.waterfalls(&bitcoin_desc).await.unwrap();
+    let message = serde_json::to_string(&result).unwrap();
+    let signature = headers.get("X-Content-Signature").unwrap();
+    let signature = MessageSignature::from_str(signature.to_str().unwrap()).unwrap();
+    let result =
+        waterfalls::server::sign::verify_response(&secp, &server_address, &message, &signature)
+            .unwrap();
+    assert!(result);
 
     test_env.shutdown().await;
     assert!(true);
