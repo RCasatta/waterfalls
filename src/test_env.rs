@@ -12,6 +12,7 @@ use std::{
 
 use age::x25519::{Identity, Recipient};
 use anyhow::bail;
+use bitcoin::{key::Secp256k1, secp256k1::All, NetworkKind, PrivateKey};
 use bitcoind::{
     bitcoincore_rpc::{bitcoin::hex::FromHex, RpcApi},
     get_available_port, BitcoinD, Conf,
@@ -33,6 +34,8 @@ pub struct TestEnv {
     client: WaterfallClient,
     base_url: String,
     server_key: Identity,
+    wif_key: PrivateKey,
+    secp: Secp256k1<All>,
 }
 
 #[cfg(feature = "db")]
@@ -84,6 +87,8 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
     let handle = tokio::spawn(inner_main(args, shutdown_signal(rx)));
 
     let client = WaterfallClient::new(base_url.to_string());
+    let secp = Secp256k1::new();
+    let wif_key = PrivateKey::generate(NetworkKind::Test);
 
     let test_env = TestEnv {
         elementsd,
@@ -92,6 +97,8 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
         client,
         base_url,
         server_key,
+        wif_key,
+        secp,
     };
 
     test_env.node_generate(1).await;
@@ -137,6 +144,10 @@ impl TestEnv {
 
     pub fn server_recipient(&self) -> Recipient {
         self.server_key.to_public()
+    }
+
+    pub fn server_address(&self) -> bitcoin::Address {
+        bitcoin::Address::p2pkh(&self.wif_key.public_key(&self.secp), NetworkKind::Test)
     }
 
     pub fn base_url(&self) -> &str {

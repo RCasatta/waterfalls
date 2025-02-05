@@ -4,6 +4,7 @@ use crate::{
     Timestamp,
 };
 use age::x25519::Identity;
+use bitcoin::PrivateKey;
 use elements::BlockHash;
 use tokio::sync::Mutex;
 
@@ -13,15 +14,19 @@ pub struct State {
     /// An asymmetric encryption key, the public key is used to optionally encrypt the descriptor field so that it's harder to leak it.
     pub key: Identity,
 
+    /// The private key of the server address used to sign responses
+    pub wif_key: PrivateKey,
+
     pub store: AnyStore,
     pub mempool: Mutex<Mempool>,
     pub blocks_hash_ts: Mutex<Vec<(BlockHash, Timestamp)>>, // TODO should be moved into the Store, but in memory for db
 }
 
 impl State {
-    pub fn new(store: AnyStore, key: Identity) -> Result<Self, Error> {
+    pub fn new(store: AnyStore, key: Identity, wif_key: PrivateKey) -> Result<Self, Error> {
         Ok(State {
             key,
+            wif_key,
             store,
             mempool: Mutex::new(Mempool::new()),
             blocks_hash_ts: Mutex::new(Vec::new()),

@@ -11,6 +11,7 @@ use crate::store::AnyStore;
 use crate::threads::blocks::blocks_infallible;
 use crate::threads::mempool::mempool_sync_infallible;
 use age::x25519::Identity;
+use bitcoin::{NetworkKind, PrivateKey};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
@@ -59,6 +60,11 @@ pub struct Arguments {
     /// If not provided is randomly generated.
     #[arg(long, env)]
     pub server_key: Option<Identity>,
+
+    /// An optional server private key in WIF format to sign responses using the bitcoin sign message standard (same as `bitcoin-cli signmessage`).
+    /// If not provided is randomly generated.
+    #[arg(long, env)]
+    pub wif_key: Option<PrivateKey>,
 
     /// Elements node rpc user and password, separated by ':' (same as the content of the cookie file)
     ///
@@ -146,7 +152,18 @@ pub async fn inner_main(
         .clone()
         .unwrap_or_else(|| Identity::generate());
 
-    let state = Arc::new(State::new(store, key)?);
+    let network_kind = if args.testnet {
+        NetworkKind::Test
+    } else {
+        NetworkKind::Main
+    };
+
+    let address_key = args
+        .wif_key
+        .clone()
+        .unwrap_or_else(|| PrivateKey::generate(network_kind));
+
+    let state = Arc::new(State::new(store, key, address_key)?);
 
     {
         let state = state.clone();
