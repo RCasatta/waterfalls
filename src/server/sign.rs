@@ -2,28 +2,31 @@ use bitcoin::{
     key::Secp256k1,
     secp256k1::{All, Message},
     sign_message::MessageSignature,
-    NetworkKind,
 };
 use elements::bitcoin::{self, PrivateKey};
+
+pub struct MessageAndSignature {
+    pub message: Message,
+    pub signature: MessageSignature,
+}
 
 // TODO accept response as &[u8]
 pub(crate) fn sign_response(
     secp: &Secp256k1<All>,
     key: &PrivateKey,
     response: &str,
-) -> (Message, MessageSignature) {
+) -> MessageAndSignature {
     let digest = bitcoin::sign_message::signed_msg_hash(response);
-    let digest = bitcoin::secp256k1::Message::from_digest_slice(digest.as_ref()).unwrap();
-    let signature = secp.sign_ecdsa_recoverable(&digest, &key.inner);
-    (
-        digest,
-        MessageSignature {
-            signature,
-            compressed: true,
-        },
-    )
+    let message = bitcoin::secp256k1::Message::from_digest_slice(digest.as_ref()).unwrap();
+    let signature = secp.sign_ecdsa_recoverable(&message, &key.inner);
+    let signature = MessageSignature {
+        signature,
+        compressed: true,
+    };
+    MessageAndSignature { message, signature }
 }
 
+#[allow(dead_code)]
 // TODO accept response as &[u8]
 pub(crate) fn verify_response(
     secp: &Secp256k1<All>,
@@ -56,9 +59,9 @@ mod tests {
 
         let address = p2pkh(&secp, &private_key);
 
-        let (_digest, signature) = sign_response(&secp, &private_key, response);
+        let m = sign_response(&secp, &private_key, response);
 
-        let result = verify_response(&secp, address, response, &signature);
+        let result = verify_response(&secp, address, response, &m.signature);
         assert!(result);
     }
 }

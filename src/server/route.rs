@@ -1,7 +1,7 @@
 use crate::{
     fetch::Client,
     hash_str,
-    server::{Error, State},
+    server::{sign::sign_response, Error, State},
     store::Store,
     TxSeen, WaterfallRequest, WaterfallResponse,
 };
@@ -27,7 +27,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-use super::encryption;
+use super::{encryption, sign::MessageAndSignature};
 
 const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 500; // TODO reduce to 50 and implement paging
@@ -111,7 +111,7 @@ pub async fn route(
             encoder
                 .encode(&metric_families, &mut buffer)
                 .map_err(|e| Error::String(format!("{e:?}")))?;
-            any_resp(buffer, StatusCode::OK, Some("text/plain"), Some(5))
+            any_resp(buffer, StatusCode::OK, Some("text/plain"), Some(5), None)
         }
         (&Method::GET, path, None) => {
             let mut s = path.split('/');
@@ -145,6 +145,7 @@ pub async fn route(
                         StatusCode::OK,
                         Some("application/octet-stream"),
                         Some(157784630),
+                        None,
                     )
                 }
                 (Some(""), Some("block"), Some(v), Some("header"), None) => {
@@ -161,6 +162,7 @@ pub async fn route(
                         StatusCode::OK,
                         Some("text/plain"),
                         Some(157784630),
+                        None,
                     )
                 }
                 _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),
@@ -200,13 +202,14 @@ fn parse_query(query: &str, key: &Identity) -> Result<WaterfallRequest, Error> {
 }
 
 fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {
-    any_resp(s.into_bytes(), status, Some("text/plain"), None)
+    any_resp(s.into_bytes(), status, Some("text/plain"), None, None)
 }
 fn any_resp(
     bytes: Vec<u8>,
     status: StatusCode,
     content: Option<&str>,
     cache: Option<u32>,
+    msg_and_signature: Option<MessageAndSignature>,
 ) -> Result<Response<Full<Bytes>>, Error> {
     let mut builder = Response::builder().status(status);
     if let Some(content) = content {
@@ -214,6 +217,14 @@ fn any_resp(
     }
     let cache = cache.unwrap_or(5);
     builder = builder.header(CACHE_CONTROL, format!("public, max-age={cache}"));
+
+    if let Some(msg_and_signature) = msg_and_signature {
+        builder = builder.header(
+            "X-Content-Signature",
+            msg_and_signature.signature.to_string(),
+        );
+        builder = builder.header("X-Content-Digest", msg_and_signature.message.to_string());
+    }
 
     Ok(builder
         .body(Full::new(bytes.into()))
@@ -290,6 +301,7 @@ async fn handle_single_address(
         hyper::StatusCode::OK,
         Some("application/json"),
         Some(5),
+        None,
     )
 }
 
@@ -383,11 +395,14 @@ async fn handle_waterfalls_req(
             );
             crate::WATERFALLS_COUNTER.inc();
             timer.observe_duration();
+
+            let m = sign_response(&state.secp, &state.wif_key, &result);
             any_resp(
                 result.into_bytes(),
                 hyper::StatusCode::OK,
                 Some("application/json"),
                 Some(5),
+                Some(m),
             )
         }
         Err(e) => str_resp(e.to_string(), hyper::StatusCode::BAD_REQUEST),
