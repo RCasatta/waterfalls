@@ -158,12 +158,21 @@ pub async fn inner_main(
         NetworkKind::Main
     };
 
-    let address_key = args
+    if let Some(wif_key) = args.wif_key.as_ref() {
+        if wif_key.network != network_kind {
+            panic!(
+                "WIF key network {:?} does not match network kind {:?}",
+                wif_key.network, network_kind
+            );
+        }
+    }
+
+    let wif_key = args
         .wif_key
         .clone()
         .unwrap_or_else(|| PrivateKey::generate(network_kind));
 
-    let state = Arc::new(State::new(store, key, address_key)?);
+    let state = Arc::new(State::new(store, key, wif_key)?);
 
     {
         let state = state.clone();

@@ -4,11 +4,11 @@ use crate::{
     Timestamp,
 };
 use age::x25519::Identity;
-use bitcoin::PrivateKey;
+use bitcoin::{key::Secp256k1, secp256k1::All, PrivateKey};
 use elements::BlockHash;
 use tokio::sync::Mutex;
 
-use super::Error;
+use super::{sign::p2pkh, Error};
 
 pub struct State {
     /// An asymmetric encryption key, the public key is used to optionally encrypt the descriptor field so that it's harder to leak it.
@@ -20,6 +20,8 @@ pub struct State {
     pub store: AnyStore,
     pub mempool: Mutex<Mempool>,
     pub blocks_hash_ts: Mutex<Vec<(BlockHash, Timestamp)>>, // TODO should be moved into the Store, but in memory for db
+
+    pub secp: Secp256k1<All>,
 }
 
 impl State {
@@ -30,6 +32,7 @@ impl State {
             store,
             mempool: Mutex::new(Mempool::new()),
             blocks_hash_ts: Mutex::new(Vec::new()),
+            secp: bitcoin::key::Secp256k1::new(),
         })
     }
 
@@ -59,5 +62,8 @@ impl State {
             blocks_hash_ts.push((meta.hash(), meta.timestamp()));
             assert_eq!(blocks_hash_ts.len() as u32 - 1, meta.height())
         }
+    }
+    pub fn address(&self) -> bitcoin::Address {
+        p2pkh(&self.secp, &self.wif_key)
     }
 }

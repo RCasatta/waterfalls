@@ -120,6 +120,10 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let tx = client.tx(txid).await.unwrap();
     assert_eq!(tx.txid(), txid);
 
+    // Test server_address
+    let address = client.server_address().await.unwrap();
+    assert_eq!(address, test_env.server_address());
+
     test_env.shutdown().await;
     assert!(true);
 }

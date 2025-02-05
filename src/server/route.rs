@@ -49,6 +49,9 @@ pub async fn route(
         (&Method::GET, "/v1/server_recipient", None) => {
             str_resp(state.key.to_public().to_string(), StatusCode::OK)
         }
+        (&Method::GET, "/v1/server_address", None) => {
+            str_resp(state.address().to_string(), StatusCode::OK)
+        }
         (&Method::GET, "/v1/waterfalls", Some(query)) => {
             let inputs = parse_query(query, &state.key)?;
             handle_waterfalls_req(state, &inputs, is_testnet, false).await

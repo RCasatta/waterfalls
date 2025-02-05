@@ -1,5 +1,5 @@
 use crate::{
-    server::{inner_main, Arguments},
+    server::{inner_main, sign::p2pkh, Arguments},
     WaterfallResponse,
 };
 use std::{
@@ -68,6 +68,8 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
     args.testnet = true;
     let server_key = Identity::generate();
     args.server_key = Some(server_key.clone());
+    let wif_key = PrivateKey::generate(NetworkKind::Test);
+    args.wif_key = Some(wif_key);
 
     let cookie = std::fs::read_to_string(&elementsd.params.cookie_file).unwrap();
     args.rpc_user_password = Some(cookie);
@@ -88,7 +90,6 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
 
     let client = WaterfallClient::new(base_url.to_string());
     let secp = Secp256k1::new();
-    let wif_key = PrivateKey::generate(NetworkKind::Test);
 
     let test_env = TestEnv {
         elementsd,
@@ -147,7 +148,7 @@ impl TestEnv {
     }
 
     pub fn server_address(&self) -> bitcoin::Address {
-        bitcoin::Address::p2pkh(&self.wif_key.public_key(&self.secp), NetworkKind::Test)
+        p2pkh(&self.secp, &self.wif_key)
     }
 
     pub fn base_url(&self) -> &str {
@@ -372,6 +373,20 @@ impl WaterfallClient {
         let text = response.text().await?;
 
         Recipient::from_str(&text).or_else(|e| bail!("cannot parse recipient {}", e))
+    }
+
+    pub async fn server_address(&self) -> anyhow::Result<bitcoin::Address> {
+        let url = format!("{}/v1/server_address", self.base_url);
+        let response = self.client.get(&url).send().await?;
+        let status_code = response.status().as_u16();
+        if status_code != 200 {
+            bail!("server_address response is not 200 but: {}", status_code);
+        }
+        let text = response.text().await?;
+
+        bitcoin::Address::from_str(&text)
+            .or_else(|e| bail!("cannot parse address {}", e))
+            .map(|a| a.assume_checked())
     }
 
     pub async fn tx(&self, txid: Txid) -> anyhow::Result<Transaction> {
