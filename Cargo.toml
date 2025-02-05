@@ -12,6 +12,7 @@ categories = ["cryptography::cryptocurrencies"]
 [dependencies]
 clap = { version = "4.5.3", features = ["derive", "env"] }
 elements = { version = "0.25.0", features = ["serde"] }
+bitcoin = { version = "0.32.5", features = ["secp-recovery", "base64"] }
 env_logger = "0.11.3"
 hyper = { version = "1.2.0", features = ["full"] }
 log = "0.4.21"
