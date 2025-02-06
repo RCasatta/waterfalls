@@ -27,7 +27,14 @@
           rustToolchain = pkgs.pkgsBuildHost.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-          src = craneLib.cleanCargoSource ./.;
+          src = lib.cleanSourceWith {
+            src = ./.; # The original, unfiltered source
+            filter = path: type:
+              # (lib.hasSuffix "\.css" path) ||
+              (lib.hasInfix "/tests/data/" path) ||
+              (craneLib.filterCargoSources path type)
+            ;
+          };
 
           nativeBuildInputs = with pkgs; [ rustToolchain pkg-config clang ];
           buildInputs = with pkgs; [ openssl ];
