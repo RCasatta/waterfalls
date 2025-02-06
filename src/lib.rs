@@ -47,16 +47,11 @@ pub struct WaterfallResponseV3 {
     pub page: u16,
     pub tip: BlockHash,
     pub txids: Vec<Txid>,
-    pub block_hashes_timestamps: Vec<BlockMeta>,
+    pub blocks_meta: Vec<BlockMeta>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub struct TxRef {
-    /// Transaction reference index, to avoid duplicating long txids
-    pub t: usize,
-    /// Block height reference, to avoid duplicating long block hashes and timestamps
-    pub h: usize,
-}
+/// The first element is the transaction reference index, the second is the block reference index
+type TxRef = [usize; 2];
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Ord, PartialOrd)]
 pub struct BlockMeta {
@@ -118,7 +113,7 @@ impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
             .flat_map(|a| a.iter())
             .map(|a| a.txid)
             .collect();
-        let block_hashes_timestamps: BTreeSet<BlockMeta> = value
+        let block_meta: BTreeSet<BlockMeta> = value
             .txs_seen
             .iter()
             .flat_map(|(_, v)| v.iter())
@@ -143,11 +138,11 @@ impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
                         .iter()
                         .position(|a| a == &b.txid)
                         .expect("by construction");
-                    let h = block_hashes_timestamps
+                    let b = block_meta
                         .iter()
                         .position(|a| a.b == b.block_hash.expect("would have errored before"))
                         .expect("by construction");
-                    current_script.push(TxRef { t, h });
+                    current_script.push([t, b]);
                 }
                 txs_seen_d.push(current_script);
             }
@@ -158,7 +153,7 @@ impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
             page: value.page,
             tip: value.tip.ok_or(())?,
             txids: txids.into_iter().collect(),
-            block_hashes_timestamps: block_hashes_timestamps.into_iter().collect(),
+            blocks_meta: block_meta.into_iter().collect(),
         };
         Ok(r)
     }
@@ -173,10 +168,10 @@ impl From<WaterfallResponseV3> for WaterfallResponse {
                 let mut current_script = vec![];
                 for b in a.iter() {
                     current_script.push(TxSeen {
-                        txid: value.txids[b.t],
-                        height: value.block_hashes_timestamps[b.h].h as u32,
-                        block_hash: Some(value.block_hashes_timestamps[b.h].b),
-                        block_timestamp: Some(value.block_hashes_timestamps[b.h].t),
+                        txid: value.txids[b[0]],
+                        height: value.blocks_meta[b[1]].h as u32,
+                        block_hash: Some(value.blocks_meta[b[1]].b),
+                        block_timestamp: Some(value.blocks_meta[b[1]].t),
                     });
                 }
                 txs_seen_d.push(current_script);
@@ -226,7 +221,7 @@ mod tests {
         let v3: WaterfallResponseV3 = v2.clone().try_into().unwrap();
         let s = serde_json::to_string(&v3).unwrap();
         println!("{}", s);
-        assert_eq!(s.len(), 3336);
+        assert_eq!(s.len(), 3028);
         let v2_back: WaterfallResponse = v3.into();
         assert_eq!(v2, v2_back);
     }
