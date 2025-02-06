@@ -1,4 +1,7 @@
-use std::hash::Hasher;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    hash::Hasher,
+};
 
 use elements::{BlockHash, Txid};
 use lazy_static::lazy_static;
@@ -28,13 +31,38 @@ pub struct WaterfallRequest {
 }
 
 /// Response from the waterfalls endpoint
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct WaterfallResponse {
-    pub txs_seen: std::collections::BTreeMap<String, Vec<Vec<TxSeen>>>,
+    pub txs_seen: BTreeMap<String, Vec<Vec<TxSeen>>>,
     pub page: u16,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tip: Option<BlockHash>,
+}
+
+/// Response from the waterfalls endpoint
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct WaterfallResponseV3 {
+    pub txs_seen: BTreeMap<String, Vec<Vec<TxRef>>>,
+    pub page: u16,
+    pub tip: BlockHash,
+    pub txids: Vec<Txid>,
+    pub block_hashes_timestamps: Vec<BlockMeta>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct TxRef {
+    /// Transaction reference index, to avoid duplicating long txids
+    pub t: usize,
+    /// Block height reference, to avoid duplicating long block hashes and timestamps
+    pub h: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Ord, PartialOrd)]
+pub struct BlockMeta {
+    pub b: BlockHash,
+    pub t: Timestamp,
+    pub h: Height,
 }
 
 impl WaterfallResponse {
@@ -79,6 +107,91 @@ impl TxSeen {
     }
 }
 
+impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
+    type Error = ();
+
+    fn try_from(value: WaterfallResponse) -> Result<Self, Self::Error> {
+        let txids: BTreeSet<Txid> = value
+            .txs_seen
+            .iter()
+            .flat_map(|(_, v)| v.iter())
+            .flat_map(|a| a.iter())
+            .map(|a| a.txid)
+            .collect();
+        let block_hashes_timestamps: BTreeSet<BlockMeta> = value
+            .txs_seen
+            .iter()
+            .flat_map(|(_, v)| v.iter())
+            .flat_map(|a| a.iter())
+            .map(|a| {
+                Ok::<BlockMeta, ()>(BlockMeta {
+                    b: a.block_hash.ok_or(())?,
+                    t: a.block_timestamp.ok_or(())?,
+                    h: a.height,
+                })
+            })
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        let mut txs_seen = BTreeMap::new();
+        for (d, v) in value.txs_seen.iter() {
+            let mut txs_seen_d = vec![];
+            for a in v.iter() {
+                let mut current_script = vec![];
+                for b in a.iter() {
+                    // TODO I used BTreeSet thinking you can binary search on it,
+                    // but it doesn't seem possible, maybe sorted and unique vec then?
+                    let t = txids
+                        .iter()
+                        .position(|a| a == &b.txid)
+                        .expect("by construction");
+                    let h = block_hashes_timestamps
+                        .iter()
+                        .position(|a| a.b == b.block_hash.expect("would have errored before"))
+                        .expect("by construction");
+                    current_script.push(TxRef { t, h });
+                }
+                txs_seen_d.push(current_script);
+            }
+            txs_seen.insert(d.clone(), txs_seen_d);
+        }
+        let r = WaterfallResponseV3 {
+            txs_seen,
+            page: value.page,
+            tip: value.tip.ok_or(())?,
+            txids: txids.into_iter().collect(),
+            block_hashes_timestamps: block_hashes_timestamps.into_iter().collect(),
+        };
+        Ok(r)
+    }
+}
+
+impl From<WaterfallResponseV3> for WaterfallResponse {
+    fn from(value: WaterfallResponseV3) -> Self {
+        let mut txs_seen = BTreeMap::new();
+        for (d, v) in value.txs_seen.iter() {
+            let mut txs_seen_d = vec![];
+            for a in v.iter() {
+                let mut current_script = vec![];
+                for b in a.iter() {
+                    current_script.push(TxSeen {
+                        txid: value.txids[b.t],
+                        height: value.block_hashes_timestamps[b.h].h as u32,
+                        block_hash: Some(value.block_hashes_timestamps[b.h].b),
+                        block_timestamp: Some(value.block_hashes_timestamps[b.h].t),
+                    });
+                }
+                txs_seen_d.push(current_script);
+            }
+            txs_seen.insert(d.clone(), txs_seen_d);
+        }
+        let r = WaterfallResponse {
+            txs_seen,
+            page: value.page,
+            tip: Some(value.tip),
+        };
+        r
+    }
+}
+
 lazy_static! {
     pub(crate) static ref WATERFALLS_COUNTER: Counter = register_counter!(opts!(
         "waterfalls_requests_total",
@@ -98,4 +211,23 @@ fn hash_str(s: &str) -> u64 {
     let mut hasher = fxhash::FxHasher::default();
     hasher.write(s.as_bytes());
     hasher.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_waterfall_response_v3_v2_roundtrip() {
+        let s = include_str!("../tests/data/waterfall_response_v2.json");
+        assert_eq!(s.len(), 8065);
+        let v2: WaterfallResponse = serde_json::from_str(&s).unwrap();
+
+        let v3: WaterfallResponseV3 = v2.clone().try_into().unwrap();
+        let s = serde_json::to_string(&v3).unwrap();
+        println!("{}", s);
+        assert_eq!(s.len(), 3336);
+        let v2_back: WaterfallResponse = v3.into();
+        assert_eq!(v2, v2_back);
+    }
 }

@@ -35,6 +35,10 @@ age = { version = "0.11.0", features = ["armor"] }
 base64 = "0.21"
 prometheus = { version = "0.13.4", features = ["process"] }
 lazy_static = "1.5.0"
+minicbor = { version = "0.23", default-features = false, features = [
+    "alloc",
+    "derive",
+] }
 
 
 [dev-dependencies]
