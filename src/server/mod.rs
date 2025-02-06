@@ -18,7 +18,7 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
-// mod cbor;
+mod cbor;
 pub mod encryption;
 mod mempool;
 pub mod preload;
