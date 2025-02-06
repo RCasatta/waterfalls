@@ -22,9 +22,17 @@ pub struct DBStore {
     salt: u64,
 }
 
-const UTXO_CF: &str = "utxo"; // OutPoint -> ScriptHash // this is needed for index building, not used on waterfall request
+// Can txid be indexed by u32? At the time of writing (2025-02-06) there are about 1B txs on mainnet, so it's possible to have u32 -> txid (u32 is 4B).
+// The issue is that the search must be bidirectional, so we need to store the txid -> u32 mapping in another table. It may be not worth it.
 
-// TODO this can become ScriptHash -> Vec<(u32, Height)>  with another table Txid -> u32 would save on space but require 2 db access with multiget versus current 1
+// this is needed for index building, not used on waterfall request
+// TODO Can we change this to Txid -> Vec<ScriptHash> (with script hash = 0 if spent) ? This would allow to compute a descriptor utxos via another multiget at the cost of complex/slower indexing.
+// In Bitcoin mainnet there are about 180M utxos, so this table would be 180M*(36+8) ~= 8GB
+const UTXO_CF: &str = "utxo"; // OutPoint -> ScriptHash
+
+// A single multiget on this is enough to compute the full get_history of a wallet.
+// In Liquid mainnet the db is about 748MB (2025-02-06)
+// In Bitcoin mainnet we have ~3B non-provably-unspendable-outputs (2025-02-06), so this table would be 3B*(8+32+4) = 132GB
 const HISTORY_CF: &str = "history"; // ScriptHash -> Vec<(Txid, Height)>
 
 const OTHER_CF: &str = "other";
