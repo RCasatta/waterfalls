@@ -1,6 +1,6 @@
 use crate::{
     server::{inner_main, sign::p2pkh, Arguments},
-    WaterfallResponse,
+    WaterfallResponse, WaterfallResponseV3,
 };
 use std::{
     error::Error,
@@ -276,7 +276,27 @@ impl WaterfallClient {
     ///
     /// it can accept the bitcoin descriptor part of the ct descriptor in plaintext
     /// or encrypted with the server key
-    pub async fn waterfalls(&self, desc: &str) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
+    pub async fn waterfalls(&self, desc: &str) -> anyhow::Result<(WaterfallResponseV3, HeaderMap)> {
+        // this code is duplicated from waterfalls_version but we need to use the v3 endpoint which return a different object
+        let descriptor_url = format!("{}/v3/waterfalls", self.base_url);
+
+        let response = self
+            .client
+            .get(&descriptor_url)
+            .query(&[("descriptor", desc)])
+            .send()
+            .await?;
+
+        let headers = response.headers().clone();
+
+        let body = response.text().await?;
+        Ok((serde_json::from_str(&body)?, headers))
+    }
+
+    pub async fn waterfalls_v2(
+        &self,
+        desc: &str,
+    ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         self.waterfalls_version(desc, 2).await
     }
 
@@ -312,7 +332,7 @@ impl WaterfallClient {
         bitcoin_desc: &str,
     ) -> anyhow::Result<WaterfallResponse> {
         for _ in 0..50 {
-            if let Ok(res) = self.waterfalls(&bitcoin_desc).await {
+            if let Ok(res) = self.waterfalls_v2(&bitcoin_desc).await {
                 if !res.0.is_empty() {
                     return Ok(res.0);
                 }

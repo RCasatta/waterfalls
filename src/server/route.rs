@@ -3,7 +3,7 @@ use crate::{
     hash_str,
     server::{sign::sign_response, Error, State},
     store::Store,
-    TxSeen, WaterfallRequest, WaterfallResponse,
+    TxSeen, WaterfallRequest, WaterfallResponse, WaterfallResponseV3,
 };
 use age::x25519::Identity;
 use elements::{
@@ -54,11 +54,15 @@ pub async fn route(
         }
         (&Method::GET, "/v1/waterfalls", Some(query)) => {
             let inputs = parse_query(query, &state.key)?;
-            handle_waterfalls_req(state, &inputs, is_testnet, false).await
+            handle_waterfalls_req(state, &inputs, is_testnet, false, false).await
         }
         (&Method::GET, "/v2/waterfalls", Some(query)) => {
             let inputs = parse_query(query, &state.key)?;
-            handle_waterfalls_req(state, &inputs, is_testnet, true).await
+            handle_waterfalls_req(state, &inputs, is_testnet, true, false).await
+        }
+        (&Method::GET, "/v3/waterfalls", Some(query)) => {
+            let inputs = parse_query(query, &state.key)?;
+            handle_waterfalls_req(state, &inputs, is_testnet, true, true).await
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {
             let ts = state.tip_timestamp().await;
@@ -310,6 +314,7 @@ async fn handle_waterfalls_req(
     inputs: &WaterfallRequest,
     is_testnet: bool,
     with_tip: bool,
+    v3: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
     let desc_str = &inputs.descriptor;
     let db = &state.store;
@@ -380,12 +385,20 @@ async fn handle_waterfalls_req(
                 None
             };
 
-            let result = serde_json::to_string(&WaterfallResponse {
+            let waterfall_response = WaterfallResponse {
                 txs_seen: map,
                 page: inputs.page,
                 tip,
-            })
-            .expect("does not contain a map with non-string keys");
+            };
+            let result = if v3 {
+                let waterfall_response_v3: WaterfallResponseV3 =
+                    waterfall_response.try_into().expect("has tip");
+                serde_json::to_string(&waterfall_response_v3)
+                    .expect("does not contain a map with non-string keys")
+            } else {
+                serde_json::to_string(&waterfall_response)
+                    .expect("does not contain a map with non-string keys")
+            };
 
             let desc_hash = hash_str(desc_str);
 
