@@ -3,11 +3,14 @@ use std::{
     hash::Hasher,
 };
 
+use crate::cbor::cbor_block_hash;
 use elements::{BlockHash, Txid};
 use lazy_static::lazy_static;
+use minicbor::{Decode, Encode};
 use prometheus::{labels, opts, register_counter, register_histogram_vec, Counter, HistogramVec};
 use serde::{Deserialize, Serialize};
 
+mod cbor;
 mod fetch;
 pub mod server;
 mod store;
@@ -53,10 +56,14 @@ pub struct WaterfallResponseV3 {
 /// The first element is the transaction reference index, the second is the block reference index
 type TxRef = [usize; 2];
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Ord, PartialOrd)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Ord, PartialOrd, Encode, Decode)]
 pub struct BlockMeta {
+    /// The block hash. It's not a `BlockHash` to support CBOR encoding
+    #[cbor(n(0), with = "cbor_block_hash")]
     pub b: BlockHash,
+    #[cbor(n(1))]
     pub t: Timestamp,
+    #[cbor(n(2))]
     pub h: Height,
 }
 
