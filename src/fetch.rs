@@ -211,7 +211,7 @@ impl Client {
             .as_str()
             .ok_or(anyhow!("unexpected non-string result"))?;
 
-        let txid = Txid::from_str(&txid_text)?;
+        let txid = Txid::from_str(txid_text)?;
         assert_eq!(txid, tx.txid());
         Ok(txid)
     }

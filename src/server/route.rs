@@ -141,7 +141,7 @@ pub async fn route(
                 (Some(""), Some("address"), Some(addr), Some("txs"), None) => {
                     let addr = Address::from_str(addr).map_err(|_| Error::InvalidAddress)?;
 
-                    handle_single_address(&state, &addr, is_testnet).await
+                    handle_single_address(state, &addr, is_testnet).await
                 }
 
                 (Some(""), Some("tx"), Some(v), Some("raw"), None) => {
@@ -242,9 +242,9 @@ fn any_resp(
         builder = builder.header("X-Content-Digest", msg_and_signature.message.to_string());
     }
 
-    Ok(builder
+    builder
         .body(Full::new(bytes.into()))
-        .map_err(|_| Error::Other)?)
+        .map_err(|_| Error::Other)
 }
 
 async fn handle_single_address(
@@ -391,7 +391,7 @@ async fn handle_waterfalls_req(
                 }
             }
 
-            let elements: usize = map.iter().map(|(_, v)| v.len()).sum();
+            let elements: usize = map.values().map(|v| v.len()).sum();
             let tip = if with_tip {
                 state.tip_hash().await
             } else {
@@ -421,17 +421,15 @@ async fn handle_waterfalls_req(
                         .as_bytes()
                         .to_vec()
                 }
+            } else if cbor {
+                let mut bytes = Vec::new();
+                minicbor::encode(&waterfall_response, &mut bytes).unwrap();
+                bytes
             } else {
-                if cbor {
-                    let mut bytes = Vec::new();
-                    minicbor::encode(&waterfall_response, &mut bytes).unwrap();
-                    bytes
-                } else {
-                    serde_json::to_string(&waterfall_response)
-                        .expect("does not contain a map with non-string keys")
-                        .as_bytes()
-                        .to_vec()
-                }
+                serde_json::to_string(&waterfall_response)
+                    .expect("does not contain a map with non-string keys")
+                    .as_bytes()
+                    .to_vec()
             };
 
             let desc_hash = hash_str(desc_str);

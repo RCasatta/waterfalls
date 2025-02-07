@@ -40,11 +40,11 @@ pub fn verify_response(
 ) -> Result<bool, MessageSignatureError> {
     let msg_hash = signed_msg_hash(response);
 
-    signature.is_signed_by_address(&secp, address, msg_hash)
+    signature.is_signed_by_address(secp, address, msg_hash)
 }
 
 pub(crate) fn p2pkh(secp: &Secp256k1<All>, wif_key: &PrivateKey) -> bitcoin::Address {
-    bitcoin::Address::p2pkh(&wif_key.public_key(&secp), wif_key.network)
+    bitcoin::Address::p2pkh(wif_key.public_key(secp), wif_key.network)
 }
 
 /// Hash message for signature using Bitcoin's message signing format.

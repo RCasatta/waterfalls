@@ -16,6 +16,12 @@ pub struct Mempool {
     outpoints_created: HashMap<OutPoint, ScriptHash>,
 }
 
+impl Default for Mempool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Mempool {
     pub fn new() -> Mempool {
         Mempool {
@@ -81,23 +87,23 @@ impl Mempool {
                     }
                 };
 
-                txid_hashes.entry(txid).or_insert(HashSet::new()).insert(e);
+                txid_hashes.entry(txid).or_default().insert(e);
                 prevouts_index += 1;
             }
 
             for output in tx.output.iter() {
                 let e = db.hash(&output.script_pubkey);
-                txid_hashes.entry(txid).or_insert(HashSet::new()).insert(e);
+                txid_hashes.entry(txid).or_default().insert(e);
             }
         }
 
         for (k, v) in txid_hashes {
             self.txid_hashes
                 .entry(k)
-                .or_insert(HashSet::new())
+                .or_default()
                 .extend(&v);
             for e in v {
-                self.hash_txids.entry(e).or_insert(vec![]).push(k);
+                self.hash_txids.entry(e).or_default().push(k);
             }
         }
     }

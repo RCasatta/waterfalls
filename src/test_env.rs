@@ -60,8 +60,10 @@ pub async fn launch_with_node(elementsd: BitcoinD) -> TestEnv {
 }
 
 async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> TestEnv {
-    let mut args = Arguments::default();
-    args.node_url = Some(elementsd.rpc_url());
+    let mut args = Arguments {
+        node_url: Some(elementsd.rpc_url()),
+        ..Default::default()
+    };
     let available_port = get_available_port().unwrap();
     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), available_port);
     let base_url = format!("http://{socket_addr}");
@@ -212,7 +214,7 @@ impl TestEnv {
             .call::<Value>("createrawtransaction", &[param1, param2])
             .unwrap();
         let tx_hex = val.as_str().unwrap();
-        let bytes = Vec::<u8>::from_hex(&tx_hex).unwrap();
+        let bytes = Vec::<u8>::from_hex(tx_hex).unwrap();
         elements::Transaction::consensus_decode(&bytes[..]).unwrap()
     }
 
@@ -227,7 +229,7 @@ impl TestEnv {
             )
             .unwrap();
         let tx_hex = val.as_str().unwrap();
-        let bytes = Vec::<u8>::from_hex(&tx_hex).unwrap();
+        let bytes = Vec::<u8>::from_hex(tx_hex).unwrap();
         elements::Transaction::consensus_decode(&bytes[..]).unwrap()
     }
 
@@ -245,7 +247,7 @@ impl TestEnv {
             )
             .unwrap();
         let tx_hex = val.get("hex").unwrap().as_str().unwrap();
-        let bytes = Vec::<u8>::from_hex(&tx_hex).unwrap();
+        let bytes = Vec::<u8>::from_hex(tx_hex).unwrap();
         elements::Transaction::consensus_decode(&bytes[..]).unwrap()
     }
 }
@@ -332,7 +334,7 @@ impl WaterfallClient {
         bitcoin_desc: &str,
     ) -> anyhow::Result<WaterfallResponse> {
         for _ in 0..50 {
-            if let Ok(res) = self.waterfalls_v2(&bitcoin_desc).await {
+            if let Ok(res) = self.waterfalls_v2(bitcoin_desc).await {
                 if !res.0.is_empty() {
                     return Ok(res.0);
                 }
@@ -384,7 +386,7 @@ impl WaterfallClient {
         let url = format!("{}/block/{}/header", self.base_url, block_hash);
         let response = self.client.get(&url).send().await?;
         let text = response.text().await?;
-        let bytes = hex::decode(&text)?;
+        let bytes = hex::decode(text)?;
         let header = BlockHeader::consensus_decode(&bytes[..])?;
         Ok(header)
     }

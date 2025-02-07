@@ -150,7 +150,7 @@ pub async fn inner_main(
     let key = args
         .server_key
         .clone()
-        .unwrap_or_else(|| Identity::generate());
+        .unwrap_or_else(Identity::generate);
 
     let network_kind = if args.testnet {
         NetworkKind::Test
@@ -169,7 +169,6 @@ pub async fn inner_main(
 
     let wif_key = args
         .wif_key
-        .clone()
         .unwrap_or_else(|| PrivateKey::generate(network_kind));
 
     let state = Arc::new(State::new(store, key, wif_key)?);

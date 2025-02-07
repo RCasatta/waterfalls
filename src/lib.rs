@@ -132,7 +132,7 @@ impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
         txids.sort();
         txids.dedup();
 
-        let mut block_meta: Vec<BlockMeta> = value
+        let mut blocks_meta: Vec<BlockMeta> = value
             .txs_seen
             .iter()
             .flat_map(|(_, v)| v.iter())
@@ -145,8 +145,8 @@ impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        block_meta.sort();
-        block_meta.dedup();
+        blocks_meta.sort();
+        blocks_meta.dedup();
 
         let mut txs_seen = BTreeMap::new();
         for (d, v) in value.txs_seen.iter() {
@@ -155,7 +155,7 @@ impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
                 let mut current_script = vec![];
                 for b in a.iter() {
                     let t = txids.binary_search(&b.txid).expect("by construction");
-                    let b = block_meta
+                    let b = blocks_meta
                         .binary_search_by_key(
                             &b.block_hash.expect("would have errored before"),
                             |e| e.b,
@@ -171,8 +171,8 @@ impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
             txs_seen,
             page: value.page,
             tip: value.tip.ok_or(())?,
-            txids: txids.into_iter().collect(),
-            blocks_meta: block_meta.into_iter().collect(),
+            txids,
+            blocks_meta,
         };
         Ok(r)
     }
@@ -188,7 +188,7 @@ impl From<WaterfallResponseV3> for WaterfallResponse {
                 for b in a.iter() {
                     current_script.push(TxSeen {
                         txid: value.txids[b[0]],
-                        height: value.blocks_meta[b[1]].h as u32,
+                        height: value.blocks_meta[b[1]].h,
                         block_hash: Some(value.blocks_meta[b[1]].b),
                         block_timestamp: Some(value.blocks_meta[b[1]].t),
                     });
@@ -197,12 +197,12 @@ impl From<WaterfallResponseV3> for WaterfallResponse {
             }
             txs_seen.insert(d.clone(), txs_seen_d);
         }
-        let r = WaterfallResponse {
+
+        WaterfallResponse {
             txs_seen,
             page: value.page,
             tip: Some(value.tip),
-        };
-        r
+        }
     }
 }
 

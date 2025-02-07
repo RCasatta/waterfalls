@@ -7,7 +7,7 @@ use super::Error;
 
 pub fn encrypt(plaintext: &str, recipient: Recipient) -> Result<String, Error> {
     let encryptor =
-        age::Encryptor::with_recipients(vec![recipient].iter().map(|e| e as &dyn age::Recipient))
+        age::Encryptor::with_recipients([recipient].iter().map(|e| e as &dyn age::Recipient))
             .expect("we provided a recipient");
 
     let mut encrypted = vec![];

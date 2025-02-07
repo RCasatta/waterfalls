@@ -4,8 +4,8 @@ pub(crate) mod cbor_block_hash {
     use elements::BlockHash;
     use minicbor::{bytes::ByteArray, Decoder, Encoder};
 
-    pub(crate) fn decode<'b, Ctx>(
-        d: &mut Decoder<'b>,
+    pub(crate) fn decode<Ctx>(
+        d: &mut Decoder<'_>,
         _ctx: &mut Ctx,
     ) -> Result<BlockHash, minicbor::decode::Error> {
         let bytes = d.decode::<ByteArray<32>>()?;
@@ -29,12 +29,12 @@ pub(crate) mod cbor_opt_block_hash {
     use elements::BlockHash;
     use minicbor::{bytes::ByteArray, Decoder, Encoder};
 
-    pub(crate) fn decode<'b, Ctx>(
-        d: &mut Decoder<'b>,
+    pub(crate) fn decode<Ctx>(
+        d: &mut Decoder<'_>,
         _ctx: &mut Ctx,
     ) -> Result<Option<BlockHash>, minicbor::decode::Error> {
         let bytes = d.decode::<ByteArray<32>>()?;
-        if bytes.as_slice() == &[0u8; 32] {
+        if bytes.as_slice() == [0u8; 32] {
             Ok(None)
         } else {
             Ok(Some(
@@ -63,8 +63,8 @@ pub(crate) mod cbor_txids {
     use elements::Txid;
     use minicbor::{bytes::ByteArray, Decoder, Encoder};
 
-    pub(crate) fn decode<'b, Ctx>(
-        d: &mut Decoder<'b>,
+    pub(crate) fn decode<Ctx>(
+        d: &mut Decoder<'_>,
         _ctx: &mut Ctx,
     ) -> Result<Vec<Txid>, minicbor::decode::Error> {
         let len = d.array()?.unwrap(); // TODO unwrap?
@@ -95,8 +95,8 @@ pub(crate) mod cbor_txid {
     use elements::Txid;
     use minicbor::{bytes::ByteArray, Decoder, Encoder};
 
-    pub(crate) fn decode<'b, Ctx>(
-        d: &mut Decoder<'b>,
+    pub(crate) fn decode<Ctx>(
+        d: &mut Decoder<'_>,
         _ctx: &mut Ctx,
     ) -> Result<Txid, minicbor::decode::Error> {
         let bytes = d.decode::<ByteArray<32>>()?;

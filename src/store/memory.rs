@@ -94,7 +94,7 @@ impl MemoryStore {
     fn update_history(&self, add: HashMap<ScriptHash, Vec<TxSeen>>) {
         let mut history = self.history.lock().unwrap();
         for (k, v) in add {
-            history.entry(k).or_insert(vec![]).extend(v);
+            history.entry(k).or_default().extend(v);
         }
     }
     fn insert_utxos(&self, adds: &HashMap<OutPoint, ScriptHash>) {
