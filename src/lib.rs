@@ -3,7 +3,7 @@ use std::{
     hash::Hasher,
 };
 
-use crate::cbor::{cbor_block_hash, cbor_txids};
+use crate::cbor::{cbor_block_hash, cbor_opt_block_hash, cbor_txid, cbor_txids};
 use elements::{BlockHash, Txid};
 use lazy_static::lazy_static;
 use minicbor::{Decode, Encode};
@@ -34,11 +34,14 @@ pub struct WaterfallRequest {
 }
 
 /// Response from the waterfalls endpoint
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Encode, Decode)]
 pub struct WaterfallResponse {
+    #[cbor(n(0))]
     pub txs_seen: BTreeMap<String, Vec<Vec<TxSeen>>>,
+    #[cbor(n(1))]
     pub page: u16,
 
+    #[cbor(n(2), with = "cbor_opt_block_hash")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tip: Option<BlockHash>,
 }
@@ -88,14 +91,18 @@ impl WaterfallResponse {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Encode, Decode)]
 pub struct TxSeen {
+    #[cbor(n(0), with = "cbor_txid")]
     pub txid: Txid,
+    #[cbor(n(1))]
     pub height: Height,
 
+    #[cbor(n(2), with = "cbor_opt_block_hash")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_hash: Option<BlockHash>,
 
+    #[cbor(n(3))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_timestamp: Option<Timestamp>,
 }

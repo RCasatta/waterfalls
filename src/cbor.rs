@@ -23,6 +23,40 @@ pub(crate) mod cbor_block_hash {
     }
 }
 
+pub(crate) mod cbor_opt_block_hash {
+
+    use bitcoin::hashes::Hash;
+    use elements::BlockHash;
+    use minicbor::{bytes::ByteArray, Decoder, Encoder};
+
+    pub(crate) fn decode<'b, Ctx>(
+        d: &mut Decoder<'b>,
+        _ctx: &mut Ctx,
+    ) -> Result<Option<BlockHash>, minicbor::decode::Error> {
+        let bytes = d.decode::<ByteArray<32>>()?;
+        if bytes.as_slice() == &[0u8; 32] {
+            Ok(None)
+        } else {
+            Ok(Some(
+                BlockHash::from_slice(bytes.as_slice())
+                    .expect("every 32 bytes is a valid block hash"),
+            ))
+        }
+    }
+
+    pub(crate) fn encode<Ctx, W: minicbor::encode::Write>(
+        v: &Option<BlockHash>,
+        e: &mut Encoder<W>,
+        _ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        match v {
+            Some(block_hash) => e.bytes(block_hash.as_ref())?,
+            None => e.bytes(&[0u8; 32])?,
+        };
+        Ok(())
+    }
+}
+
 pub(crate) mod cbor_txids {
 
     use elements::hashes::Hash;
@@ -55,6 +89,31 @@ pub(crate) mod cbor_txids {
     }
 }
 
+pub(crate) mod cbor_txid {
+
+    use elements::hashes::Hash;
+    use elements::Txid;
+    use minicbor::{bytes::ByteArray, Decoder, Encoder};
+
+    pub(crate) fn decode<'b, Ctx>(
+        d: &mut Decoder<'b>,
+        _ctx: &mut Ctx,
+    ) -> Result<Txid, minicbor::decode::Error> {
+        let bytes = d.decode::<ByteArray<32>>()?;
+        // TODO use array
+        Ok(Txid::from_slice(bytes.as_slice()).expect("every 32 bytes is a valid txid"))
+    }
+
+    pub(crate) fn encode<Ctx, W: minicbor::encode::Write>(
+        v: &Txid,
+        e: &mut Encoder<W>,
+        _ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(v.as_ref())?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -64,6 +123,7 @@ mod tests {
 
     use super::cbor_txids;
     use crate::BlockMeta;
+    use crate::WaterfallResponse;
     use crate::WaterfallResponseV3;
 
     #[test]
@@ -111,10 +171,16 @@ mod tests {
         let mut buffer = vec![];
         minicbor::encode(&resp, &mut buffer).unwrap();
         assert_eq!(buffer.len(), 1529);
-        std::fs::write("waterfall_response_v3.cbor", &buffer).unwrap();
-        std::fs::write("waterfall_response_v3.cbor.hex", buffer.to_hex()).unwrap();
-
         let resp_decoded: WaterfallResponseV3 = minicbor::decode(&buffer).unwrap();
+        assert_eq!(resp_decoded, resp);
+
+        let s = include_str!("../tests/data/waterfall_response_v2.json");
+        assert_eq!(s.len(), 8065);
+        let resp: WaterfallResponse = serde_json::from_str(&s).unwrap();
+        let mut buffer = vec![];
+        minicbor::encode(&resp, &mut buffer).unwrap();
+        assert_eq!(buffer.len(), 3312);
+        let resp_decoded: WaterfallResponse = minicbor::decode(&buffer).unwrap();
         assert_eq!(resp_decoded, resp);
     }
 }
