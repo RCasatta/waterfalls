@@ -54,15 +54,27 @@ pub async fn route(
         }
         (&Method::GET, "/v1/waterfalls", Some(query)) => {
             let inputs = parse_query(query, &state.key)?;
-            handle_waterfalls_req(state, &inputs, is_testnet, false, false).await
+            handle_waterfalls_req(state, &inputs, is_testnet, false, false, false).await
         }
         (&Method::GET, "/v2/waterfalls", Some(query)) => {
             let inputs = parse_query(query, &state.key)?;
-            handle_waterfalls_req(state, &inputs, is_testnet, true, false).await
+            handle_waterfalls_req(state, &inputs, is_testnet, true, false, false).await
         }
         (&Method::GET, "/v3/waterfalls", Some(query)) => {
             let inputs = parse_query(query, &state.key)?;
-            handle_waterfalls_req(state, &inputs, is_testnet, true, true).await
+            handle_waterfalls_req(state, &inputs, is_testnet, true, true, false).await
+        }
+        (&Method::GET, "/v1/waterfalls.cbor", Some(query)) => {
+            let inputs = parse_query(query, &state.key)?;
+            handle_waterfalls_req(state, &inputs, is_testnet, false, false, true).await
+        }
+        (&Method::GET, "/v2/waterfalls.cbor", Some(query)) => {
+            let inputs = parse_query(query, &state.key)?;
+            handle_waterfalls_req(state, &inputs, is_testnet, true, false, true).await
+        }
+        (&Method::GET, "/v3/waterfalls.cbor", Some(query)) => {
+            let inputs = parse_query(query, &state.key)?;
+            handle_waterfalls_req(state, &inputs, is_testnet, true, true, true).await
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {
             let ts = state.tip_timestamp().await;
@@ -315,6 +327,7 @@ async fn handle_waterfalls_req(
     is_testnet: bool,
     with_tip: bool,
     v3: bool,
+    cbor: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
     let desc_str = &inputs.descriptor;
     let db = &state.store;
@@ -390,14 +403,35 @@ async fn handle_waterfalls_req(
                 page: inputs.page,
                 tip,
             };
+            let content = if cbor {
+                "application/cbor"
+            } else {
+                "application/json"
+            };
             let result = if v3 {
                 let waterfall_response_v3: WaterfallResponseV3 =
                     waterfall_response.try_into().expect("has tip");
-                serde_json::to_string(&waterfall_response_v3)
-                    .expect("does not contain a map with non-string keys")
+                if cbor {
+                    let mut bytes = Vec::new();
+                    minicbor::encode(&waterfall_response_v3, &mut bytes).unwrap();
+                    bytes
+                } else {
+                    serde_json::to_string(&waterfall_response_v3)
+                        .expect("does not contain a map with non-string keys")
+                        .as_bytes()
+                        .to_vec()
+                }
             } else {
-                serde_json::to_string(&waterfall_response)
-                    .expect("does not contain a map with non-string keys")
+                if cbor {
+                    let mut bytes = Vec::new();
+                    minicbor::encode(&waterfall_response, &mut bytes).unwrap();
+                    bytes
+                } else {
+                    serde_json::to_string(&waterfall_response)
+                        .expect("does not contain a map with non-string keys")
+                        .as_bytes()
+                        .to_vec()
+                }
             };
 
             let desc_hash = hash_str(desc_str);
@@ -409,11 +443,11 @@ async fn handle_waterfalls_req(
             crate::WATERFALLS_COUNTER.inc();
             timer.observe_duration();
 
-            let m = sign_response(&state.secp, &state.wif_key, result.as_bytes());
+            let m = sign_response(&state.secp, &state.wif_key, &result);
             any_resp(
-                result.into_bytes(),
+                result,
                 hyper::StatusCode::OK,
-                Some("application/json"),
+                Some(content),
                 Some(5),
                 Some(m),
             )
