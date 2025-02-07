@@ -3,7 +3,7 @@ use std::{
     hash::Hasher,
 };
 
-use crate::cbor::cbor_block_hash;
+use crate::cbor::{cbor_block_hash, cbor_txids};
 use elements::{BlockHash, Txid};
 use lazy_static::lazy_static;
 use minicbor::{Decode, Encode};
@@ -44,12 +44,17 @@ pub struct WaterfallResponse {
 }
 
 /// Response from the waterfalls endpoint
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Encode, Decode)]
 pub struct WaterfallResponseV3 {
+    #[cbor(n(0))]
     pub txs_seen: BTreeMap<String, Vec<Vec<TxRef>>>,
+    #[cbor(n(1))]
     pub page: u16,
+    #[cbor(n(2), with = "cbor_block_hash")]
     pub tip: BlockHash,
+    #[cbor(n(3), with = "cbor_txids")]
     pub txids: Vec<Txid>,
+    #[cbor(n(4))]
     pub blocks_meta: Vec<BlockMeta>,
 }
 
