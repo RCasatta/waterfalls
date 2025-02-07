@@ -409,7 +409,7 @@ async fn handle_waterfalls_req(
             crate::WATERFALLS_COUNTER.inc();
             timer.observe_duration();
 
-            let m = sign_response(&state.secp, &state.wif_key, &result);
+            let m = sign_response(&state.secp, &state.wif_key, result.as_bytes());
             any_resp(
                 result.into_bytes(),
                 hyper::StatusCode::OK,

@@ -131,9 +131,13 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let message = serde_json::to_string(&result).unwrap();
     let signature = headers.get("X-Content-Signature").unwrap();
     let signature = MessageSignature::from_str(signature.to_str().unwrap()).unwrap();
-    let sign_result =
-        waterfalls::server::sign::verify_response(&secp, &server_address, &message, &signature)
-            .unwrap();
+    let sign_result = waterfalls::server::sign::verify_response(
+        &secp,
+        &server_address,
+        message.as_bytes(),
+        &signature,
+    )
+    .unwrap();
     assert!(sign_result);
 
     // Test v3
