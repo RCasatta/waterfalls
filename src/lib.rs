@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    hash::Hasher,
-};
+use std::{collections::BTreeMap, hash::Hasher};
 
 use crate::cbor::{cbor_block_hash, cbor_opt_block_hash, cbor_txid, cbor_txids};
 use elements::{BlockHash, Txid};
@@ -125,14 +122,17 @@ impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
     type Error = ();
 
     fn try_from(value: WaterfallResponse) -> Result<Self, Self::Error> {
-        let txids: BTreeSet<Txid> = value
+        let mut txids: Vec<Txid> = value
             .txs_seen
             .iter()
             .flat_map(|(_, v)| v.iter())
             .flat_map(|a| a.iter())
             .map(|a| a.txid)
             .collect();
-        let block_meta: BTreeSet<BlockMeta> = value
+        txids.sort();
+        txids.dedup();
+
+        let mut block_meta: Vec<BlockMeta> = value
             .txs_seen
             .iter()
             .flat_map(|(_, v)| v.iter())
@@ -144,22 +144,22 @@ impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
                     h: a.height,
                 })
             })
-            .collect::<Result<BTreeSet<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
+        block_meta.sort();
+        block_meta.dedup();
+
         let mut txs_seen = BTreeMap::new();
         for (d, v) in value.txs_seen.iter() {
             let mut txs_seen_d = vec![];
             for a in v.iter() {
                 let mut current_script = vec![];
                 for b in a.iter() {
-                    // TODO I used BTreeSet thinking you can binary search on it,
-                    // but it doesn't seem possible, maybe sorted and unique vec then?
-                    let t = txids
-                        .iter()
-                        .position(|a| a == &b.txid)
-                        .expect("by construction");
+                    let t = txids.binary_search(&b.txid).expect("by construction");
                     let b = block_meta
-                        .iter()
-                        .position(|a| a.b == b.block_hash.expect("would have errored before"))
+                        .binary_search_by_key(
+                            &b.block_hash.expect("would have errored before"),
+                            |e| e.b,
+                        )
                         .expect("by construction");
                     current_script.push([t, b]);
                 }
