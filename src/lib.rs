@@ -219,6 +219,12 @@ lazy_static! {
         &["handler"]
     )
     .unwrap();
+    pub(crate) static ref WATERFALLS_DB_HISTORY_HISTOGRAM: HistogramVec = register_histogram_vec!(
+        "waterfalls_request_db_history_duration_seconds",
+        "The waterfalls request db history latencies in seconds.",
+        &["handler"]
+    )
+    .unwrap();
 }
 
 fn hash_str(s: &str) -> u64 {

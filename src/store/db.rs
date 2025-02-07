@@ -207,6 +207,10 @@ impl Store for DBStore {
 
     /// get the block heights where the given scripts hash have been seen
     fn get_history(&self, scripts: &[ScriptHash]) -> Result<Vec<Vec<TxSeen>>> {
+        let timer = crate::WATERFALLS_DB_HISTORY_HISTOGRAM
+            .with_label_values(&["all"])
+            .start_timer();
+
         if scripts.is_empty() {
             return Ok(vec![]);
         }
@@ -227,6 +231,7 @@ impl Store for DBStore {
                 }
             }
         }
+        timer.observe_duration();
         Ok(result)
     }
 
