@@ -46,6 +46,7 @@ pub(crate) fn p2pkh(secp: &Secp256k1<All>, wif_key: &PrivateKey) -> bitcoin::Add
 #[cfg(test)]
 mod tests {
     use elements::bitcoin::NetworkKind;
+    use std::str::FromStr;
 
     use super::*;
 
@@ -60,6 +61,20 @@ mod tests {
         let m = sign_response(&secp, &private_key, response);
 
         let result = verify_response(&secp, &address, response, &m.signature).unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn test_verify_fixed_values() {
+        let address = "mj55KBETZ5vd5yVaWN9t9EEvJPsCmYVYCr";
+        let response = "test";
+        let signature = "IDL1hPIcEj6E9j/uXQugiGZem6fxZQQYALI0j1yQ+GqdaTKwvulr6eUuKkzmCDHzHdzFD8k3AVdL6/yzqyn9dZA=";
+        let secp = bitcoin::key::Secp256k1::new();
+        let address = bitcoin::Address::from_str(address)
+            .unwrap()
+            .assume_checked();
+        let signature = MessageSignature::from_base64(signature).unwrap();
+        let result = verify_response(&secp, &address, response, &signature).unwrap();
         assert!(result);
     }
 }
