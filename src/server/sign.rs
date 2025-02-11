@@ -14,7 +14,6 @@ pub struct MessageAndSignature {
     pub signature: MessageSignature,
 }
 
-// TODO accept response as &[u8]
 pub(crate) fn sign_response(
     secp: &Secp256k1<All>,
     key: &PrivateKey,
@@ -31,7 +30,6 @@ pub(crate) fn sign_response(
     MessageAndSignature { message, signature }
 }
 
-// TODO accept response as &[u8]
 pub fn verify_response(
     secp: &Secp256k1<All>,
     address: &bitcoin::Address,
