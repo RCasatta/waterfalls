@@ -27,7 +27,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-use super::{encryption, sign::MessageAndSignature};
+use super::{encryption, sign::MsgSigAddress};
 
 const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 500; // TODO reduce to 50 and implement paging
@@ -225,7 +225,7 @@ fn any_resp(
     status: StatusCode,
     content: Option<&str>,
     cache: Option<u32>,
-    msg_and_signature: Option<MessageAndSignature>,
+    msg_sig_adr: Option<MsgSigAddress>,
 ) -> Result<Response<Full<Bytes>>, Error> {
     let mut builder = Response::builder().status(status);
     if let Some(content) = content {
@@ -234,12 +234,10 @@ fn any_resp(
     let cache = cache.unwrap_or(5);
     builder = builder.header(CACHE_CONTROL, format!("public, max-age={cache}"));
 
-    if let Some(msg_and_signature) = msg_and_signature {
-        builder = builder.header(
-            "X-Content-Signature",
-            msg_and_signature.signature.to_string(),
-        );
-        builder = builder.header("X-Content-Digest", msg_and_signature.message.to_string());
+    if let Some(msg_sig_adr) = msg_sig_adr {
+        builder = builder.header("X-Content-Signature", msg_sig_adr.signature.to_string());
+        builder = builder.header("X-Content-Digest", msg_sig_adr.message.to_string());
+        builder = builder.header("X-Server-Address", msg_sig_adr.address.to_string());
     }
 
     builder
@@ -442,6 +440,7 @@ async fn handle_waterfalls_req(
             timer.observe_duration();
 
             let m = sign_response(&state.secp, &state.wif_key, &result);
+            let m = m.to_msg_sig_address(state.address());
             any_resp(
                 result,
                 hyper::StatusCode::OK,

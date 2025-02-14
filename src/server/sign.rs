@@ -14,7 +14,23 @@ pub struct MessageAndSignature {
     pub signature: MessageSignature,
 }
 
-pub(crate) fn sign_response(
+impl MessageAndSignature {
+    pub fn to_msg_sig_address(self, address: bitcoin::Address) -> MsgSigAddress {
+        MsgSigAddress {
+            message: self.message,
+            signature: self.signature,
+            address,
+        }
+    }
+}
+
+pub struct MsgSigAddress {
+    pub message: Message,
+    pub signature: MessageSignature,
+    pub address: bitcoin::Address,
+}
+
+pub fn sign_response(
     secp: &Secp256k1<All>,
     key: &PrivateKey,
     response: &[u8],
@@ -41,7 +57,7 @@ pub fn verify_response(
     signature.is_signed_by_address(secp, address, msg_hash)
 }
 
-pub(crate) fn p2pkh(secp: &Secp256k1<All>, wif_key: &PrivateKey) -> bitcoin::Address {
+pub fn p2pkh(secp: &Secp256k1<All>, wif_key: &PrivateKey) -> bitcoin::Address {
     bitcoin::Address::p2pkh(wif_key.public_key(secp), wif_key.network)
 }
 
