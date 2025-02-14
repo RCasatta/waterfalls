@@ -5,7 +5,13 @@ use elements_miniscript::DescriptorPublicKey;
 use waterfalls::WaterfallResponse;
 use waterfalls::WaterfallResponseV3;
 
-criterion_group!(benches, descriptor, encoding_decoding, conversion);
+criterion_group!(
+    benches,
+    descriptor,
+    encoding_decoding,
+    conversion,
+    sign_verify
+);
 criterion_main!(benches);
 
 pub fn descriptor(c: &mut Criterion) {
@@ -73,6 +79,35 @@ pub fn conversion(c: &mut Criterion) {
             b.iter(|| {
                 let resp_v3: WaterfallResponseV3 = resp.clone().try_into().unwrap();
                 black_box(resp_v3);
+            });
+        });
+}
+
+pub fn sign_verify(c: &mut Criterion) {
+    let secp = bitcoin::key::Secp256k1::new();
+    let private_key = elements::bitcoin::PrivateKey::generate(elements::bitcoin::NetworkKind::Test);
+    let test_data = b"benchmark test data";
+
+    c.benchmark_group("sign verify")
+        .bench_function("sign", |b: &mut criterion::Bencher<'_>| {
+            b.iter(|| {
+                let sig = waterfalls::server::sign::sign_response(&secp, &private_key, test_data);
+                black_box(sig);
+            });
+        })
+        .bench_function("verify", |b: &mut criterion::Bencher<'_>| {
+            let address = waterfalls::server::sign::p2pkh(&secp, &private_key);
+            let sig = waterfalls::server::sign::sign_response(&secp, &private_key, test_data);
+
+            b.iter(|| {
+                let result = waterfalls::server::sign::verify_response(
+                    &secp,
+                    &address,
+                    test_data,
+                    &sig.signature,
+                )
+                .unwrap();
+                black_box(result);
             });
         });
 }
