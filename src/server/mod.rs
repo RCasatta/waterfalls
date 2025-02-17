@@ -86,7 +86,7 @@ impl Arguments {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     WrongNetwork,
     Other,
@@ -147,10 +147,7 @@ pub async fn inner_main(
 
     let store = get_store(&args)?;
 
-    let key = args
-        .server_key
-        .clone()
-        .unwrap_or_else(Identity::generate);
+    let key = args.server_key.clone().unwrap_or_else(Identity::generate);
 
     let network_kind = if args.testnet {
         NetworkKind::Test

@@ -21,6 +21,7 @@ type Height = u32;
 type Timestamp = u32;
 
 /// Request to the waterfalls endpoint
+#[derive(Debug)]
 pub struct WaterfallRequest {
     descriptor:
         elements_miniscript::descriptor::Descriptor<elements_miniscript::DescriptorPublicKey>,

@@ -207,20 +207,22 @@ fn parse_query(query: &str, key: &Identity, is_testnet: bool) -> Result<Waterfal
     let desc_str = params
         .remove("descriptor")
         .ok_or(Error::DescriptorFieldMandatory)?;
+    println!("Desc str: {desc_str:?}");
     let desc_str = encryption::decrypt(&desc_str, key).unwrap_or(desc_str);
+    println!("Desc str: {desc_str:?}");
 
     let page = params
         .get("page")
         .map(|e| e.parse().unwrap_or(0))
         .unwrap_or(0u16);
 
-    if is_testnet == desc_str.contains("xpub") {
-        return Err(Error::WrongNetwork);
-    }
-
     let descriptor = desc_str
         .parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>()
         .map_err(|e| Error::String(e.to_string()))?;
+
+    if is_testnet == desc_str.contains("xpub") {
+        return Err(Error::WrongNetwork);
+    }
 
     Ok(WaterfallRequest { descriptor, page })
 }
@@ -453,4 +455,70 @@ async fn handle_waterfalls_req(
         Some(5),
         Some(m),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MAINNET_DESC: &str = "elwpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#20ufqv7z";
+    const TESTNET_DESC: &str = "elwpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)#v7pu3vak";
+
+    #[test]
+    fn test_parse_query() {
+        // Test missing descriptor field
+        let key = age::x25519::Identity::generate();
+        let result = parse_query("", &key, false);
+        assert!(matches!(result, Err(Error::DescriptorFieldMandatory)));
+
+        // Test invalid descriptor
+        let result = parse_query("descriptor=invalid", &key, false).unwrap_err();
+        let not_an_element_desc = "Invalid descriptor: Not an Elements Descriptor".to_string();
+        assert_eq!(result, Error::String(not_an_element_desc.clone()));
+
+        // Test empty descriptor
+        let result = parse_query("descriptor=", &key, false).unwrap_err();
+        assert_eq!(result, Error::String(not_an_element_desc));
+
+        // Test valid clear descriptor
+        let query = encode_query(MAINNET_DESC, None);
+        let result = parse_query(&query, &key, false).unwrap();
+        assert_eq!(result.descriptor.to_string(), MAINNET_DESC);
+        assert_eq!(result.page, 0);
+
+        // Test valid encrypted descriptor
+        let encrypted = encryption::encrypt(MAINNET_DESC, key.to_public()).unwrap();
+        println!("Encrypted: {encrypted:?}");
+        let query = encode_query(&encrypted, None);
+        let result = parse_query(&query, &key, false).unwrap();
+        assert_eq!(result.descriptor.to_string(), MAINNET_DESC);
+
+        // Test with page parameter
+        let query = encode_query(MAINNET_DESC, Some(5));
+        let result = parse_query(&query, &key, false).unwrap();
+        assert_eq!(result.page, 5);
+
+        // Test wrong network (mainnet xpub on testnet) and then right network
+        let query = encode_query(MAINNET_DESC, None);
+        let result = parse_query(&query, &key, true).unwrap_err();
+        assert_eq!(result, Error::WrongNetwork);
+        let result = parse_query(&query, &key, false).unwrap();
+        assert_eq!(result.descriptor.to_string(), MAINNET_DESC);
+
+        // Test wrong network (testnet xpub on mainnet) and then right network
+        let query = encode_query(TESTNET_DESC, None);
+        let result = parse_query(&query, &key, false).unwrap_err();
+        assert_eq!(result, Error::WrongNetwork);
+        let result = parse_query(&query, &key, true).unwrap();
+        assert_eq!(result.descriptor.to_string(), TESTNET_DESC);
+    }
+
+    fn encode_query(descriptor: &str, page: Option<u16>) -> String {
+        let mut serializer = form_urlencoded::Serializer::new(String::new());
+        serializer.append_pair("descriptor", descriptor);
+        if let Some(page) = page {
+            serializer.append_pair("page", &page.to_string());
+        }
+        serializer.finish()
+    }
 }
