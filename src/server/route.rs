@@ -502,21 +502,21 @@ mod tests {
     fn test_parse_query() {
         // Test missing descriptor field
         let key = age::x25519::Identity::generate();
-        let result = parse_query("", &key, false);
+        let result = parse_query("", &key, false, 100);
         assert!(matches!(result, Err(Error::AtLeastOneFieldMandatory)));
 
         // Test invalid descriptor
-        let result = parse_query("descriptor=invalid", &key, false).unwrap_err();
+        let result = parse_query("descriptor=invalid", &key, false, 100).unwrap_err();
         let not_an_element_desc = "Invalid descriptor: Not an Elements Descriptor".to_string();
         assert_eq!(result, Error::String(not_an_element_desc.clone()));
 
         // Test empty descriptor
-        let result = parse_query("descriptor=", &key, false).unwrap_err();
+        let result = parse_query("descriptor=", &key, false, 100).unwrap_err();
         assert_eq!(result, Error::String(not_an_element_desc));
 
         // Test valid clear descriptor
         let query = encode_query(MAINNET_DESC, None);
-        let result = parse_query(&query, &key, false).unwrap();
+        let result = parse_query(&query, &key, false, 100).unwrap();
         assert_eq!(
             result.descriptor().unwrap().descriptor.to_string(),
             MAINNET_DESC
@@ -526,7 +526,7 @@ mod tests {
         // Test valid encrypted descriptor
         let encrypted = encryption::encrypt(MAINNET_DESC, key.to_public()).unwrap();
         let query = encode_query(&encrypted, None);
-        let result = parse_query(&query, &key, false).unwrap();
+        let result = parse_query(&query, &key, false, 100).unwrap();
         assert_eq!(
             result.descriptor().unwrap().descriptor.to_string(),
             MAINNET_DESC
@@ -534,14 +534,14 @@ mod tests {
 
         // Test with page parameter
         let query = encode_query(MAINNET_DESC, Some(5));
-        let result = parse_query(&query, &key, false).unwrap();
+        let result = parse_query(&query, &key, false, 100).unwrap();
         assert_eq!(result.page(), 5);
 
         // Test wrong network (mainnet xpub on testnet) and then right network
         let query = encode_query(MAINNET_DESC, None);
-        let result = parse_query(&query, &key, true).unwrap_err();
+        let result = parse_query(&query, &key, true, 100).unwrap_err();
         assert_eq!(result, Error::WrongNetwork);
-        let result = parse_query(&query, &key, false).unwrap();
+        let result = parse_query(&query, &key, false, 100).unwrap();
         assert_eq!(
             result.descriptor().unwrap().descriptor.to_string(),
             MAINNET_DESC
@@ -549,21 +549,22 @@ mod tests {
 
         // Test wrong network (testnet xpub on mainnet) and then right network
         let query = encode_query(TESTNET_DESC, None);
-        let result = parse_query(&query, &key, false).unwrap_err();
+        let result = parse_query(&query, &key, false, 100).unwrap_err();
         assert_eq!(result, Error::WrongNetwork);
-        let result = parse_query(&query, &key, true).unwrap();
+        let result = parse_query(&query, &key, true, 100).unwrap();
         assert_eq!(
             result.descriptor().unwrap().descriptor.to_string(),
             TESTNET_DESC
         );
 
         // Test Invalid Address
-        let result = parse_query("addresses=ciao", &key, false).unwrap_err();
+        let result = parse_query("addresses=ciao", &key, false, 100).unwrap_err();
         assert_eq!(result, Error::InvalidAddress("ciao".to_string()));
 
         // Test Valid mainnet Address
         let mainnet_address = "ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh";
-        let result = parse_query(&format!("addresses={mainnet_address}"), &key, false).unwrap();
+        let result =
+            parse_query(&format!("addresses={mainnet_address}"), &key, false, 100).unwrap();
         assert_eq!(result.addresses().unwrap().addresses.len(), 1);
         assert_eq!(
             result.addresses().unwrap().addresses[0].to_string(),
@@ -572,7 +573,7 @@ mod tests {
 
         // Test Valid testnet Address
         let testnet_address = "tex1qv0s62sz6xnxf9d4qkvsnwqs5pz9k9q8dpp0q2h";
-        let result = parse_query(&format!("addresses={testnet_address}"), &key, true).unwrap();
+        let result = parse_query(&format!("addresses={testnet_address}"), &key, true, 100).unwrap();
         assert_eq!(result.addresses().unwrap().addresses.len(), 1);
         assert_eq!(
             result.addresses().unwrap().addresses[0].to_string(),
@@ -580,8 +581,12 @@ mod tests {
         );
 
         // Test Invalid Address (blinding key)
-        let result = parse_query("addresses=lq1qqgyxa469eaugae2sz3q8qzaqy0v57ecuekzyngfac5nw4z87yqskc5tp2wtueqq6am0x062zewkrl9lr0cqwvw0j9633xqe2e", &key, false).unwrap_err();
+        let result = parse_query("addresses=lq1qqgyxa469eaugae2sz3q8qzaqy0v57ecuekzyngfac5nw4z87yqskc5tp2wtueqq6am0x062zewkrl9lr0cqwvw0j9633xqe2e", &key, false, 100).unwrap_err();
         assert_eq!(result, Error::AddressCannotBeBlinded);
+
+        // Test too many addresses
+        let result = parse_query("addresses=ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh,ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh,ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh", &key, false, 2).unwrap_err();
+        assert_eq!(result, Error::TooManyAddresses);
     }
 
     fn encode_query(descriptor: &str, page: Option<u16>) -> String {
