@@ -22,13 +22,30 @@ type Timestamp = u32;
 
 /// Request to the waterfalls endpoint
 #[derive(Debug)]
-pub struct WaterfallRequest {
+pub enum WaterfallRequest {
+    Descriptor(DescriptorRequest),
+    Addresses(AddressesRequest),
+}
+
+/// Request to the waterfalls endpoint using a descriptor
+#[derive(Debug)]
+pub struct DescriptorRequest {
     descriptor:
         elements_miniscript::descriptor::Descriptor<elements_miniscript::DescriptorPublicKey>,
 
     /// Requested page, 0 if not specified
     /// The first returned index is equal to `page * 1000`
     /// The same page is used for all the descriptor (ie both external and internal)
+    page: u16,
+}
+
+/// Request to the waterfalls endpoint using a list of addresses
+#[derive(Debug)]
+pub struct AddressesRequest {
+    addresses: Vec<elements::Address>,
+
+    /// Requested page, 0 if not specified
+    /// The first returned index is equal to `page * 1000`
     page: u16,
 }
 
@@ -72,6 +89,29 @@ pub struct BlockMeta {
     pub t: Timestamp,
     #[cbor(n(2))]
     pub h: Height,
+}
+
+impl WaterfallRequest {
+    pub fn descriptor(&self) -> Option<&DescriptorRequest> {
+        match self {
+            WaterfallRequest::Descriptor(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn addresses(&self) -> Option<&AddressesRequest> {
+        match self {
+            WaterfallRequest::Addresses(a) => Some(a),
+            _ => None,
+        }
+    }
+
+    pub fn page(&self) -> u16 {
+        match self {
+            WaterfallRequest::Descriptor(d) => d.page,
+            WaterfallRequest::Addresses(a) => a.page,
+        }
+    }
 }
 
 impl WaterfallResponse {

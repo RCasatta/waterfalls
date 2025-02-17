@@ -90,7 +90,6 @@ impl Arguments {
 pub enum Error {
     WrongNetwork,
     Other,
-    DescriptorFieldMandatory,
     CannotParseHeight,
     InvalidTxid,
     CannotFindTx,
@@ -102,7 +101,10 @@ pub enum Error {
     CannotEncrypt,
     InvalidTx,
     String(String),
-    InvalidAddress,
+    InvalidAddress(String),
+    CannotSpecifyBothDescriptorAndAddresses,
+    AtLeastOneFieldMandatory,
+    NotYetImplemented,
 }
 
 impl std::fmt::Display for Error {

@@ -3,7 +3,8 @@ use crate::{
     hash_str,
     server::{sign::sign_response, Error, State},
     store::Store,
-    TxSeen, WaterfallRequest, WaterfallResponse, WaterfallResponseV3,
+    AddressesRequest, DescriptorRequest, TxSeen, WaterfallRequest, WaterfallResponse,
+    WaterfallResponseV3,
 };
 use age::x25519::Identity;
 use elements::{
@@ -139,7 +140,8 @@ pub async fn route(
                 }
                 //address/ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh/txs
                 (Some(""), Some("address"), Some(addr), Some("txs"), None) => {
-                    let addr = Address::from_str(addr).map_err(|_| Error::InvalidAddress)?;
+                    let addr = Address::from_str(addr)
+                        .map_err(|e| Error::InvalidAddress(e.to_string()))?;
 
                     handle_single_address(state, &addr, is_testnet).await
                 }
@@ -204,27 +206,46 @@ fn parse_query(query: &str, key: &Identity, is_testnet: bool) -> Result<Waterfal
     let mut params = form_urlencoded::parse(query.as_bytes())
         .into_owned()
         .collect::<HashMap<String, String>>();
-    let desc_str = params
-        .remove("descriptor")
-        .ok_or(Error::DescriptorFieldMandatory)?;
-    println!("Desc str: {desc_str:?}");
-    let desc_str = encryption::decrypt(&desc_str, key).unwrap_or(desc_str);
-    println!("Desc str: {desc_str:?}");
 
     let page = params
         .get("page")
         .map(|e| e.parse().unwrap_or(0))
         .unwrap_or(0u16);
 
-    let descriptor = desc_str
-        .parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>()
-        .map_err(|e| Error::String(e.to_string()))?;
+    let descriptor = params.remove("descriptor");
+    let addresses = params.remove("addresses");
+    match (descriptor, addresses) {
+        (Some(_), Some(_)) => Err(Error::CannotSpecifyBothDescriptorAndAddresses),
+        (Some(desc_str), None) => {
+            let desc_str = encryption::decrypt(&desc_str, key).unwrap_or(desc_str);
 
-    if is_testnet == desc_str.contains("xpub") {
-        return Err(Error::WrongNetwork);
+            let descriptor = desc_str
+                .parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>()
+                .map_err(|e| Error::String(e.to_string()))?;
+
+            if is_testnet == desc_str.contains("xpub") {
+                return Err(Error::WrongNetwork);
+            }
+            Ok(WaterfallRequest::Descriptor(DescriptorRequest {
+                descriptor,
+                page,
+            }))
+        }
+        (None, Some(addresses)) => {
+            // TODO should I check the addresses are without blinding key?
+            // TODO check max addresses
+            // TODO check network
+            let addresses = addresses
+                .split(',')
+                .map(|e| Address::from_str(e).map_err(|_| Error::InvalidAddress(e.to_string())))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(WaterfallRequest::Addresses(AddressesRequest {
+                addresses,
+                page,
+            }))
+        }
+        (None, None) => Err(Error::AtLeastOneFieldMandatory),
     }
-
-    Ok(WaterfallRequest { descriptor, page })
 }
 
 fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {
@@ -336,10 +357,10 @@ async fn handle_waterfalls_req(
     v3: bool,
     cbor: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
-    let WaterfallRequest {
-        descriptor,
-        page: _,
-    } = inputs;
+    let (descriptor, page) = match inputs {
+        WaterfallRequest::Descriptor(DescriptorRequest { descriptor, page }) => (descriptor, page),
+        _ => return Err(Error::NotYetImplemented),
+    };
     let db = &state.store;
     let start = Instant::now();
 
@@ -356,7 +377,7 @@ async fn handle_waterfalls_req(
         for batch in 0..MAX_BATCH {
             let mut scripts = Vec::with_capacity(GAP_LIMIT as usize);
 
-            let start = batch * GAP_LIMIT + inputs.page as u32 * MAX_ADDRESSES;
+            let start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
             for index in start..start + GAP_LIMIT {
                 let l = desc.at_derivation_index(index).unwrap();
                 let script_pubkey = l.script_pubkey();
@@ -407,7 +428,7 @@ async fn handle_waterfalls_req(
 
     let waterfall_response = WaterfallResponse {
         txs_seen: map,
-        page: inputs.page,
+        page,
         tip,
     };
     let content = if cbor {
@@ -469,7 +490,7 @@ mod tests {
         // Test missing descriptor field
         let key = age::x25519::Identity::generate();
         let result = parse_query("", &key, false);
-        assert!(matches!(result, Err(Error::DescriptorFieldMandatory)));
+        assert!(matches!(result, Err(Error::AtLeastOneFieldMandatory)));
 
         // Test invalid descriptor
         let result = parse_query("descriptor=invalid", &key, false).unwrap_err();
@@ -483,34 +504,62 @@ mod tests {
         // Test valid clear descriptor
         let query = encode_query(MAINNET_DESC, None);
         let result = parse_query(&query, &key, false).unwrap();
-        assert_eq!(result.descriptor.to_string(), MAINNET_DESC);
-        assert_eq!(result.page, 0);
+        assert_eq!(
+            result.descriptor().unwrap().descriptor.to_string(),
+            MAINNET_DESC
+        );
+        assert_eq!(result.page(), 0);
 
         // Test valid encrypted descriptor
         let encrypted = encryption::encrypt(MAINNET_DESC, key.to_public()).unwrap();
-        println!("Encrypted: {encrypted:?}");
         let query = encode_query(&encrypted, None);
         let result = parse_query(&query, &key, false).unwrap();
-        assert_eq!(result.descriptor.to_string(), MAINNET_DESC);
+        assert_eq!(
+            result.descriptor().unwrap().descriptor.to_string(),
+            MAINNET_DESC
+        );
 
         // Test with page parameter
         let query = encode_query(MAINNET_DESC, Some(5));
         let result = parse_query(&query, &key, false).unwrap();
-        assert_eq!(result.page, 5);
+        assert_eq!(result.page(), 5);
 
         // Test wrong network (mainnet xpub on testnet) and then right network
         let query = encode_query(MAINNET_DESC, None);
         let result = parse_query(&query, &key, true).unwrap_err();
         assert_eq!(result, Error::WrongNetwork);
         let result = parse_query(&query, &key, false).unwrap();
-        assert_eq!(result.descriptor.to_string(), MAINNET_DESC);
+        assert_eq!(
+            result.descriptor().unwrap().descriptor.to_string(),
+            MAINNET_DESC
+        );
 
         // Test wrong network (testnet xpub on mainnet) and then right network
         let query = encode_query(TESTNET_DESC, None);
         let result = parse_query(&query, &key, false).unwrap_err();
         assert_eq!(result, Error::WrongNetwork);
         let result = parse_query(&query, &key, true).unwrap();
-        assert_eq!(result.descriptor.to_string(), TESTNET_DESC);
+        assert_eq!(
+            result.descriptor().unwrap().descriptor.to_string(),
+            TESTNET_DESC
+        );
+
+        // Test Invalid Address
+        let result = parse_query("addresses=ciao", &key, false).unwrap_err();
+        assert_eq!(result, Error::InvalidAddress("ciao".to_string()));
+
+        // Test Valid Address
+        let result = parse_query(
+            "addresses=ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh",
+            &key,
+            false,
+        )
+        .unwrap();
+        assert_eq!(result.addresses().unwrap().addresses.len(), 1);
+        assert_eq!(
+            result.addresses().unwrap().addresses[0].to_string(),
+            "ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh"
+        );
     }
 
     fn encode_query(descriptor: &str, page: Option<u16>) -> String {
