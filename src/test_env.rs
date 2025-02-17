@@ -73,6 +73,7 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
     args.server_key = Some(server_key.clone());
     let wif_key = PrivateKey::generate(NetworkKind::Test);
     args.wif_key = Some(wif_key);
+    args.max_addresses = 100;
 
     let cookie = std::fs::read_to_string(&elementsd.params.cookie_file).unwrap();
     args.rpc_user_password = Some(cookie);
@@ -286,6 +287,34 @@ impl WaterfallClient {
             .client
             .get(&descriptor_url)
             .query(&[("descriptor", desc)])
+            .send()
+            .await?;
+
+        let headers = response.headers().clone();
+
+        let body = response.text().await?;
+        Ok((serde_json::from_str(&body)?, headers))
+    }
+
+    /// Call the waterfalls endpoint
+    ///
+    /// it accepts a list of addresses to search in the mempool and in the blockchain
+    pub async fn waterfalls_addresses(
+        &self,
+        addressess: &[Address],
+    ) -> anyhow::Result<(WaterfallResponseV3, HeaderMap)> {
+        // this code is duplicated from waterfalls_version but we need to use the v3 endpoint which return a different object
+        let descriptor_url = format!("{}/v3/waterfalls", self.base_url);
+
+        let addresses_str = addressess
+            .iter()
+            .map(|a| a.to_string())
+            .collect::<Vec<String>>()
+            .join(",");
+        let response = self
+            .client
+            .get(&descriptor_url)
+            .query(&[("addresses", addresses_str)])
             .send()
             .await?;
 

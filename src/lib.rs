@@ -128,6 +128,28 @@ impl WaterfallResponse {
             .filter(|a| !a.is_empty())
             .count()
     }
+    pub fn count_scripts(&self) -> usize {
+        self.txs_seen.iter().flat_map(|(_, v)| v.iter()).count()
+    }
+}
+
+impl WaterfallResponseV3 {
+    pub fn is_empty(&self) -> bool {
+        self.txs_seen
+            .iter()
+            .flat_map(|(_, v)| v.iter())
+            .all(|a| a.is_empty())
+    }
+    pub fn count_non_empty(&self) -> usize {
+        self.txs_seen
+            .iter()
+            .flat_map(|(_, v)| v.iter())
+            .filter(|a| !a.is_empty())
+            .count()
+    }
+    pub fn count_scripts(&self) -> usize {
+        self.txs_seen.iter().flat_map(|(_, v)| v.iter()).count()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Encode, Decode)]

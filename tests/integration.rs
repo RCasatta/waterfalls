@@ -90,6 +90,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert_eq!(result.txs_seen.len(), 2);
     assert!(!result.is_empty());
     assert_eq!(result.count_non_empty(), 1);
+    assert_eq!(result.count_scripts(), 60);
     assert!(result.tip.is_some());
     let first = &result.txs_seen.iter().next().unwrap().1[0][0];
     assert_eq!(first.txid, txid);
@@ -144,6 +145,11 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let (result_v3, _headers) = client.waterfalls(&bitcoin_desc).await.unwrap();
     let result_v2: WaterfallResponse = result_v3.try_into().unwrap();
     assert_eq!(result, result_v2);
+
+    // Test addresses
+    let addresses = vec![addr.to_unconfidential()];
+    let (result, _) = client.waterfalls_addresses(&addresses).await.unwrap();
+    assert_eq!(result.count_non_empty(), 1);
 
     test_env.shutdown().await;
     assert!(true);
