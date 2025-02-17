@@ -105,6 +105,7 @@ pub enum Error {
     CannotSpecifyBothDescriptorAndAddresses,
     AtLeastOneFieldMandatory,
     NotYetImplemented,
+    AddressCannotBeBlinded,
 }
 
 impl std::fmt::Display for Error {

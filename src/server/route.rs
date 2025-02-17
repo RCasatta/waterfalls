@@ -232,7 +232,6 @@ fn parse_query(query: &str, key: &Identity, is_testnet: bool) -> Result<Waterfal
             }))
         }
         (None, Some(addresses)) => {
-            // TODO should I check the addresses are without blinding key?
             // TODO check max addresses
             let addresses = addresses
                 .split(',')
@@ -241,6 +240,9 @@ fn parse_query(query: &str, key: &Identity, is_testnet: bool) -> Result<Waterfal
             for a in addresses.iter() {
                 if is_testnet == (a.params == &AddressParams::LIQUID) {
                     return Err(Error::WrongNetwork);
+                }
+                if a.blinding_pubkey.is_some() {
+                    return Err(Error::AddressCannotBeBlinded);
                 }
             }
             Ok(WaterfallRequest::Addresses(AddressesRequest {
@@ -569,6 +571,10 @@ mod tests {
             result.addresses().unwrap().addresses[0].to_string(),
             testnet_address
         );
+
+        // Test Invalid Address (blinding key)
+        let result = parse_query("addresses=lq1qqgyxa469eaugae2sz3q8qzaqy0v57ecuekzyngfac5nw4z87yqskc5tp2wtueqq6am0x062zewkrl9lr0cqwvw0j9633xqe2e", &key, false).unwrap_err();
+        assert_eq!(result, Error::AddressCannotBeBlinded);
     }
 
     fn encode_query(descriptor: &str, page: Option<u16>) -> String {
