@@ -72,6 +72,10 @@ pub struct Arguments {
     /// It's an error if `use_esplora` is false and this is missing.
     #[arg(long, env)]
     pub rpc_user_password: Option<String>,
+
+    /// Maximum number of addresses that can be specified in the query string.
+    #[arg(long, default_value = "100")]
+    pub max_addresses: usize,
 }
 
 impl Arguments {
@@ -106,6 +110,7 @@ pub enum Error {
     AtLeastOneFieldMandatory,
     NotYetImplemented,
     AddressCannotBeBlinded,
+    TooManyAddresses,
 }
 
 impl std::fmt::Display for Error {
@@ -171,7 +176,7 @@ pub async fn inner_main(
         .wif_key
         .unwrap_or_else(|| PrivateKey::generate(network_kind));
 
-    let state = Arc::new(State::new(store, key, wif_key)?);
+    let state = Arc::new(State::new(store, key, wif_key, args.max_addresses)?);
 
     {
         let state = state.clone();

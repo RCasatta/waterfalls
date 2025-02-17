@@ -22,10 +22,17 @@ pub struct State {
     pub blocks_hash_ts: Mutex<Vec<(BlockHash, Timestamp)>>, // TODO should be moved into the Store, but in memory for db
 
     pub secp: Secp256k1<All>,
+
+    pub max_addresses: usize,
 }
 
 impl State {
-    pub fn new(store: AnyStore, key: Identity, wif_key: PrivateKey) -> Result<Self, Error> {
+    pub fn new(
+        store: AnyStore,
+        key: Identity,
+        wif_key: PrivateKey,
+        max_addresses: usize,
+    ) -> Result<Self, Error> {
         Ok(State {
             key,
             wif_key,
@@ -33,6 +40,7 @@ impl State {
             mempool: Mutex::new(Mempool::new()),
             blocks_hash_ts: Mutex::new(Vec::new()),
             secp: bitcoin::key::Secp256k1::new(),
+            max_addresses,
         })
     }
 

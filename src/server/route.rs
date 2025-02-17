@@ -54,27 +54,27 @@ pub async fn route(
             str_resp(state.address().to_string(), StatusCode::OK)
         }
         (&Method::GET, "/v1/waterfalls", Some(query)) => {
-            let inputs = parse_query(query, &state.key, is_testnet)?;
+            let inputs = parse_query(query, &state.key, is_testnet, state.max_addresses)?;
             handle_waterfalls_req(state, inputs, false, false, false).await
         }
         (&Method::GET, "/v2/waterfalls", Some(query)) => {
-            let inputs = parse_query(query, &state.key, is_testnet)?;
+            let inputs = parse_query(query, &state.key, is_testnet, state.max_addresses)?;
             handle_waterfalls_req(state, inputs, true, false, false).await
         }
         (&Method::GET, "/v3/waterfalls", Some(query)) => {
-            let inputs = parse_query(query, &state.key, is_testnet)?;
+            let inputs = parse_query(query, &state.key, is_testnet, state.max_addresses)?;
             handle_waterfalls_req(state, inputs, true, true, false).await
         }
         (&Method::GET, "/v1/waterfalls.cbor", Some(query)) => {
-            let inputs = parse_query(query, &state.key, is_testnet)?;
+            let inputs = parse_query(query, &state.key, is_testnet, state.max_addresses)?;
             handle_waterfalls_req(state, inputs, false, false, true).await
         }
         (&Method::GET, "/v2/waterfalls.cbor", Some(query)) => {
-            let inputs = parse_query(query, &state.key, is_testnet)?;
+            let inputs = parse_query(query, &state.key, is_testnet, state.max_addresses)?;
             handle_waterfalls_req(state, inputs, true, false, true).await
         }
         (&Method::GET, "/v3/waterfalls.cbor", Some(query)) => {
-            let inputs = parse_query(query, &state.key, is_testnet)?;
+            let inputs = parse_query(query, &state.key, is_testnet, state.max_addresses)?;
             handle_waterfalls_req(state, inputs, true, true, true).await
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {
@@ -202,7 +202,12 @@ fn block_hash_resp(
     }
 }
 
-fn parse_query(query: &str, key: &Identity, is_testnet: bool) -> Result<WaterfallRequest, Error> {
+fn parse_query(
+    query: &str,
+    key: &Identity,
+    is_testnet: bool,
+    max_addresses: usize,
+) -> Result<WaterfallRequest, Error> {
     let mut params = form_urlencoded::parse(query.as_bytes())
         .into_owned()
         .collect::<HashMap<String, String>>();
@@ -232,11 +237,13 @@ fn parse_query(query: &str, key: &Identity, is_testnet: bool) -> Result<Waterfal
             }))
         }
         (None, Some(addresses)) => {
-            // TODO check max addresses
             let addresses = addresses
                 .split(',')
                 .map(|e| Address::from_str(e).map_err(|_| Error::InvalidAddress(e.to_string())))
                 .collect::<Result<Vec<_>, _>>()?;
+            if addresses.len() > max_addresses {
+                return Err(Error::TooManyAddresses);
+            }
             for a in addresses.iter() {
                 if is_testnet == (a.params == &AddressParams::LIQUID) {
                     return Err(Error::WrongNetwork);
