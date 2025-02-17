@@ -22,7 +22,8 @@ type Timestamp = u32;
 
 /// Request to the waterfalls endpoint
 pub struct WaterfallRequest {
-    descriptor: String,
+    descriptor:
+        elements_miniscript::descriptor::Descriptor<elements_miniscript::DescriptorPublicKey>,
 
     /// Requested page, 0 if not specified
     /// The first returned index is equal to `page * 1000`

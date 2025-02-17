@@ -53,28 +53,28 @@ pub async fn route(
             str_resp(state.address().to_string(), StatusCode::OK)
         }
         (&Method::GET, "/v1/waterfalls", Some(query)) => {
-            let inputs = parse_query(query, &state.key)?;
-            handle_waterfalls_req(state, &inputs, is_testnet, false, false, false).await
+            let inputs = parse_query(query, &state.key, is_testnet)?;
+            handle_waterfalls_req(state, inputs, false, false, false).await
         }
         (&Method::GET, "/v2/waterfalls", Some(query)) => {
-            let inputs = parse_query(query, &state.key)?;
-            handle_waterfalls_req(state, &inputs, is_testnet, true, false, false).await
+            let inputs = parse_query(query, &state.key, is_testnet)?;
+            handle_waterfalls_req(state, inputs, true, false, false).await
         }
         (&Method::GET, "/v3/waterfalls", Some(query)) => {
-            let inputs = parse_query(query, &state.key)?;
-            handle_waterfalls_req(state, &inputs, is_testnet, true, true, false).await
+            let inputs = parse_query(query, &state.key, is_testnet)?;
+            handle_waterfalls_req(state, inputs, true, true, false).await
         }
         (&Method::GET, "/v1/waterfalls.cbor", Some(query)) => {
-            let inputs = parse_query(query, &state.key)?;
-            handle_waterfalls_req(state, &inputs, is_testnet, false, false, true).await
+            let inputs = parse_query(query, &state.key, is_testnet)?;
+            handle_waterfalls_req(state, inputs, false, false, true).await
         }
         (&Method::GET, "/v2/waterfalls.cbor", Some(query)) => {
-            let inputs = parse_query(query, &state.key)?;
-            handle_waterfalls_req(state, &inputs, is_testnet, true, false, true).await
+            let inputs = parse_query(query, &state.key, is_testnet)?;
+            handle_waterfalls_req(state, inputs, true, false, true).await
         }
         (&Method::GET, "/v3/waterfalls.cbor", Some(query)) => {
-            let inputs = parse_query(query, &state.key)?;
-            handle_waterfalls_req(state, &inputs, is_testnet, true, true, true).await
+            let inputs = parse_query(query, &state.key, is_testnet)?;
+            handle_waterfalls_req(state, inputs, true, true, true).await
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {
             let ts = state.tip_timestamp().await;
@@ -200,19 +200,27 @@ fn block_hash_resp(
     }
 }
 
-fn parse_query(query: &str, key: &Identity) -> Result<WaterfallRequest, Error> {
+fn parse_query(query: &str, key: &Identity, is_testnet: bool) -> Result<WaterfallRequest, Error> {
     let mut params = form_urlencoded::parse(query.as_bytes())
         .into_owned()
         .collect::<HashMap<String, String>>();
-    let descriptor = params
+    let desc_str = params
         .remove("descriptor")
         .ok_or(Error::DescriptorFieldMandatory)?;
-    let descriptor = encryption::decrypt(&descriptor, key).unwrap_or(descriptor);
+    let desc_str = encryption::decrypt(&desc_str, key).unwrap_or(desc_str);
 
     let page = params
         .get("page")
         .map(|e| e.parse().unwrap_or(0))
         .unwrap_or(0u16);
+
+    if is_testnet == desc_str.contains("xpub") {
+        return Err(Error::WrongNetwork);
+    }
+
+    let descriptor = desc_str
+        .parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>()
+        .map_err(|e| Error::String(e.to_string()))?;
 
     Ok(WaterfallRequest { descriptor, page })
 }
@@ -321,134 +329,128 @@ async fn handle_single_address(
 
 async fn handle_waterfalls_req(
     state: &Arc<State>,
-    inputs: &WaterfallRequest,
-    is_testnet: bool,
+    inputs: WaterfallRequest,
     with_tip: bool,
     v3: bool,
     cbor: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
-    let desc_str = &inputs.descriptor;
+    let WaterfallRequest {
+        descriptor,
+        page: _,
+    } = inputs;
     let db = &state.store;
     let start = Instant::now();
+
+    let desc_hash = hash_str(&descriptor.to_string());
 
     // TODO add label with batches?
     let timer = crate::WATERFALLS_HISTOGRAM
         .with_label_values(&["all"])
         .start_timer();
 
-    match desc_str.parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>() {
-        Ok(desc) => {
-            if is_testnet == desc_str.contains("xpub") {
-                return str_resp("Wrong network".to_string(), hyper::StatusCode::BAD_REQUEST);
+    let mut map = BTreeMap::new();
+    for desc in descriptor.into_single_descriptors().unwrap().iter() {
+        let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
+        for batch in 0..MAX_BATCH {
+            let mut scripts = Vec::with_capacity(GAP_LIMIT as usize);
+
+            let start = batch * GAP_LIMIT + inputs.page as u32 * MAX_ADDRESSES;
+            for index in start..start + GAP_LIMIT {
+                let l = desc.at_derivation_index(index).unwrap();
+                let script_pubkey = l.script_pubkey();
+                log::debug!("{}/{} {}", desc, index, script_pubkey);
+                scripts.push(db.hash(&script_pubkey));
             }
-            let mut map = BTreeMap::new();
-            for desc in desc.into_single_descriptors().unwrap().iter() {
-                let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
-                for batch in 0..MAX_BATCH {
-                    let mut scripts = Vec::with_capacity(GAP_LIMIT as usize);
+            let mut seen_blockchain = db.get_history(&scripts).unwrap();
+            let seen_mempool = state.mempool.lock().await.seen(&scripts);
 
-                    let start = batch * GAP_LIMIT + inputs.page as u32 * MAX_ADDRESSES;
-                    for index in start..start + GAP_LIMIT {
-                        let l = desc.at_derivation_index(index).unwrap();
-                        let script_pubkey = l.script_pubkey();
-                        log::debug!("{}/{} {}", desc, index, script_pubkey);
-                        scripts.push(db.hash(&script_pubkey));
-                    }
-                    let mut seen_blockchain = db.get_history(&scripts).unwrap();
-                    let seen_mempool = state.mempool.lock().await.seen(&scripts);
-
-                    for (conf, unconf) in seen_blockchain.iter_mut().zip(seen_mempool.iter()) {
-                        for txid in unconf {
-                            conf.push(TxSeen::mempool(*txid))
-                        }
-                    }
-                    let is_last = seen_blockchain.iter().all(|e| e.is_empty());
-                    result.extend(seen_blockchain);
-
-                    if is_last {
-                        break;
-                    }
-                }
-                map.insert(desc.to_string(), result);
-            }
-
-            // enrich with block hashes and timestamps
-            {
-                let blocks_hash_ts = state.blocks_hash_ts.lock().await;
-                for v in map.values_mut() {
-                    for tx_seens in v.iter_mut() {
-                        for tx_seen in tx_seens.iter_mut() {
-                            if tx_seen.height > 0 {
-                                // unconfirmed has height 0, we don't want to map those to the genesis block
-                                let (hash, ts) = blocks_hash_ts[tx_seen.height as usize];
-                                tx_seen.block_hash = Some(hash);
-                                tx_seen.block_timestamp = Some(ts);
-                            }
-                        }
-                    }
+            for (conf, unconf) in seen_blockchain.iter_mut().zip(seen_mempool.iter()) {
+                for txid in unconf {
+                    conf.push(TxSeen::mempool(*txid))
                 }
             }
+            let is_last = seen_blockchain.iter().all(|e| e.is_empty());
+            result.extend(seen_blockchain);
 
-            let elements: usize = map.values().map(|v| v.len()).sum();
-            let tip = if with_tip {
-                state.tip_hash().await
-            } else {
-                None
-            };
-
-            let waterfall_response = WaterfallResponse {
-                txs_seen: map,
-                page: inputs.page,
-                tip,
-            };
-            let content = if cbor {
-                "application/cbor"
-            } else {
-                "application/json"
-            };
-            let result = if v3 {
-                let waterfall_response_v3: WaterfallResponseV3 =
-                    waterfall_response.try_into().expect("has tip");
-                if cbor {
-                    let mut bytes = Vec::new();
-                    minicbor::encode(&waterfall_response_v3, &mut bytes).unwrap();
-                    bytes
-                } else {
-                    serde_json::to_string(&waterfall_response_v3)
-                        .expect("does not contain a map with non-string keys")
-                        .as_bytes()
-                        .to_vec()
-                }
-            } else if cbor {
-                let mut bytes = Vec::new();
-                minicbor::encode(&waterfall_response, &mut bytes).unwrap();
-                bytes
-            } else {
-                serde_json::to_string(&waterfall_response)
-                    .expect("does not contain a map with non-string keys")
-                    .as_bytes()
-                    .to_vec()
-            };
-
-            let desc_hash = hash_str(desc_str);
-
-            log::info!(
-                "returning: {elements} elements for #{desc_hash}, elapsed: {}ms",
-                start.elapsed().as_millis()
-            );
-            crate::WATERFALLS_COUNTER.inc();
-            timer.observe_duration();
-
-            let m = sign_response(&state.secp, &state.wif_key, &result);
-            let m = m.to_msg_sig_address(state.address());
-            any_resp(
-                result,
-                hyper::StatusCode::OK,
-                Some(content),
-                Some(5),
-                Some(m),
-            )
+            if is_last {
+                break;
+            }
         }
-        Err(e) => str_resp(e.to_string(), hyper::StatusCode::BAD_REQUEST),
+        map.insert(desc.to_string(), result);
     }
+
+    // enrich with block hashes and timestamps
+    {
+        let blocks_hash_ts = state.blocks_hash_ts.lock().await;
+        for v in map.values_mut() {
+            for tx_seens in v.iter_mut() {
+                for tx_seen in tx_seens.iter_mut() {
+                    if tx_seen.height > 0 {
+                        // unconfirmed has height 0, we don't want to map those to the genesis block
+                        let (hash, ts) = blocks_hash_ts[tx_seen.height as usize];
+                        tx_seen.block_hash = Some(hash);
+                        tx_seen.block_timestamp = Some(ts);
+                    }
+                }
+            }
+        }
+    }
+
+    let elements: usize = map.values().map(|v| v.len()).sum();
+    let tip = if with_tip {
+        state.tip_hash().await
+    } else {
+        None
+    };
+
+    let waterfall_response = WaterfallResponse {
+        txs_seen: map,
+        page: inputs.page,
+        tip,
+    };
+    let content = if cbor {
+        "application/cbor"
+    } else {
+        "application/json"
+    };
+    let result = if v3 {
+        let waterfall_response_v3: WaterfallResponseV3 =
+            waterfall_response.try_into().expect("has tip");
+        if cbor {
+            let mut bytes = Vec::new();
+            minicbor::encode(&waterfall_response_v3, &mut bytes).unwrap();
+            bytes
+        } else {
+            serde_json::to_string(&waterfall_response_v3)
+                .expect("does not contain a map with non-string keys")
+                .as_bytes()
+                .to_vec()
+        }
+    } else if cbor {
+        let mut bytes = Vec::new();
+        minicbor::encode(&waterfall_response, &mut bytes).unwrap();
+        bytes
+    } else {
+        serde_json::to_string(&waterfall_response)
+            .expect("does not contain a map with non-string keys")
+            .as_bytes()
+            .to_vec()
+    };
+
+    log::info!(
+        "returning: {elements} elements for #{desc_hash}, elapsed: {}ms",
+        start.elapsed().as_millis()
+    );
+    crate::WATERFALLS_COUNTER.inc();
+    timer.observe_duration();
+
+    let m = sign_response(&state.secp, &state.wif_key, &result);
+    let m = m.to_msg_sig_address(state.address());
+    any_resp(
+        result,
+        hyper::StatusCode::OK,
+        Some(content),
+        Some(5),
+        Some(m),
+    )
 }
