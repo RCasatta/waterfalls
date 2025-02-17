@@ -1,6 +1,5 @@
 use crate::{
     fetch::Client,
-    hash_str,
     server::{sign::sign_response, Error, State},
     store::Store,
     AddressesRequest, DescriptorRequest, TxSeen, WaterfallRequest, WaterfallResponse,
@@ -370,14 +369,9 @@ async fn handle_waterfalls_req(
     v3: bool,
     cbor: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
-    let (descriptor, page) = match inputs {
-        WaterfallRequest::Descriptor(DescriptorRequest { descriptor, page }) => (descriptor, page),
-        _ => return Err(Error::NotYetImplemented),
-    };
     let db = &state.store;
     let start = Instant::now();
-
-    let desc_hash = hash_str(&descriptor.to_string());
+    let page = inputs.page();
 
     // TODO add label with batches?
     let timer = crate::WATERFALLS_HISTOGRAM
@@ -385,35 +379,40 @@ async fn handle_waterfalls_req(
         .start_timer();
 
     let mut map = BTreeMap::new();
-    for desc in descriptor.into_single_descriptors().unwrap().iter() {
-        let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
-        for batch in 0..MAX_BATCH {
-            let mut scripts = Vec::with_capacity(GAP_LIMIT as usize);
 
-            let start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
-            for index in start..start + GAP_LIMIT {
-                let l = desc.at_derivation_index(index).unwrap();
-                let script_pubkey = l.script_pubkey();
-                log::debug!("{}/{} {}", desc, index, script_pubkey);
-                scripts.push(db.hash(&script_pubkey));
-            }
-            let mut seen_blockchain = db.get_history(&scripts).unwrap();
-            let seen_mempool = state.mempool.lock().await.seen(&scripts);
+    match inputs {
+        WaterfallRequest::Descriptor(DescriptorRequest { descriptor, page }) => {
+            for desc in descriptor.into_single_descriptors().unwrap().iter() {
+                let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
+                for batch in 0..MAX_BATCH {
+                    let mut scripts = Vec::with_capacity(GAP_LIMIT as usize);
 
-            for (conf, unconf) in seen_blockchain.iter_mut().zip(seen_mempool.iter()) {
-                for txid in unconf {
-                    conf.push(TxSeen::mempool(*txid))
+                    let start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
+                    for index in start..start + GAP_LIMIT {
+                        let l = desc.at_derivation_index(index).unwrap();
+                        let script_pubkey = l.script_pubkey();
+                        log::debug!("{}/{} {}", desc, index, script_pubkey);
+                        scripts.push(db.hash(&script_pubkey));
+                    }
+                    let is_last = find_scripts(state, db, &mut result, scripts).await;
+
+                    if is_last {
+                        break;
+                    }
                 }
-            }
-            let is_last = seen_blockchain.iter().all(|e| e.is_empty());
-            result.extend(seen_blockchain);
-
-            if is_last {
-                break;
+                map.insert(desc.to_string(), result);
             }
         }
-        map.insert(desc.to_string(), result);
-    }
+        WaterfallRequest::Addresses(AddressesRequest { addresses, page: _ }) => {
+            let mut scripts = Vec::with_capacity(addresses.len());
+            for addr in addresses.iter() {
+                scripts.push(db.hash(&addr.script_pubkey()));
+            }
+            let mut result = Vec::with_capacity(addresses.len());
+            let _ = find_scripts(state, db, &mut result, scripts).await;
+            map.insert("addresses".to_string(), result);
+        }
+    };
 
     // enrich with block hashes and timestamps
     {
@@ -474,7 +473,7 @@ async fn handle_waterfalls_req(
     };
 
     log::info!(
-        "returning: {elements} elements for #{desc_hash}, elapsed: {}ms",
+        "returning: {elements} elements, elapsed: {}ms",
         start.elapsed().as_millis()
     );
     crate::WATERFALLS_COUNTER.inc();
@@ -489,6 +488,25 @@ async fn handle_waterfalls_req(
         Some(5),
         Some(m),
     )
+}
+
+async fn find_scripts(
+    state: &Arc<State>,
+    db: &crate::store::AnyStore,
+    result: &mut Vec<Vec<TxSeen>>,
+    scripts: Vec<u64>,
+) -> bool {
+    let mut seen_blockchain = db.get_history(&scripts).unwrap();
+    let seen_mempool = state.mempool.lock().await.seen(&scripts);
+
+    for (conf, unconf) in seen_blockchain.iter_mut().zip(seen_mempool.iter()) {
+        for txid in unconf {
+            conf.push(TxSeen::mempool(*txid))
+        }
+    }
+    let is_last = seen_blockchain.iter().all(|e| e.is_empty());
+    result.extend(seen_blockchain);
+    is_last
 }
 
 #[cfg(test)]

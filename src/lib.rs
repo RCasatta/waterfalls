@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, hash::Hasher};
+use std::collections::BTreeMap;
 
 use crate::cbor::{cbor_block_hash, cbor_opt_block_hash, cbor_txid, cbor_txids};
 use elements::{BlockHash, Txid};
@@ -267,12 +267,6 @@ lazy_static! {
         &["handler"]
     )
     .unwrap();
-}
-
-fn hash_str(s: &str) -> u64 {
-    let mut hasher = fxhash::FxHasher::default();
-    hasher.write(s.as_bytes());
-    hasher.finish()
 }
 
 #[cfg(test)]
