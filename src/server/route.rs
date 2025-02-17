@@ -234,11 +234,15 @@ fn parse_query(query: &str, key: &Identity, is_testnet: bool) -> Result<Waterfal
         (None, Some(addresses)) => {
             // TODO should I check the addresses are without blinding key?
             // TODO check max addresses
-            // TODO check network
             let addresses = addresses
                 .split(',')
                 .map(|e| Address::from_str(e).map_err(|_| Error::InvalidAddress(e.to_string())))
                 .collect::<Result<Vec<_>, _>>()?;
+            for a in addresses.iter() {
+                if is_testnet == (a.params == &AddressParams::LIQUID) {
+                    return Err(Error::WrongNetwork);
+                }
+            }
             Ok(WaterfallRequest::Addresses(AddressesRequest {
                 addresses,
                 page,
@@ -548,17 +552,22 @@ mod tests {
         let result = parse_query("addresses=ciao", &key, false).unwrap_err();
         assert_eq!(result, Error::InvalidAddress("ciao".to_string()));
 
-        // Test Valid Address
-        let result = parse_query(
-            "addresses=ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh",
-            &key,
-            false,
-        )
-        .unwrap();
+        // Test Valid mainnet Address
+        let mainnet_address = "ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh";
+        let result = parse_query(&format!("addresses={mainnet_address}"), &key, false).unwrap();
         assert_eq!(result.addresses().unwrap().addresses.len(), 1);
         assert_eq!(
             result.addresses().unwrap().addresses[0].to_string(),
-            "ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh"
+            mainnet_address
+        );
+
+        // Test Valid testnet Address
+        let testnet_address = "tex1qv0s62sz6xnxf9d4qkvsnwqs5pz9k9q8dpp0q2h";
+        let result = parse_query(&format!("addresses={testnet_address}"), &key, true).unwrap();
+        assert_eq!(result.addresses().unwrap().addresses.len(), 1);
+        assert_eq!(
+            result.addresses().unwrap().addresses[0].to_string(),
+            testnet_address
         );
     }
 
