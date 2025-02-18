@@ -32,6 +32,7 @@ use super::{encryption, sign::MsgSigAddress};
 const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 500; // TODO reduce to 50 and implement paging
 const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
+const MAX_ADDRESS_LENGTH: usize = 100; // max characters for an address (excessive to be conservative)
 
 // needed endpoint to make this self-contained for testing, in prod they should probably be never hit cause proxied by nginx
 // https://waterfalls.liquidwebwallet.org/liquidtestnet/api/blocks/tip/hash
@@ -236,6 +237,11 @@ fn parse_query(
             }))
         }
         (None, Some(addresses)) => {
+            let comma_count = addresses.matches(',').count();
+            if addresses.len() > max_addresses * MAX_ADDRESS_LENGTH || comma_count > max_addresses {
+                // early/fast length checks before parsing addresses which is expensive
+                return Err(Error::TooManyAddresses);
+            }
             let addresses = addresses
                 .split(',')
                 .map(|e| Address::from_str(e).map_err(|_| Error::InvalidAddress(e.to_string())))
@@ -604,6 +610,14 @@ mod tests {
 
         // Test too many addresses
         let result = parse_query("addresses=ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh,ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh,ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh", &key, false, 2).unwrap_err();
+        assert_eq!(result, Error::TooManyAddresses);
+
+        // Test too many addresses, fast checks
+        let result = parse_query("addresses=,,,", &key, false, 2).unwrap_err();
+        assert_eq!(result, Error::TooManyAddresses);
+        let long_str: String = "a".repeat(400);
+        let query = format!("addresses={long_str}");
+        let result = parse_query(&query, &key, false, 2).unwrap_err();
         assert_eq!(result, Error::TooManyAddresses);
     }
 
