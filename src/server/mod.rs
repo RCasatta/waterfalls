@@ -15,6 +15,7 @@ use bitcoin::{NetworkKind, PrivateKey};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
+use route::infallible_route;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
@@ -218,7 +219,7 @@ pub async fn inner_main(
                     let is_testnet = args.testnet;
                     let client = &client;
 
-                    let service = service_fn(move |req| route::route(state, client, req, is_testnet));
+                    let service = service_fn(move |req| infallible_route(state, client, req, is_testnet));
 
                     if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
                         log::error!("Error serving connection: {:?}", err);

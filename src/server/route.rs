@@ -515,6 +515,29 @@ async fn find_scripts(
     is_last
 }
 
+/// This function is used to wrap the route function so that it never returns an error but always a response
+/// However, the signature must return Result anyway to be used in the service_fn
+pub async fn infallible_route(
+    state: &Arc<State>,
+    client: &Arc<Mutex<Client>>,
+    req: Request<Incoming>,
+    is_testnet: bool,
+) -> Result<Response<Full<Bytes>>, hyper::Error> {
+    Ok(match route(state, client, req, is_testnet).await {
+        Ok(response) => response,
+        Err(error) => Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header(CONTENT_TYPE, "text/plain")
+            .body(Full::new(error.to_string().into()))
+            .unwrap_or_else(|_| {
+                Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Full::new(Bytes::from("Failed to create error response")))
+                    .unwrap()
+            }),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
