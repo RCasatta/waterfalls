@@ -303,7 +303,6 @@ mod tests {
 
         let v3: WaterfallResponseV3 = v2.clone().try_into().unwrap();
         let s = serde_json::to_string(&v3).unwrap();
-        println!("{}", s);
         assert_eq!(s.len(), 3028);
         let v2_back: WaterfallResponse = v3.into();
         assert_eq!(v2, v2_back);
