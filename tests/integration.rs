@@ -67,7 +67,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
         .address(&secp, &AddressParams::ELEMENTS)
         .unwrap();
 
-    let txid = test_env.send_to(&addr, 10_000);
+    let initial_txid = test_env.send_to(&addr, 10_000);
 
     let result = client
         .wait_waterfalls_non_empty(&bitcoin_desc)
@@ -78,7 +78,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert!(!result.is_empty());
     assert_eq!(result.count_non_empty(), 1);
     let first = &result.txs_seen.iter().next().unwrap().1[0][0];
-    assert_eq!(first.txid, txid);
+    assert_eq!(first.txid, initial_txid);
     assert_eq!(first.height, 0);
     assert_eq!(first.block_hash, None);
     assert_eq!(first.block_timestamp, None);
@@ -93,7 +93,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert_eq!(result.count_scripts(), 60);
     assert!(result.tip.is_some());
     let first = &result.txs_seen.iter().next().unwrap().1[0][0];
-    assert_eq!(first.txid, txid);
+    assert_eq!(first.txid, initial_txid);
     assert_eq!(first.height, 3);
     assert!(first.block_hash.is_some());
     assert!(first.block_timestamp.is_some());
@@ -150,6 +150,10 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let addresses = vec![addr.to_unconfidential()];
     let (result, _) = client.waterfalls_addresses(&addresses).await.unwrap();
     assert_eq!(result.count_non_empty(), 1);
+
+    // Test address_txs
+    let address_txs = client.address_txs(&addr).await.unwrap();
+    assert!(address_txs.contains(&initial_txid.to_string()));
 
     test_env.shutdown().await;
     assert!(true);

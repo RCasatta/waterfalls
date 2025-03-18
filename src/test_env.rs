@@ -68,7 +68,8 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), available_port);
     let base_url = format!("http://{socket_addr}");
     args.listen = Some(socket_addr);
-    args.testnet = true;
+    args.testnet = false;
+    args.regtest = true;
     let server_key = Identity::generate();
     args.server_key = Some(server_key.clone());
     let wif_key = PrivateKey::generate(NetworkKind::Test);
@@ -470,5 +471,22 @@ impl WaterfallClient {
         } else {
             bail!("broadcast response is not 200 but: {status_code} text: {text}");
         }
+    }
+
+    pub async fn address_txs(&self, address: &elements::Address) -> anyhow::Result<String> {
+        let url = format!("{}/address/{}/txs", self.base_url, address);
+        println!("url: {}", url);
+        let response = self.client.get(&url).send().await?;
+        let status_code = response.status().as_u16();
+        let text = response.text().await?;
+
+        if status_code != 200 {
+            bail!(
+                "address_txs response is not 200 but: {} text: {}",
+                status_code,
+                text
+            );
+        }
+        Ok(text)
     }
 }

@@ -37,8 +37,11 @@ pub struct Arguments {
     pub testnet: bool,
 
     /// if specified, use liquid regtest
+    // TODO network handling is a mess, accept a single network parameter of 3 values,
+    // make conversion to NetworkKind/AddressParams, use network kind for descriptors
+    // and wathever, while use network params for address parsing
     #[arg(long)]
-    pub is_regtest: bool,
+    pub regtest: bool,
 
     /// if specified, it uses esplora instead of local node to get data
     #[arg(long)]
@@ -89,6 +92,11 @@ pub struct Arguments {
 
 impl Arguments {
     pub fn is_valid(&self) -> Result<(), Error> {
+        if self.testnet && self.regtest {
+            return Err(Error::String(
+                "testnet and regtest cannot be true at the same time".to_string(),
+            ));
+        }
         if !self.use_esplora && self.rpc_user_password.is_none() {
             Err(Error::String(
                 "When using the node you must specify user and password".to_string(),
@@ -166,7 +174,7 @@ pub async fn inner_main(
 
     let key = args.server_key.clone().unwrap_or_else(Identity::generate);
 
-    let network_kind = if args.testnet {
+    let network_kind = if args.testnet || args.regtest {
         NetworkKind::Test
     } else {
         NetworkKind::Main
@@ -225,7 +233,7 @@ pub async fn inner_main(
                 tokio::task::spawn(async move {
                     let state = &state;
                     let is_testnet = args.testnet;
-                    let is_regtest = args.is_regtest;
+                    let is_regtest = args.regtest;
                     let add_cors = args.add_cors;
                     let client = &client;
 

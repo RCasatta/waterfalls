@@ -46,6 +46,7 @@ pub async fn route(
     is_testnet: bool,
     is_regtest: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
+    let is_testnet_or_regtest = is_testnet || is_regtest;
     log::debug!("---> {req:?}");
     let res = match (req.method(), req.uri().path(), req.uri().query()) {
         (&Method::GET, "/v1/server_recipient", None) => {
@@ -55,27 +56,57 @@ pub async fn route(
             str_resp(state.address().to_string(), StatusCode::OK)
         }
         (&Method::GET, "/v1/waterfalls", Some(query)) => {
-            let inputs = parse_query(query, &state.key, is_testnet, state.max_addresses)?;
+            let inputs = parse_query(
+                query,
+                &state.key,
+                is_testnet_or_regtest,
+                state.max_addresses,
+            )?;
             handle_waterfalls_req(state, inputs, false, false, false).await
         }
         (&Method::GET, "/v2/waterfalls", Some(query)) => {
-            let inputs = parse_query(query, &state.key, is_testnet, state.max_addresses)?;
+            let inputs = parse_query(
+                query,
+                &state.key,
+                is_testnet_or_regtest,
+                state.max_addresses,
+            )?;
             handle_waterfalls_req(state, inputs, true, false, false).await
         }
         (&Method::GET, "/v3/waterfalls", Some(query)) => {
-            let inputs = parse_query(query, &state.key, is_testnet, state.max_addresses)?;
+            let inputs = parse_query(
+                query,
+                &state.key,
+                is_testnet_or_regtest,
+                state.max_addresses,
+            )?;
             handle_waterfalls_req(state, inputs, true, true, false).await
         }
         (&Method::GET, "/v1/waterfalls.cbor", Some(query)) => {
-            let inputs = parse_query(query, &state.key, is_testnet, state.max_addresses)?;
+            let inputs = parse_query(
+                query,
+                &state.key,
+                is_testnet_or_regtest,
+                state.max_addresses,
+            )?;
             handle_waterfalls_req(state, inputs, false, false, true).await
         }
         (&Method::GET, "/v2/waterfalls.cbor", Some(query)) => {
-            let inputs = parse_query(query, &state.key, is_testnet, state.max_addresses)?;
+            let inputs = parse_query(
+                query,
+                &state.key,
+                is_testnet_or_regtest,
+                state.max_addresses,
+            )?;
             handle_waterfalls_req(state, inputs, true, false, true).await
         }
         (&Method::GET, "/v3/waterfalls.cbor", Some(query)) => {
-            let inputs = parse_query(query, &state.key, is_testnet, state.max_addresses)?;
+            let inputs = parse_query(
+                query,
+                &state.key,
+                is_testnet_or_regtest,
+                state.max_addresses,
+            )?;
             handle_waterfalls_req(state, inputs, true, true, true).await
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {
@@ -206,7 +237,7 @@ fn block_hash_resp(
 fn parse_query(
     query: &str,
     key: &Identity,
-    is_testnet: bool,
+    is_testnet_or_regtest: bool,
     max_addresses: usize,
 ) -> Result<WaterfallRequest, Error> {
     let mut params = form_urlencoded::parse(query.as_bytes())
@@ -229,7 +260,7 @@ fn parse_query(
                 .parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>()
                 .map_err(|e| Error::String(e.to_string()))?;
 
-            if is_testnet == desc_str.contains("xpub") {
+            if is_testnet_or_regtest == desc_str.contains("xpub") {
                 return Err(Error::WrongNetwork);
             }
             Ok(WaterfallRequest::Descriptor(DescriptorRequest {
@@ -251,7 +282,8 @@ fn parse_query(
                 return Err(Error::TooManyAddresses);
             }
             for a in addresses.iter() {
-                if is_testnet == (a.params == &AddressParams::LIQUID) {
+                if is_testnet_or_regtest == (a.params == &AddressParams::LIQUID) {
+                    // TODO check if regtest or testnet
                     return Err(Error::WrongNetwork);
                 }
                 if a.blinding_pubkey.is_some() {
