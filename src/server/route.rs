@@ -14,7 +14,7 @@ use elements_miniscript::DescriptorPublicKey;
 use http_body_util::{BodyExt, Full};
 use hyper::{
     body::{Bytes, Incoming},
-    header::{CACHE_CONTROL, CONTENT_TYPE},
+    header::{self, CACHE_CONTROL, CONTENT_TYPE},
     Method, Request, Response, StatusCode,
 };
 use prometheus::Encoder;
@@ -44,6 +44,7 @@ pub async fn route(
     client: &Arc<Mutex<Client>>,
     req: Request<Incoming>,
     is_testnet: bool,
+    is_regtest: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
     log::debug!("---> {req:?}");
     let res = match (req.method(), req.uri().path(), req.uri().query()) {
@@ -143,7 +144,7 @@ pub async fn route(
                     let addr = Address::from_str(addr)
                         .map_err(|e| Error::InvalidAddress(e.to_string()))?;
 
-                    handle_single_address(state, &addr, is_testnet).await
+                    handle_single_address(state, &addr, is_testnet, is_regtest).await
                 }
 
                 (Some(""), Some("tx"), Some(v), Some("raw"), None) => {
@@ -298,6 +299,7 @@ async fn handle_single_address(
     state: &Arc<State>,
     address: &Address,
     is_testnet: bool,
+    is_regtest: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
     #[derive(Serialize)]
     struct EsploraTx {
@@ -311,12 +313,21 @@ async fn handle_single_address(
         block_hash: Option<BlockHash>,
     }
 
-    if is_testnet && address.params == &AddressParams::LIQUID {
-        return Err(Error::WrongNetwork);
+    // Check network compatibility
+    if is_regtest {
+        if address.params != &AddressParams::ELEMENTS {
+            return Err(Error::WrongNetwork);
+        }
+    } else if is_testnet {
+        if address.params != &AddressParams::LIQUID_TESTNET {
+            return Err(Error::WrongNetwork);
+        }
+    } else {
+        if address.params != &AddressParams::LIQUID {
+            return Err(Error::WrongNetwork);
+        }
     }
-    if !is_testnet && address.params != &AddressParams::LIQUID {
-        return Err(Error::WrongNetwork);
-    }
+
     let db = &state.store;
     let script_pubkey = address.script_pubkey();
 
@@ -522,8 +533,10 @@ pub async fn infallible_route(
     client: &Arc<Mutex<Client>>,
     req: Request<Incoming>,
     is_testnet: bool,
+    is_regtest: bool,
+    add_cors: bool,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
-    let mut response = match route(state, client, req, is_testnet).await {
+    let mut response = match route(state, client, req, is_testnet, is_regtest).await {
         Ok(r) => r,
         Err(e) => Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -532,7 +545,7 @@ pub async fn infallible_route(
     };
 
     // Add CORS headers if enabled
-    if state.args.add_cors {
+    if add_cors {
         let headers = response.headers_mut();
         headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
         headers.insert(

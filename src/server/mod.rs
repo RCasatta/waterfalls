@@ -36,6 +36,10 @@ pub struct Arguments {
     #[arg(long)]
     pub testnet: bool,
 
+    /// if specified, use liquid regtest
+    #[arg(long)]
+    pub is_regtest: bool,
+
     /// if specified, it uses esplora instead of local node to get data
     #[arg(long)]
     pub use_esplora: bool,
@@ -221,9 +225,11 @@ pub async fn inner_main(
                 tokio::task::spawn(async move {
                     let state = &state;
                     let is_testnet = args.testnet;
+                    let is_regtest = args.is_regtest;
+                    let add_cors = args.add_cors;
                     let client = &client;
 
-                    let service = service_fn(move |req| infallible_route(state, client, req, is_testnet));
+                    let service = service_fn(move |req| infallible_route(state, client, req, is_testnet, is_regtest, add_cors));
 
                     if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
                         log::error!("Error serving connection: {:?}", err);
