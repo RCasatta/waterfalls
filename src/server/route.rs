@@ -523,19 +523,29 @@ pub async fn infallible_route(
     req: Request<Incoming>,
     is_testnet: bool,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
-    Ok(match route(state, client, req, is_testnet).await {
-        Ok(response) => response,
-        Err(error) => Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .header(CONTENT_TYPE, "text/plain")
-            .body(Full::new(error.to_string().into()))
-            .unwrap_or_else(|_| {
-                Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Full::new(Bytes::from("Failed to create error response")))
-                    .unwrap()
-            }),
-    })
+    let mut response = match route(state, client, req, is_testnet).await {
+        Ok(r) => r,
+        Err(e) => Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Full::new(e.to_string().into()))
+            .unwrap(),
+    };
+
+    // Add CORS headers if enabled
+    if state.args.add_cors {
+        let headers = response.headers_mut();
+        headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_METHODS,
+            "GET, POST, OPTIONS".parse().unwrap(),
+        );
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            "Content-Type".parse().unwrap(),
+        );
+    }
+
+    Ok(response)
 }
 
 #[cfg(test)]

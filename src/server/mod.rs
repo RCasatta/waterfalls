@@ -77,6 +77,10 @@ pub struct Arguments {
     /// Maximum number of addresses that can be specified in the query string.
     #[arg(long, default_value = "100")]
     pub max_addresses: usize,
+
+    /// If true, add CORS headers to responses
+    #[arg(long)]
+    pub add_cors: bool,
 }
 
 impl Arguments {
