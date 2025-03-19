@@ -12,6 +12,7 @@ use crate::threads::blocks::blocks_infallible;
 use crate::threads::mempool::mempool_sync_infallible;
 use age::x25519::Identity;
 use bitcoin::{NetworkKind, PrivateKey};
+use elements::AddressParams;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
@@ -29,19 +30,19 @@ mod state;
 pub use mempool::Mempool;
 pub use state::State;
 
+#[derive(Clone, clap::ValueEnum, Debug, PartialEq, Eq, Copy)]
+pub enum Network {
+    Liquid,
+    LiquidTestnet,
+    ElementsRegtest,
+}
+
 #[derive(clap::Parser, Clone, Default)]
 #[command(author, version, about, long_about = None)]
 pub struct Arguments {
-    /// if specified, use liquid testnet
+    /// network to use, default on liquid mainnet
     #[arg(long)]
-    pub testnet: bool,
-
-    /// if specified, use liquid regtest
-    // TODO network handling is a mess, accept a single network parameter of 3 values,
-    // make conversion to NetworkKind/AddressParams, use network kind for descriptors
-    // and wathever, while use network params for address parsing
-    #[arg(long)]
-    pub regtest: bool,
+    pub network: Network,
 
     /// if specified, it uses esplora instead of local node to get data
     #[arg(long)]
@@ -92,17 +93,75 @@ pub struct Arguments {
 
 impl Arguments {
     pub fn is_valid(&self) -> Result<(), Error> {
-        if self.testnet && self.regtest {
-            return Err(Error::String(
-                "testnet and regtest cannot be true at the same time".to_string(),
-            ));
-        }
         if !self.use_esplora && self.rpc_user_password.is_none() {
             Err(Error::String(
                 "When using the node you must specify user and password".to_string(),
             ))
         } else {
             Ok(())
+        }
+    }
+}
+
+impl std::str::FromStr for Network {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "liquid" => Ok(Self::Liquid),
+            "liquid-testnet" => Ok(Self::LiquidTestnet),
+            "elements-regtest" => Ok(Self::ElementsRegtest),
+            _ => Err(Error::String(format!("Invalid network: {}", s))),
+        }
+    }
+}
+
+impl std::fmt::Display for Network {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Network::Liquid => "liquid",
+            Network::LiquidTestnet => "liquid-testnet",
+            Network::ElementsRegtest { .. } => "elements-regtest",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl Default for Network {
+    fn default() -> Self {
+        Self::Liquid
+    }
+}
+
+impl Network {
+    pub fn as_network_kind(&self) -> NetworkKind {
+        match self {
+            Network::Liquid => NetworkKind::Main,
+            _ => NetworkKind::Test,
+        }
+    }
+
+    pub fn default_elements_listen_port(&self) -> u16 {
+        match self {
+            Network::Liquid => 7041,
+            Network::LiquidTestnet => 7039,
+            Network::ElementsRegtest => 7043, // TODO: check this
+        }
+    }
+
+    pub fn default_listen_port(&self) -> u16 {
+        match self {
+            Network::Liquid => 3100,
+            Network::LiquidTestnet => 3101,
+            Network::ElementsRegtest => 3102,
+        }
+    }
+
+    fn address_params(&self) -> &'static AddressParams {
+        match self {
+            Network::Liquid => &AddressParams::LIQUID,
+            Network::LiquidTestnet => &AddressParams::LIQUID_TESTNET,
+            Network::ElementsRegtest => &AddressParams::ELEMENTS,
         }
     }
 }
@@ -149,11 +208,7 @@ fn get_store(args: &Arguments) -> Result<AnyStore, Error> {
         Some(p) => {
             let mut path = p.clone();
             path.push("db");
-            if args.testnet {
-                path.push("testnet");
-            } else {
-                path.push("mainnet");
-            }
+            path.push(args.network.to_string());
             AnyStore::Db(
                 store::db::DBStore::open(&path).map_err(|e| Error::DBOpen(format!("{e:?}")))?,
             )
@@ -174,11 +229,7 @@ pub async fn inner_main(
 
     let key = args.server_key.clone().unwrap_or_else(Identity::generate);
 
-    let network_kind = if args.testnet || args.regtest {
-        NetworkKind::Test
-    } else {
-        NetworkKind::Main
-    };
+    let network_kind = args.network.as_network_kind();
 
     if let Some(wif_key) = args.wif_key.as_ref() {
         if wif_key.network != network_kind {
@@ -214,7 +265,7 @@ pub async fn inner_main(
 
     let addr = args.listen.unwrap_or(SocketAddr::from((
         [127, 0, 0, 1],
-        3100 + args.testnet as u16,
+        args.network.default_listen_port(),
     )));
     log::info!("Starting on http://{addr}");
 
@@ -232,12 +283,11 @@ pub async fn inner_main(
 
                 tokio::task::spawn(async move {
                     let state = &state;
-                    let is_testnet = args.testnet;
-                    let is_regtest = args.regtest;
+                    let network = args.network;
                     let add_cors = args.add_cors;
                     let client = &client;
 
-                    let service = service_fn(move |req| infallible_route(state, client, req, is_testnet, is_regtest, add_cors));
+                    let service = service_fn(move |req| infallible_route(state, client, req, network, add_cors));
 
                     if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
                         log::error!("Error serving connection: {:?}", err);

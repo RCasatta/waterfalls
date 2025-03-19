@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::time::sleep;
 
-use crate::server::Arguments;
+use crate::server::{Arguments, Network};
 
 pub struct Client {
     client: reqwest::Client,
@@ -31,25 +31,24 @@ const LOCAL: &str = "http://127.0.0.1";
 
 impl Client {
     pub fn new(args: &Arguments) -> Client {
-        let esplora_url = if args.testnet {
-            args.esplora_url
+        let esplora_url = match args.network {
+            Network::Liquid => args
+                .esplora_url
                 .clone()
-                .unwrap_or(format!("{BS}/liquidtestnet/api"))
-        } else {
-            args.esplora_url
+                .unwrap_or(format!("{BS}/liquid/api")),
+            Network::LiquidTestnet => args
+                .esplora_url
                 .clone()
-                .unwrap_or(format!("{BS}/liquid/api"))
+                .unwrap_or(format!("{BS}/liquidtestnet/api")),
+            Network::ElementsRegtest => args.esplora_url.clone().unwrap_or(format!("{LOCAL}:3000")),
         };
         let use_esplora = args.use_esplora;
         let base_url = if use_esplora {
             esplora_url.clone()
         } else {
             let node_url = args.node_url.clone();
-            if args.testnet {
-                node_url.unwrap_or(format!("{LOCAL}:7039"))
-            } else {
-                node_url.unwrap_or(format!("{LOCAL}:7041"))
-            }
+            let port = args.network.default_elements_listen_port();
+            node_url.unwrap_or(format!("{LOCAL}:{port}"))
         };
         log::info!("connecting to {base_url}");
         Client {
@@ -272,7 +271,7 @@ mod test {
 
     use elements::{BlockHash, Txid};
 
-    use crate::server::Arguments;
+    use crate::server::{Arguments, Network};
 
     use super::Client;
 
@@ -281,10 +280,10 @@ mod test {
     async fn test_client_esplora() {
         let mut args = Arguments::default();
         args.use_esplora = true;
-        for is_testnet in [true, false] {
-            args.testnet = is_testnet;
+        for network in [Network::Liquid, Network::LiquidTestnet] {
+            args.network = network;
             let client = Client::new(&args);
-            test(client, is_testnet).await;
+            test(client, network).await;
         }
     }
 
@@ -294,15 +293,15 @@ mod test {
         let mut args = Arguments::default();
         args.use_esplora = false;
 
-        for is_testnet in [true, false] {
-            args.testnet = is_testnet;
+        for network in [Network::Liquid, Network::LiquidTestnet] {
+            args.network = network;
             let client = Client::new(&args);
-            test(client, is_testnet).await;
+            test(client, network).await;
         }
     }
 
-    async fn test(client: Client, is_testnet: bool) {
-        let (genesis_hash, genesis_txid) = if is_testnet {
+    async fn test(client: Client, network: Network) {
+        let (genesis_hash, genesis_txid) = if network == Network::LiquidTestnet {
             (
                 "a771da8e52ee6ad581ed1e9a99825e5b3b7992225534eaa2ae23244fe26ab1c1",
                 "0471d2f856b3fdbc4397af272bee1660b77aaf9a4aeb86fdd96110ce00f2b158",
@@ -318,7 +317,7 @@ mod test {
         let genesis_txid = Txid::from_str(&genesis_txid).unwrap();
 
         let fetched = client.block_hash(0).await.unwrap().unwrap();
-        assert_eq!(genesis_hash, fetched, "is_testnet:{is_testnet}");
+        assert_eq!(genesis_hash, fetched, "network:{network}");
         let genesis_block = client.block(genesis_hash).await.unwrap();
         assert_eq!(genesis_block.block_hash(), genesis_hash);
         let genesis_tx = client.tx(genesis_txid).await.unwrap();

@@ -1,5 +1,5 @@
 use crate::{
-    server::{inner_main, sign::p2pkh, Arguments},
+    server::{inner_main, sign::p2pkh, Arguments, Network},
     WaterfallResponse, WaterfallResponseV3,
 };
 use std::{
@@ -68,8 +68,7 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), available_port);
     let base_url = format!("http://{socket_addr}");
     args.listen = Some(socket_addr);
-    args.testnet = false;
-    args.regtest = true;
+    args.network = Network::ElementsRegtest;
     let server_key = Identity::generate();
     args.server_key = Some(server_key.clone());
     let wif_key = PrivateKey::generate(NetworkKind::Test);

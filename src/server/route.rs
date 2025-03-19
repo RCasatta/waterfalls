@@ -27,7 +27,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-use super::{encryption, sign::MsgSigAddress};
+use super::{encryption, sign::MsgSigAddress, Network};
 
 const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 500; // TODO reduce to 50 and implement paging
@@ -43,10 +43,10 @@ pub async fn route(
     state: &Arc<State>,
     client: &Arc<Mutex<Client>>,
     req: Request<Incoming>,
-    is_testnet: bool,
-    is_regtest: bool,
+    network: Network,
 ) -> Result<Response<Full<Bytes>>, Error> {
-    let is_testnet_or_regtest = is_testnet || is_regtest;
+    let is_testnet_or_regtest =
+        network == Network::LiquidTestnet || network == Network::ElementsRegtest;
     log::debug!("---> {req:?}");
     let res = match (req.method(), req.uri().path(), req.uri().query()) {
         (&Method::GET, "/v1/server_recipient", None) => {
@@ -175,7 +175,7 @@ pub async fn route(
                     let addr = Address::from_str(addr)
                         .map_err(|e| Error::InvalidAddress(e.to_string()))?;
 
-                    handle_single_address(state, &addr, is_testnet, is_regtest).await
+                    handle_single_address(state, &addr, network).await
                 }
 
                 (Some(""), Some("tx"), Some(v), Some("raw"), None) => {
@@ -330,8 +330,7 @@ fn any_resp(
 async fn handle_single_address(
     state: &Arc<State>,
     address: &Address,
-    is_testnet: bool,
-    is_regtest: bool,
+    network: Network,
 ) -> Result<Response<Full<Bytes>>, Error> {
     #[derive(Serialize)]
     struct EsploraTx {
@@ -346,18 +345,8 @@ async fn handle_single_address(
     }
 
     // Check network compatibility
-    if is_regtest {
-        if address.params != &AddressParams::ELEMENTS {
-            return Err(Error::WrongNetwork);
-        }
-    } else if is_testnet {
-        if address.params != &AddressParams::LIQUID_TESTNET {
-            return Err(Error::WrongNetwork);
-        }
-    } else {
-        if address.params != &AddressParams::LIQUID {
-            return Err(Error::WrongNetwork);
-        }
+    if address.params != network.address_params() {
+        return Err(Error::WrongNetwork);
     }
 
     let db = &state.store;
@@ -564,11 +553,10 @@ pub async fn infallible_route(
     state: &Arc<State>,
     client: &Arc<Mutex<Client>>,
     req: Request<Incoming>,
-    is_testnet: bool,
-    is_regtest: bool,
+    network: Network,
     add_cors: bool,
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
-    let mut response = match route(state, client, req, is_testnet, is_regtest).await {
+    let mut response = match route(state, client, req, network).await {
         Ok(r) => r,
         Err(e) => Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
