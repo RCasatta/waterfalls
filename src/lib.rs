@@ -34,9 +34,13 @@ pub struct DescriptorRequest {
         elements_miniscript::descriptor::Descriptor<elements_miniscript::DescriptorPublicKey>,
 
     /// Requested page, 0 if not specified
-    /// The first returned index is equal to `page * 1000`
+    /// The first returned index is equal to `page * 10000`
     /// The same page is used for all the descriptor (ie both external and internal)
     page: u16,
+
+    /// The last known derivation index to scan up to, 0 if not specified
+    /// This can be used to override the GAP_LIMIT
+    to_index: u32,
 }
 
 /// Request to the waterfalls endpoint using a list of addresses
@@ -45,7 +49,7 @@ pub struct AddressesRequest {
     addresses: Vec<elements::Address>,
 
     /// Requested page, 0 if not specified
-    /// The first returned index is equal to `page * 1000`
+    /// The first returned index is equal to `page * 10000`
     page: u16,
 }
 
