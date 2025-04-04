@@ -320,13 +320,12 @@ fn concat_merge(
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
+    use elements::{hashes::Hash, BlockHash, OutPoint, Txid};
+    use std::{collections::HashMap, str::FromStr};
 
-    use elements::{hashes::Hash, OutPoint, Txid};
-
-    use crate::{
-        store::db::{get_or_init_salt, TxSeen},
-        store::Store,
+    use crate::store::{
+        db::{get_or_init_salt, TxSeen},
+        BlockMeta, Store,
     };
 
     use super::DBStore;
@@ -388,5 +387,133 @@ mod test {
 
         // let r = db._get_multi_block_hash(&[0, 1, 2]).unwrap();
         // assert_eq!(r, vec![BlockHash::all_zeros(); 3]);
+    }
+
+    #[test]
+    fn test_spent_different_block() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let db = DBStore::open(tempdir.path()).unwrap();
+
+        let mut history_map_1 = HashMap::new();
+        let mut utxo_created_1 = HashMap::new();
+        let mut utxo_spent_1 = vec![];
+
+        let txid_1 =
+            Txid::from_str("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2")
+                .unwrap();
+        let outpoint_1 = OutPoint::new(txid_1, 0);
+        let utxos: HashMap<_, _> = vec![(outpoint_1, 1u64)].into_iter().collect();
+        db.insert_utxos(&utxos).unwrap();
+
+        // Simulate a transaction that spends the UTXO created above
+        let txid_2 =
+            Txid::from_str("0c52d2526a5c9f00e9fb74afd15dd3caaf17c823159a514f929ae25193a43a52")
+                .unwrap();
+        let el_2 = history_map_1.entry(7u64).or_insert(vec![]);
+        el_2.push(TxSeen::new(txid_2, 1));
+
+        let outpoint_2 = OutPoint::new(txid_2, 0);
+        utxo_created_1.insert(outpoint_2, 7u64);
+
+        utxo_spent_1.push((outpoint_1, txid_2));
+
+        // Update block 1
+        let meta_1 = BlockMeta::new(1, BlockHash::all_zeros(), 1);
+        db.update(&meta_1, utxo_spent_1, history_map_1, utxo_created_1)
+            .unwrap();
+
+        let result = db.get_history(&[7]).unwrap();
+        assert_eq!(result[0], vec![TxSeen::new(txid_2, 1)]);
+
+        // Start block 2
+        let mut history_map_2 = HashMap::new();
+        let mut utxo_created_2 = HashMap::new();
+        let mut utxo_spent_2 = vec![];
+
+        // Simulate a transaction that spends the UTXO created above
+        let txid_3 =
+            Txid::from_str("f3581d726b4cf9b62f0ff9ad3b39c01f8ac3e8528dec4fd0cc656aac8c084032")
+                .unwrap();
+        let el_3 = history_map_2.entry(8u64).or_insert(vec![]);
+        el_3.push(TxSeen::new(txid_3, 2));
+
+        let outpoint_3 = OutPoint::new(txid_3, 0);
+        utxo_created_2.insert(outpoint_3, 8u64);
+
+        utxo_spent_2.push((outpoint_2, txid_3));
+
+        // Update block 2
+        let meta_2 = BlockMeta::new(2, BlockHash::all_zeros(), 2);
+        db.update(&meta_2, utxo_spent_2, history_map_2, utxo_created_2)
+            .unwrap();
+
+        let result_7 = db.get_history(&[7]).unwrap();
+        assert_eq!(
+            result_7[0],
+            vec![TxSeen::new(txid_2, 1), TxSeen::new(txid_3, 2)]
+        );
+
+        let result_8 = db.get_history(&[8]).unwrap();
+        assert_eq!(result_8[0], vec![TxSeen::new(txid_3, 2)]);
+    }
+
+    #[test]
+    fn test_spent_same_block() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let db = DBStore::open(tempdir.path()).unwrap();
+
+        let mut history_map = HashMap::new();
+        let mut utxo_created = HashMap::new();
+        let mut utxo_spent = vec![];
+
+        let txid_1 =
+            Txid::from_str("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2")
+                .unwrap();
+        let outpoint_1 = OutPoint::new(txid_1, 0);
+        let utxos: HashMap<_, _> = vec![(outpoint_1, 1u64)].into_iter().collect();
+        db.insert_utxos(&utxos).unwrap();
+
+        // Simulate a transaction that spends the UTXO created above
+        let txid_2 =
+            Txid::from_str("0c52d2526a5c9f00e9fb74afd15dd3caaf17c823159a514f929ae25193a43a52")
+                .unwrap();
+        let el_2 = history_map.entry(7u64).or_insert(vec![]);
+        el_2.push(TxSeen::new(txid_2, 1));
+
+        let outpoint_2 = OutPoint::new(txid_2, 0);
+        utxo_created.insert(outpoint_2, 7u64);
+
+        // Simulate a transaction that spends the UTXO created above
+        let txid_3 =
+            Txid::from_str("f3581d726b4cf9b62f0ff9ad3b39c01f8ac3e8528dec4fd0cc656aac8c084032")
+                .unwrap();
+        let el_3 = history_map.entry(8u64).or_insert(vec![]);
+        el_3.push(TxSeen::new(txid_3, 1));
+
+        let outpoint_3 = OutPoint::new(txid_3, 0);
+        utxo_created.insert(outpoint_3, 8u64);
+        utxo_spent.push((outpoint_1, txid_2));
+
+        // Removed as its spent in the same block
+        utxo_created.remove(&outpoint_2);
+        //utxo_spent.push((outpoint_2, txid_3));
+
+        // We need to insert the history of the spend for the previous output script
+        let el_4 = history_map.entry(7u64).or_insert(vec![]);
+        el_4.push(TxSeen::new(txid_3, 1));
+
+        // Update block
+        let meta = BlockMeta::new(1, BlockHash::all_zeros(), 1);
+        db.update(&meta, utxo_spent, history_map, utxo_created)
+            .unwrap();
+
+        let result_7 = db.get_history(&[7]).unwrap();
+        assert_eq!(
+            result_7[0],
+            vec![TxSeen::new(txid_2, 1), TxSeen::new(txid_3, 1)]
+        );
+
+        let result_8 = db.get_history(&[8]).unwrap();
+        assert_eq!(result_8[0], vec![TxSeen::new(txid_3, 1)]);
     }
 }
