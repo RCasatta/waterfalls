@@ -38,6 +38,37 @@ async fn launch_memory() -> waterfalls::test_env::TestEnv {
 }
 
 #[cfg(feature = "test_env")]
+fn get_new_address(wallet: &bitcoind::bitcoincore_rpc::Client) -> elements::Address {
+    use bitcoind::bitcoincore_rpc::RpcApi;
+    use serde_json::Value;
+    use std::str::FromStr;
+
+    let address_value: Value = wallet
+        .call("getnewaddress", &[Value::Null, Value::Null])
+        .unwrap();
+    elements::Address::from_str(address_value.as_str().unwrap()).unwrap()
+}
+
+#[cfg(feature = "test_env")]
+fn send_to_address(
+    wallet: &bitcoind::bitcoincore_rpc::Client,
+    address: &elements::Address,
+    amount: f64,
+) -> elements::Txid {
+    use bitcoind::bitcoincore_rpc::RpcApi;
+    use serde_json::Value;
+    use std::str::FromStr;
+
+    let result: Value = wallet
+        .call(
+            "sendtoaddress",
+            &[address.to_string().into(), amount.to_string().into()],
+        )
+        .unwrap();
+    elements::Txid::from_str(result.as_str().unwrap()).unwrap()
+}
+
+#[cfg(feature = "test_env")]
 async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     use bitcoin::sign_message::MessageSignature;
     use elements::{bitcoin::secp256k1, AddressParams};
@@ -154,6 +185,20 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     // Test address_txs
     let address_txs = client.address_txs(&addr).await.unwrap();
     assert!(address_txs.contains(&initial_txid.to_string()));
+
+    // Create two transactions in the same block the second one is spending an output of the first one
+    let other_wallet = test_env.create_other_wallet();
+    let other_address = get_new_address(&other_wallet);
+    test_env.send_to(&other_address, 1_000_000);
+    test_env.node_generate(1).await;
+    let address_spent_same_block = get_new_address(&other_wallet);
+    let txid1 = send_to_address(&other_wallet, &address_spent_same_block, 0.0098);
+    let new_address = test_env.get_new_address(None);
+    let txid2 = send_to_address(&other_wallet, &new_address, 0.0096);
+    test_env.node_generate(1).await;
+    let address_txs = client.address_txs(&address_spent_same_block).await.unwrap();
+    assert!(address_txs.contains(&txid1.to_string()));
+    assert!(address_txs.contains(&txid2.to_string()));
 
     test_env.shutdown().await;
     assert!(true);

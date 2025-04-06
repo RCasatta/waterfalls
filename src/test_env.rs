@@ -14,7 +14,7 @@ use age::x25519::{Identity, Recipient};
 use anyhow::bail;
 use bitcoin::{key::Secp256k1, secp256k1::All, NetworkKind, PrivateKey};
 use bitcoind::{
-    bitcoincore_rpc::{bitcoin::hex::FromHex, RpcApi},
+    bitcoincore_rpc::{bitcoin::hex::FromHex, Client, RpcApi},
     get_available_port, BitcoinD, Conf,
 };
 use elements::{
@@ -232,6 +232,10 @@ impl TestEnv {
         let tx_hex = val.as_str().unwrap();
         let bytes = Vec::<u8>::from_hex(tx_hex).unwrap();
         elements::Transaction::consensus_decode(&bytes[..]).unwrap()
+    }
+
+    pub fn create_other_wallet(&self) -> Client {
+        self.elementsd.create_wallet("other_wallet").unwrap()
     }
 
     pub fn sign_raw_transanction_with_wallet(
