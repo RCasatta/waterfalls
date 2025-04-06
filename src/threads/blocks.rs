@@ -63,11 +63,7 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
                     }
                     match utxo_created.remove(&input.previous_output) {
                         Some(script_hash) => {
-                            log::debug!("spent same block, avoiding {}", &input.previous_output);
-                            // spent in the same block:
-                            // - no need to remove from the persisted utxo
-                            // - this height already inserted for this script from the relative same-height output
-                            // Update the history map, adding history of the spend for the previous output script
+                            // also the spending tx must be indexed
                             let el = history_map.entry(script_hash).or_insert(vec![]);
                             el.push(TxSeen::new(txid, block_height));
                         }
