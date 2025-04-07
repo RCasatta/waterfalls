@@ -30,7 +30,7 @@ use tokio::sync::Mutex;
 use super::{encryption, sign::MsgSigAddress, Network};
 
 const GAP_LIMIT: u32 = 20;
-const MAX_BATCH: u32 = 500; // TODO reduce to 50 and implement paging
+const MAX_BATCH: u32 = 50;
 const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
 const MAX_ADDRESS_LENGTH: usize = 100; // max characters for an address (excessive to be conservative)
 
