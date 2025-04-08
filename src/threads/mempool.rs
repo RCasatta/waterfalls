@@ -18,10 +18,14 @@ async fn mempool_sync(state: Arc<State>, client: Client) -> Result<(), Error> {
                 let new: Vec<_> = current.difference(&mempool_txids).collect();
                 let removed: Vec<_> = mempool_txids.difference(&current).cloned().collect();
                 if !new.is_empty() {
-                    log::info!("new txs in mempool {:?}, tip: {tip:?}", new);
+                    log::debug!("new txs in mempool {:?}, tip: {tip:?}", new);
                 }
                 if !removed.is_empty() {
-                    log::info!("removed txs from mempool {:?}, tip: {tip:?}", removed);
+                    log::info!(
+                        "removed txs from mempool {:?}, tip: {tip:?}, still in mempool: {}",
+                        removed,
+                        current.len()
+                    );
                 }
 
                 let mut txs = vec![];

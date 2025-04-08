@@ -200,6 +200,18 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert!(address_txs.contains(&txid1.to_string()));
     assert!(address_txs.contains(&txid2.to_string()));
 
+    // Test using huge to_index will return paginated results
+    let (result, _) = client
+        .waterfalls_version(&bitcoin_desc, 2, None, Some(1_000_000))
+        .await
+        .unwrap();
+    assert_eq!(result.page, 0);
+    assert_eq!(result.txs_seen.len(), 2);
+    assert!(!result.is_empty());
+    assert_eq!(result.count_non_empty(), 1);
+    assert_eq!(result.count_scripts(), 2_000); // this is MAX_BATCH * GAP_LIMIT * 2
+    assert!(result.tip.is_some());
+
     test_env.shutdown().await;
     assert!(true);
 }

@@ -332,29 +332,38 @@ impl WaterfallClient {
         &self,
         desc: &str,
     ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
-        self.waterfalls_version(desc, 2).await
+        self.waterfalls_version(desc, 2, None, None).await
     }
 
     pub async fn waterfalls_v1(
         &self,
         desc: &str,
     ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
-        self.waterfalls_version(desc, 1).await
+        self.waterfalls_version(desc, 1, None, None).await
     }
 
-    async fn waterfalls_version(
+    pub async fn waterfalls_version(
         &self,
         desc: &str,
         version: u8,
+        page: Option<u32>,
+        to_index: Option<u32>,
     ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         let descriptor_url = format!("{}/v{}/waterfalls", self.base_url, version);
 
-        let response = self
+        let mut builder = self
             .client
             .get(&descriptor_url)
-            .query(&[("descriptor", desc)])
-            .send()
-            .await?;
+            .query(&[("descriptor", desc)]);
+
+        if let Some(to_index) = to_index {
+            builder = builder.query(&[("to_index", to_index.to_string().as_str())]);
+        }
+        if let Some(page) = page {
+            builder = builder.query(&[("page", page.to_string().as_str())]);
+        }
+
+        let response = builder.send().await?;
 
         let headers = response.headers().clone();
 
