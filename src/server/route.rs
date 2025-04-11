@@ -249,6 +249,11 @@ fn parse_query(
         .map(|e| e.parse().unwrap_or(0))
         .unwrap_or(0u16);
 
+    let to_index = params
+        .get("to_index")
+        .map(|e| e.parse().unwrap_or(0))
+        .unwrap_or(0u32);
+
     let descriptor = params.remove("descriptor");
     let addresses = params.remove("addresses");
     match (descriptor, addresses) {
@@ -266,6 +271,7 @@ fn parse_query(
             Ok(WaterfallRequest::Descriptor(DescriptorRequest {
                 descriptor,
                 page,
+                to_index,
             }))
         }
         (None, Some(addresses)) => {
@@ -419,7 +425,11 @@ async fn handle_waterfalls_req(
     let mut map = BTreeMap::new();
 
     match inputs {
-        WaterfallRequest::Descriptor(DescriptorRequest { descriptor, page }) => {
+        WaterfallRequest::Descriptor(DescriptorRequest {
+            descriptor,
+            page,
+            to_index,
+        }) => {
             for desc in descriptor.into_single_descriptors().unwrap().iter() {
                 let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
                 for batch in 0..MAX_BATCH {
@@ -434,7 +444,7 @@ async fn handle_waterfalls_req(
                     }
                     let is_last = find_scripts(state, db, &mut result, scripts).await;
 
-                    if is_last {
+                    if is_last && start + GAP_LIMIT >= to_index {
                         break;
                     }
                 }
