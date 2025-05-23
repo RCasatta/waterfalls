@@ -1,6 +1,5 @@
 //! Inside this module everything is needed to run the service providing the waterfalls protocol
 
-use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -18,6 +17,7 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use route::infallible_route;
 use tokio::net::TcpListener;
+use tokio::sync::watch::Receiver;
 use tokio::sync::Mutex;
 
 pub mod encryption;
@@ -219,7 +219,7 @@ fn get_store(args: &Arguments) -> Result<AnyStore, Error> {
 
 pub async fn inner_main(
     args: Arguments,
-    shutdown_signal: impl Future<Output = ()>,
+    shutdown_signal: Receiver<()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     args.is_valid()?;
 
@@ -254,7 +254,8 @@ pub async fn inner_main(
     let _h1 = {
         let state = state.clone();
         let client: Client = Client::new(&args);
-        tokio::spawn(async move { blocks_infallible(state, client).await })
+        let shutdown_signal = shutdown_signal.clone();
+        tokio::spawn(async move { blocks_infallible(state, client, shutdown_signal).await })
     };
 
     let _h2 = {
@@ -272,9 +273,10 @@ pub async fn inner_main(
     let listener = TcpListener::bind(addr).await?;
     let client = Client::new(&args);
     let client = Arc::new(Mutex::new(client));
-    let mut signal = std::pin::pin!(shutdown_signal);
 
     loop {
+        let mut signal = shutdown_signal.clone();
+
         tokio::select! {
             Ok( (stream, _)) = listener.accept() => {
                 let io = TokioIo::new(stream);
@@ -295,7 +297,7 @@ pub async fn inner_main(
                 });
             },
 
-            _ = &mut signal => {
+            _ = signal.changed() => {
                 log::info!("graceful shutdown signal received");
                 // stop the accept loop
                 break;
