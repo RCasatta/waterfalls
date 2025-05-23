@@ -1,6 +1,7 @@
 use clap::Parser;
 use env_logger::Env;
 use std::io::Write;
+use tokio::sync::watch::{self, Receiver};
 use waterfalls::server::{inner_main, Arguments};
 
 #[tokio::main(flavor = "current_thread")]
@@ -8,15 +9,21 @@ async fn main() {
     init_logging();
 
     let args = Arguments::parse();
+    let shutdown_signal = shutdown_signal().await;
 
-    inner_main(args, shutdown_signal()).await.unwrap(); // we want to panic in case of error so that the process exit with non-zero value
+    inner_main(args, shutdown_signal).await.unwrap(); // we want to panic in case of error so that the process exit with non-zero value
 }
 
-async fn shutdown_signal() {
-    // Wait for the CTRL+C signal
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to install CTRL+C signal handler");
+async fn shutdown_signal() -> Receiver<()> {
+    let (shutdown_sender, shutdown_receiver) = watch::channel::<()>(());
+    tokio::spawn(async move {
+        // Wait for the CTRL+C signal
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install CTRL+C signal handler");
+        let _ = shutdown_sender.send(());
+    });
+    shutdown_receiver
 }
 
 fn init_logging() {

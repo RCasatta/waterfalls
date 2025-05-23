@@ -15,6 +15,7 @@ use tokio::time::sleep;
 
 use crate::server::{Arguments, Network};
 
+#[derive(Clone)]
 pub struct Client {
     client: reqwest::Client,
     use_esplora: bool,
