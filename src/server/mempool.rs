@@ -98,10 +98,7 @@ impl Mempool {
         }
 
         for (k, v) in txid_hashes {
-            self.txid_hashes
-                .entry(k)
-                .or_default()
-                .extend(&v);
+            self.txid_hashes.entry(k).or_default().extend(&v);
             for e in v {
                 self.hash_txids.entry(e).or_default().push(k);
             }
