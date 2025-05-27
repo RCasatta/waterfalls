@@ -229,16 +229,16 @@ impl Client {
     }
 
     pub(crate) async fn block_hash_or_wait(&self, height: u32) -> BlockHash {
-        let mut i = 0;
+        let mut i = 1;
         loop {
             match self.block_hash(height).await {
                 Ok(Some(b)) => {
                     return b;
                 }
                 Ok(None) => {
-                    if i > 100 {
+                    if i % 100 == 0 {
                         // when waiting for a new block, 60 fails are expected
-                        log::warn!("waiting for blockhash({height}) for more than 100 secs");
+                        log::warn!("waiting for blockhash({height}) for more than {i} secs");
                     }
                 }
                 Err(e) => {
