@@ -86,7 +86,10 @@ impl MemoryStore {
                     .lock()
                     .unwrap()
                     .remove(outpoint)
-                    .unwrap_or_else(|| panic!("{outpoint} must be unspent")),
+                    .unwrap_or_else(|| {
+                        log::error!("{outpoint} must be unspent");
+                        panic!("{outpoint} must be unspent");
+                    }),
             );
         }
         result

@@ -384,6 +384,7 @@ impl WaterfallClient {
 
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
+        log::error!("no non-empty result after 10s");
         panic!("no non-empty result after 10s")
     }
 
@@ -418,6 +419,7 @@ impl WaterfallClient {
 
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
+        log::error!("no tip height after 10s");
         panic!("no tip height after 10s")
     }
 
