@@ -41,6 +41,9 @@ pub struct DescriptorRequest {
     /// The last known derivation index to scan up to, 0 if not specified
     /// This can be used to override the GAP_LIMIT
     to_index: u32,
+
+    /// The gap limit to use for this request, defaults to 20 if not specified
+    gap_limit: u32,
 }
 
 /// Request to the waterfalls endpoint using a list of addresses

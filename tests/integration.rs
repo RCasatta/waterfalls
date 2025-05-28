@@ -211,7 +211,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert_eq!(result.txs_seen.len(), 2);
     assert!(!result.is_empty());
     assert_eq!(result.count_non_empty(), 1);
-    assert_eq!(result.count_scripts(), 2_000); // this is MAX_BATCH * GAP_LIMIT * 2
+    assert_eq!(result.count_scripts(), 2_000); // this is MAX_ADDRESSES * 2 (default gap_limit=20, so max_batch=50, 50*20*2=2000)
     assert!(result.tip.is_some());
 
     // Test descriptor without wildcard
