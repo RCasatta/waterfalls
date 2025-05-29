@@ -68,6 +68,13 @@ You can also specify additional parameters via environment variables:
 docker run -p 3100:3100 -e NETWORK=liquid -e USE_ESPLORA=true waterfalls:latest
 ```
 
+### Publish the Docker
+
+```bash
+docker tag waterfalls:latest xenoky/waterfalls:latest
+docker push xenoky/waterfalls:latest
+```
+
 ## Bench
 
 `criterion` is used and nightly is not needed for benching, just do:
