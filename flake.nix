@@ -68,7 +68,7 @@
                 bin
                 openssl
                 rocksdb
-                # Add other runtime dependencies as needed
+                bash # just to inspect the docker
               ];
               pathsToLink = [ "/bin" "/lib" ];
             };
