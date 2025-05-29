@@ -1,5 +1,3 @@
-
-
 # Waterfall
 
 Waterfall is a proposed new scanning mechanism for web light-clients wallets that leverages a new server endpoint.
@@ -35,6 +33,40 @@ Txs | First         | Following
 ----|---------------|-------------
  80 | 22s (85 reqs) | 1s (5 reqs)
   3 | 2s (11 reqs)  | 1s (5 reqs)
+
+## Docker
+
+You can run Waterfalls in a Docker container using the included Nix configuration.
+
+### Building the Docker image
+
+```bash
+# Build the Docker image
+nix build .#dockerImage
+
+# Load the image into Docker
+docker load < result
+```
+
+### Running the Docker container
+
+The Docker image exposes all network ports (3100 for Liquid, 3101 for LiquidTestnet, 3102 for ElementsRegtest). You need to specify the `NETWORK` environment variable when running the container:
+
+```bash
+# Run with Liquid network
+docker run -p 3100:3100 -e NETWORK=liquid waterfalls:latest
+
+# Run with LiquidTestnet network
+docker run -p 3101:3101 -e NETWORK=liquid-testnet waterfalls:latest
+
+```
+
+You can also specify additional parameters via environment variables:
+
+```bash
+# Use Esplora API instead of a local node
+docker run -p 3100:3100 -e NETWORK=liquid -e USE_ESPLORA=true waterfalls:latest
+```
 
 ## Bench
 

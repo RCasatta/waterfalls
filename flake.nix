@@ -55,12 +55,40 @@
           bin = craneLib.buildPackage (commonArgs // {
             inherit cargoArtifacts;
           });
+
+          # Docker image configuration
+          dockerImage = pkgs.dockerTools.buildImage {
+            name = "waterfalls";
+            tag = "latest";
+
+            # Copy runtime dependencies
+            copyToRoot = pkgs.buildEnv {
+              name = "image-root";
+              paths = with pkgs; [
+                bin
+                openssl
+                rocksdb
+                # Add other runtime dependencies as needed
+              ];
+              pathsToLink = [ "/bin" "/lib" ];
+            };
+
+            config = {
+              Cmd = [ "${bin}/bin/waterfalls" ];
+              ExposedPorts = {
+                # Expose all possible ports for different networks
+                "3100/tcp" = {}; # Liquid
+                "3101/tcp" = {}; # LiquidTestnet
+                "3102/tcp" = {}; # ElementsRegtest
+              };
+            };
+          };
         in
         with pkgs;
         {
           packages =
             {
-              inherit bin;
+              inherit bin dockerImage;
               default = bin;
             };
           devShells.default = mkShell {
