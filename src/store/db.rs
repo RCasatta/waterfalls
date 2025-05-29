@@ -111,7 +111,7 @@ impl DBStore {
             batch.put_cf(&cf, &key_buf, val);
         }
 
-        self.db.write(batch)?;
+        self.db.write(batch).context("Error writing to db")?;
         Ok(())
     }
 
@@ -138,7 +138,7 @@ impl DBStore {
             batch.delete_cf(&cf, &key.1);
         }
 
-        self.db.write(batch)?;
+        self.db.write(batch).context("Error writing to db")?;
 
         Ok(result)
     }
@@ -158,7 +158,7 @@ impl DBStore {
         for (script_hash, new_heights) in add {
             batch.merge_cf(&cf, script_hash.to_be_bytes(), to_be_bytes(new_heights))
         }
-        self.db.write(batch)?;
+        self.db.write(batch).context("Error writing to db")?;
         Ok(())
     }
 }
@@ -245,15 +245,19 @@ impl Store for DBStore {
         let mut history_map = history_map;
         // TODO should be a db tx
         let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.0).collect();
-        let script_hashes = self.remove_utxos(&only_outpoints)?;
+        let script_hashes = self
+            .remove_utxos(&only_outpoints)
+            .context("Error removing utxos")?;
         for (script_hash, (_, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
             el.push(TxSeen::new(txid, block_meta.height()));
         }
 
         self.set_hash_ts(block_meta);
-        self.update_history(&history_map)?;
-        self.insert_utxos(&utxo_created)?;
+        self.update_history(&history_map)
+            .context("Error updating history")?;
+        self.insert_utxos(&utxo_created)
+            .context("Error inserting utxos")?;
 
         Ok(())
     }

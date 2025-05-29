@@ -25,7 +25,7 @@ use elements::{
 use hyper::HeaderMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::oneshot::{self, Receiver, Sender};
+use tokio::sync::watch::{self, Sender};
 
 pub struct TestEnv {
     #[allow(dead_code)]
@@ -89,8 +89,8 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
         }
     }
 
-    let (tx, rx) = oneshot::channel();
-    let handle = tokio::spawn(inner_main(args, shutdown_signal(rx)));
+    let (tx, rx) = watch::channel::<()>(());
+    let handle = tokio::spawn(inner_main(args, rx));
 
     let client = WaterfallClient::new(base_url.to_string());
     let secp = Secp256k1::new();
@@ -255,10 +255,6 @@ impl TestEnv {
         let bytes = Vec::<u8>::from_hex(tx_hex).unwrap();
         elements::Transaction::consensus_decode(&bytes[..]).unwrap()
     }
-}
-
-async fn shutdown_signal(rx: Receiver<()>) {
-    rx.await.unwrap()
 }
 
 #[derive(Serialize, Deserialize)]
