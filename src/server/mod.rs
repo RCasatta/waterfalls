@@ -41,28 +41,28 @@ pub enum Network {
 #[command(author, version, about, long_about = None)]
 pub struct Arguments {
     /// network to use, default on liquid mainnet
-    #[arg(long)]
+    #[arg(env, long)]
     pub network: Network,
 
     /// if specified, it uses esplora instead of local node to get data
-    #[arg(long)]
+    #[arg(env, long)]
     pub use_esplora: bool,
 
     /// If `use_esplora` is true will use this address to fetch data from esplora or a default url according to the used network if not provided.
-    #[arg(long)]
+    #[arg(env, long)]
     pub esplora_url: Option<String>,
 
     /// If `use_esplora` is false will use this address to fetch data from the local rest-enabled elements node or a default url according to the used network if not provided.
-    #[arg(long)]
+    #[arg(env, long)]
     pub node_url: Option<String>,
 
     /// Socket address where to listen to serve requests
-    #[arg(long)]
+    #[arg(env, long)]
     pub listen: Option<SocketAddr>,
 
     /// Directory where to save the database
     #[cfg(feature = "db")]
-    #[arg(long)]
+    #[arg(env, long)]
     pub db_dir: Option<std::path::PathBuf>,
 
     /// An optional age server key to decrypt descriptor query string.
@@ -83,11 +83,11 @@ pub struct Arguments {
     pub rpc_user_password: Option<String>,
 
     /// Maximum number of addresses that can be specified in the query string.
-    #[arg(long, default_value = "100")]
+    #[arg(env, long, default_value = "100")]
     pub max_addresses: usize,
 
     /// If true, add CORS headers to responses
-    #[arg(long)]
+    #[arg(env, long)]
     pub add_cors: bool,
 }
 
