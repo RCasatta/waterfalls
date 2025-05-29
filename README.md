@@ -115,6 +115,17 @@ curl 'https://waterfalls.liquidwebwallet.org/liquid/api/v1/waterfalls?descriptor
 * The format of the data returned resembles what you have in Esplora with multiple `script_get_history` calls, to minimize client changes needed. The only exception is giving some extra information (block timestamp) to avoid even more requests.
 * Data returned in the endpoint mixes data in blocks and in mempool, since nature of the data differs (eg you could cache data coming from blocks for a minute) there could be some advantages in separating data returned in different endpoints, but we decided the gains are not worth the complexity
 
+### Waterfalls response versioning
+
+At the moment there are 3 versions for the /waterfalls endpoint and this are the differences between versions:
+
+v1 and v2 differs only for the fact that v2 includes the current tip of the blockchain for the server. Having the tip cost a little and it's saving a roundtrip in most cases for the wallet scan algorithm. For this reason v1 is available for backward compatibility but it's deprecatedd.
+
+v2 and v3 contains the same information. Indeed there is a test that is doing a roundtrip `test_waterfall_response_v3_v2_roundtrip`.
+What v3 is trying to achieve is using references for repeated data to save space. So, for example, instead of repeating an hex txid which is 64 chars, it creates an array ot txid at the end of the JSON and then references the index of the array where that txid is needed. In another way is a context-aware compression of the JSON. In practice compressed v2 endpoint for example using the fast zstd achieve almost the same data saving than doing this tricks. For this reasons we don't thing the added complexity of the json is worth the change and v3 would most likely be deprecated.
+
+We suggest new implementation to use v2 endpoint.
+
 ## TODO
 
 - [ ] `WaterfallRequest` and `WaterfallResponse` should be handy in a separate crate so that client can use that
