@@ -119,10 +119,15 @@ curl 'https://waterfalls.liquidwebwallet.org/liquid/api/v1/waterfalls?descriptor
 
 At the moment there are 3 versions for the /waterfalls endpoint and this are the differences between versions:
 
-v1 and v2 differs only for the fact that v2 includes the current tip of the blockchain for the server. Having the tip cost a little and it's saving a roundtrip in most cases for the wallet scan algorithm. For this reason v1 is available for backward compatibility but it's deprecatedd.
+v1 and v2 differs only for the fact that v2 includes the current tip of the blockchain for the server.
+Having the tip cost a little and it's saving a roundtrip in most cases for the wallet scan algorithm.
+For this reason v1 is available for backward compatibility but it's deprecated.
 
 v2 and v3 contains the same information. Indeed there is a test that is doing a roundtrip `test_waterfall_response_v3_v2_roundtrip`.
-What v3 is trying to achieve is using references for repeated data to save space. So, for example, instead of repeating an hex txid which is 64 chars, it creates an array ot txid at the end of the JSON and then references the index of the array where that txid is needed. In another way is a context-aware compression of the JSON. In practice compressed v2 endpoint for example using the fast zstd achieve almost the same data saving than doing this tricks. For this reasons we don't thing the added complexity of the json is worth the change and v3 would most likely be deprecated.
+What v3 is trying to achieve is using references for repeated data to save space. So, for example, instead of repeating an hex txid which is 64 chars, it creates an array ot txid at the end of the JSON and then references the index of the array where that txid is needed. In another way is a context-aware compression of the JSON.
+In practice compressed v2 endpoint for example using the fast zstd achieve almost the same data saving than doing this tricks.
+For this reasons we don't thing the added complexity of the json is worth the change and v3 would most likely be deprecated.
+See [v2 response example](tests/data/waterfall_response_v2_pretty.json) and [v3 response example](tests/data/waterfall_response_v3_pretty.json).
 
 We suggest new implementation to use v2 endpoint.
 
