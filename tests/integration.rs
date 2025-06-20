@@ -104,10 +104,12 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
         .wait_waterfalls_non_empty(&bitcoin_desc)
         .await
         .unwrap();
+
     assert_eq!(result.page, 0);
     assert_eq!(result.txs_seen.len(), 2);
     assert!(!result.is_empty());
     assert_eq!(result.count_non_empty(), 1);
+    let expected_first = &result.txs_seen.iter().next().unwrap().1[0][0];
     let first = &result.txs_seen.iter().next().unwrap().1[0][0];
     assert_eq!(first.txid, initial_txid);
     assert_eq!(first.height, 0);
@@ -211,6 +213,18 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert_eq!(result.count_non_empty(), 1);
     assert_eq!(result.count_scripts(), 2_000); // this is MAX_BATCH * GAP_LIMIT * 2
     assert!(result.tip.is_some());
+
+    // Test descriptor without wildcard
+    let desc_str = format!("elwpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/0/0)");
+    let result = client.waterfalls_v2(&desc_str).await.unwrap().0;
+    let first_script_result = &result.txs_seen.iter().next().unwrap().1[0];
+    assert_eq!(result.page, 0);
+    assert_eq!(result.txs_seen.len(), 1);
+    assert_eq!(first_script_result.len(), 1);
+    assert!(!result.is_empty());
+    assert_eq!(result.count_non_empty(), 1);
+    let first = &first_script_result[0];
+    assert_eq!(first.txid, expected_first.txid);
 
     test_env.shutdown().await;
     assert!(true);

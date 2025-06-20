@@ -431,6 +431,7 @@ async fn handle_waterfalls_req(
             to_index,
         }) => {
             for desc in descriptor.into_single_descriptors().unwrap().iter() {
+                let is_single_address = !desc.has_wildcard();
                 let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
                 for batch in 0..MAX_BATCH {
                     let mut scripts = Vec::with_capacity(GAP_LIMIT as usize);
@@ -441,10 +442,14 @@ async fn handle_waterfalls_req(
                         let script_pubkey = l.script_pubkey();
                         log::debug!("{}/{} {}", desc, index, script_pubkey);
                         scripts.push(db.hash(&script_pubkey));
+                        if is_single_address {
+                            break;
+                        }
                     }
+
                     let is_last = find_scripts(state, db, &mut result, scripts).await;
 
-                    if is_last && start + GAP_LIMIT >= to_index {
+                    if (is_last && start + GAP_LIMIT >= to_index) || is_single_address {
                         break;
                     }
                 }
