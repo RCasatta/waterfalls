@@ -29,10 +29,10 @@ use tokio::sync::Mutex;
 
 use super::{encryption, sign::MsgSigAddress, Network};
 
-const GAP_LIMIT: u32 = 20;
-const MAX_BATCH: u32 = 50;
-const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
+const MAX_ADDRESSES: u32 = 1000;
 const MAX_ADDRESS_LENGTH: usize = 100; // max characters for an address (excessive to be conservative)
+const MAX_GAP_LIMIT: u32 = 100;
+const DEFAULT_GAP_LIMIT: u32 = 20;
 
 // needed endpoint to make this self-contained for testing, in prod they should probably be never hit cause proxied by nginx
 // https://waterfalls.liquidwebwallet.org/liquidtestnet/api/blocks/tip/hash
@@ -254,6 +254,20 @@ fn parse_query(
         .map(|e| e.parse().unwrap_or(0))
         .unwrap_or(0u32);
 
+    let gap_limit = params
+        .get("gap_limit")
+        .map(|e| {
+            e.parse()
+                .map_err(|_| Error::String("gap_limit must be a number".to_string()))
+        })
+        .unwrap_or(Ok(DEFAULT_GAP_LIMIT))?;
+
+    if gap_limit > MAX_GAP_LIMIT {
+        return Err(Error::String(format!(
+            "gap_limit cannot exceed {MAX_GAP_LIMIT}",
+        )));
+    }
+
     let descriptor = params.remove("descriptor");
     let addresses = params.remove("addresses");
     match (descriptor, addresses) {
@@ -272,6 +286,7 @@ fn parse_query(
                 descriptor,
                 page,
                 to_index,
+                gap_limit,
             }))
         }
         (None, Some(addresses)) => {
@@ -429,15 +444,17 @@ async fn handle_waterfalls_req(
             descriptor,
             page,
             to_index,
+            gap_limit,
         }) => {
+            let max_batch = MAX_ADDRESSES / gap_limit;
             for desc in descriptor.into_single_descriptors().unwrap().iter() {
                 let is_single_address = !desc.has_wildcard();
-                let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
-                for batch in 0..MAX_BATCH {
-                    let mut scripts = Vec::with_capacity(GAP_LIMIT as usize);
+                let mut result = Vec::with_capacity(gap_limit as usize); // At least
+                for batch in 0..max_batch {
+                    let mut scripts = Vec::with_capacity(gap_limit as usize);
 
-                    let start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
-                    for index in start..start + GAP_LIMIT {
+                    let start = batch * gap_limit + page as u32 * MAX_ADDRESSES;
+                    for index in start..start + gap_limit {
                         let l = desc.at_derivation_index(index).unwrap();
                         let script_pubkey = l.script_pubkey();
                         log::debug!("{}/{} {}", desc, index, script_pubkey);
@@ -449,7 +466,7 @@ async fn handle_waterfalls_req(
 
                     let is_last = find_scripts(state, db, &mut result, scripts).await;
 
-                    if (is_last && start + GAP_LIMIT >= to_index) || is_single_address {
+                    if (is_last && start + gap_limit >= to_index) || is_single_address {
                         break;
                     }
                 }
@@ -700,6 +717,24 @@ mod tests {
         let query = format!("addresses={long_str}");
         let result = parse_query(&query, &key, false, 2).unwrap_err();
         assert_eq!(result, Error::TooManyAddresses);
+
+        // Test gap_limit exceeding MAX_GAP_LIMIT
+        let query = format!("descriptor={MAINNET_DESC}&gap_limit=123123");
+        let result = parse_query(&query, &key, false, 100).unwrap_err();
+        assert_eq!(
+            result,
+            Error::String(format!("gap_limit cannot exceed {MAX_GAP_LIMIT}"))
+        );
+
+        // Test gap_limit at MAX_GAP_LIMIT (should succeed)
+        let query = format!("descriptor={MAINNET_DESC}&gap_limit={MAX_GAP_LIMIT}");
+        let result = parse_query(&query, &key, false, 100).unwrap();
+        assert_eq!(result.descriptor().unwrap().gap_limit, MAX_GAP_LIMIT);
+
+        // Test gap_limit below MAX_GAP_LIMIT (should succeed)
+        let query = format!("descriptor={MAINNET_DESC}&gap_limit=50");
+        let result = parse_query(&query, &key, false, 100).unwrap();
+        assert_eq!(result.descriptor().unwrap().gap_limit, 50);
     }
 
     fn encode_query(descriptor: &str, page: Option<u16>) -> String {
