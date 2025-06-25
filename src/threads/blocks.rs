@@ -9,12 +9,29 @@ use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
+use tokio::{sync::watch::Receiver, time::sleep};
 
-pub(crate) async fn blocks_infallible(shared_state: Arc<State>, client: Client) {
-    if let Err(e) = index(shared_state, client).await {
-        log::error!("{:?}", e);
+pub(crate) async fn blocks_infallible(
+    shared_state: Arc<State>,
+    client: Client,
+    shutdown_signal: Receiver<()>,
+) {
+    loop {
+        let mut signal = shutdown_signal.clone();
+        tokio::select! {
+            _ = signal.changed() => {
+                log::info!("Shutdown signal received, exiting blocks thread");
+                return;
+            }
+            res = index(shared_state.clone(), client.clone()) => {
+                if let Err(e) = res {
+                    log::error!("Error indexing blocks: {:?}", e);
+                    sleep(Duration::from_secs(10)).await
+                }
+            }
+        }
     }
 }
 
@@ -79,9 +96,10 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
         }
 
         let meta = BlockMeta::new(block_height, block.block_hash(), block.header.time);
-        state.set_hash_ts(&meta).await;
         db.update(&meta, utxo_spent, history_map, utxo_created)
+            .inspect_err(|e| log::error!("Error updating store: {e:?}"))
             .map_err(|_| Error::Other)?; // TODO
+        state.set_hash_ts(&meta).await;
     }
     Ok(())
 }
