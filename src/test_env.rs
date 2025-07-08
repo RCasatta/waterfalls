@@ -27,9 +27,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::oneshot::{self, Receiver, Sender};
 
-pub struct TestEnv {
+pub struct TestEnv<'a> {
     #[allow(dead_code)]
-    elementsd: BitcoinD,
+    elementsd: &'a BitcoinD,
     handle: tokio::task::JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>,
     tx: Sender<()>,
     client: WaterfallClient,
@@ -40,26 +40,26 @@ pub struct TestEnv {
 }
 
 #[cfg(feature = "db")]
-pub async fn launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv {
+pub async fn launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv<'static> {
     inner_launch(exe, path).await
 }
 
 #[cfg(not(feature = "db"))]
-pub async fn launch<S: AsRef<OsStr>>(exe: S) -> TestEnv {
+pub async fn launch<S: AsRef<OsStr>>(exe: S) -> TestEnv<'static> {
     inner_launch(exe, None).await
 }
 
 #[cfg(feature = "db")]
-pub async fn launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> TestEnv {
+pub async fn launch_with_node(elementsd: &BitcoinD, path: Option<PathBuf>) -> TestEnv {
     inner_launch_with_node(elementsd, path).await
 }
 
 #[cfg(not(feature = "db"))]
-pub async fn launch_with_node(elementsd: BitcoinD) -> TestEnv {
+pub async fn launch_with_node(elementsd: &BitcoinD) -> TestEnv {
     inner_launch_with_node(elementsd, None).await
 }
 
-async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> TestEnv {
+async fn inner_launch_with_node(elementsd: &BitcoinD, path: Option<PathBuf>) -> TestEnv {
     let mut args = Arguments {
         node_url: Some(elementsd.rpc_url()),
         ..Default::default()
@@ -117,7 +117,7 @@ async fn inner_launch_with_node(elementsd: BitcoinD, path: Option<PathBuf>) -> T
     test_env
 }
 
-async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv {
+async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv<'static> {
     let mut conf = Conf::default();
     let args = vec![
         "-fallbackfee=0.0001",
@@ -134,10 +134,12 @@ async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv
     conf.network = "liquidregtest";
 
     let elementsd = BitcoinD::with_conf(exe, &conf).unwrap();
-    inner_launch_with_node(elementsd, path).await
+    // Use Box::leak to create a static reference
+    let elementsd_ref = Box::leak(Box::new(elementsd));
+    inner_launch_with_node(elementsd_ref, path).await
 }
 
-impl TestEnv {
+impl<'a> TestEnv<'a> {
     pub async fn shutdown(self) {
         self.tx.send(()).unwrap();
         let _ = self.handle.await.unwrap();
