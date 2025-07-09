@@ -32,8 +32,8 @@ const UTXO_CF: &str = "utxo"; // OutPoint -> ScriptHash
 
 // A single multiget on this is enough to compute the full get_history of a wallet.
 // In Liquid mainnet the db is about 748MB (2025-02-06)
-// In Bitcoin mainnet we have ~3B non-provably-unspendable-outputs (2025-02-06), so this table would be 3B*(8+32+4) = 132GB
-const HISTORY_CF: &str = "history"; // ScriptHash -> Vec<(Txid, Height)>
+// In Bitcoin mainnet we have ~3B non-provably-unspendable-outputs (2025-02-06), so this table would be 3B*(8+32+3) = 129GB
+const HISTORY_CF: &str = "historyv2"; // ScriptHash -> Vec<(Txid, Height(3 bytes))>
 
 const OTHER_CF: &str = "other";
 
@@ -47,7 +47,7 @@ const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF];
 // height key for salting
 const SALT_KEY: &[u8] = b"S";
 
-const VEC_TX_SEEN_SIZE: usize = 36;
+const VEC_TX_SEEN_SIZE: usize = 35;
 
 impl DBStore {
     fn create_cf_descriptors() -> Vec<rocksdb::ColumnFamilyDescriptor> {
@@ -161,7 +161,7 @@ impl DBStore {
             batch.merge_cf(
                 &cf,
                 script_hash.to_be_bytes(),
-                vec_tx_seen_to_be_bytes(new_heights),
+                vec_tx_seen_to_be_bytes(new_heights)?,
             )
         }
         self.db.write(batch)?;
@@ -271,13 +271,19 @@ fn serialize_outpoint(o: &OutPoint) -> Vec<u8> {
     v
 }
 
-fn vec_tx_seen_to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
+fn vec_tx_seen_to_be_bytes(v: &[TxSeen]) -> Result<Vec<u8>> {
     let mut result = Vec::with_capacity(v.len() * VEC_TX_SEEN_SIZE);
     for TxSeen { txid, height, .. } in v {
         result.extend(txid.as_byte_array());
-        result.extend(height.to_be_bytes());
+        if *height >= 16777216 {
+            // 0xFFFFFF or 2^24
+            return Err(anyhow::anyhow!("height too high"));
+        }
+        let height_bytes = height.to_be_bytes();
+        assert_eq!(height_bytes[0], 0);
+        result.extend(&height_bytes[1..]);
     }
-    result
+    Ok(result)
 }
 
 fn vec_tx_seen_from_be_bytes(v: &[u8]) -> Result<Vec<TxSeen>> {
@@ -288,7 +294,11 @@ fn vec_tx_seen_from_be_bytes(v: &[u8]) -> Result<Vec<TxSeen>> {
 
     for chunk in v.chunks(VEC_TX_SEEN_SIZE) {
         let txid = Txid::from_slice(&chunk[..32])?;
-        let height = Height::from_be_bytes(chunk[32..].try_into()?);
+        let mut height_be_bytes = [0u8; 4];
+        for i in 0..3 {
+            height_be_bytes[i + 1] = chunk[32 + i];
+        }
+        let height = Height::from_be_bytes(height_be_bytes);
         result.push(TxSeen::new(txid, height))
     }
     Ok(result)
@@ -399,6 +409,18 @@ mod test {
     }
 
     #[test]
+    fn test_single_static_tx_seen_round_trip() {
+        let tx_seen = TxSeen::new(Txid::all_zeros(), 16777215);
+        let serialized = vec_tx_seen_to_be_bytes(&[tx_seen.clone()]).unwrap();
+        let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
+        assert_eq!(deserialized[0], tx_seen);
+
+        let tx_seen = TxSeen::new(Txid::all_zeros(), 16777216);
+        let err = vec_tx_seen_to_be_bytes(&[tx_seen.clone()]).unwrap_err();
+        assert_eq!(err.to_string(), "height too high");
+    }
+
+    #[test]
     fn test_vec_tx_seen_round_trip() {
         use bitcoin::key::rand::Rng;
 
@@ -415,7 +437,7 @@ mod test {
             match vec_tx_seen_from_be_bytes(&random_bytes) {
                 Ok(parsed_tx_seen) => {
                     // If parsing succeeded, reserialize and verify round-trip
-                    let reserialized = vec_tx_seen_to_be_bytes(&parsed_tx_seen);
+                    let reserialized = vec_tx_seen_to_be_bytes(&parsed_tx_seen).unwrap();
                     assert_eq!(
                         random_bytes,
                         reserialized,
