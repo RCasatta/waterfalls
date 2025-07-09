@@ -26,14 +26,14 @@ pub struct DBStore {
 // The issue is that the search must be bidirectional, so we need to store the txid -> u32 mapping in another table. It may be not worth it.
 
 // this is needed for index building, not used on waterfall request
-// TODO Can we change this to Txid -> Vec<ScriptHash> (with script hash = 0 if spent) ? This would allow to compute a descriptor utxos via another multiget at the cost of complex/slower indexing.
 // In Bitcoin mainnet there are about 180M utxos, so this table would be 180M*(36+8) ~= 8GB
 const UTXO_CF: &str = "utxo"; // OutPoint -> ScriptHash
 
 // A single multiget on this is enough to compute the full get_history of a wallet.
 // In Liquid mainnet the db is about 748MB (2025-02-06)
-// In Bitcoin mainnet we have ~3B non-provably-unspendable-outputs (2025-02-06), so this table would be 3B*(8+32+3) = 129GB
-const HISTORY_CF: &str = "historyv2"; // ScriptHash -> Vec<(Txid, Height(3 bytes))>
+// In Bitcoin mainnet we have ~3B non-provably-unspendable-outputs (2025-02-06), so this table would be 3B*(8+32+3+3) = 138GB
+// The Vout is stored to rebuild the OutPoint and query the UTXO set to compute the utxo_scan.
+const HISTORY_CF: &str = "historyv3"; // ScriptHash -> Vec<(Txid, Height(3 bytes), Vout(3bytes))>
 
 const OTHER_CF: &str = "other";
 
