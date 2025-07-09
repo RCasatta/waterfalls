@@ -50,6 +50,7 @@ minicbor = { version = "0.23", default-features = false, features = [
 [dev-dependencies]
 criterion = "0.5.1"
 tempfile = "3.10.1"
+lwk_wollet = { version = "0.10.0", features = ["test_wallet"] }
 
 [features]
 default = ["test_env", "db"]

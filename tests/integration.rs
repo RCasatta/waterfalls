@@ -4,6 +4,8 @@
 //! Thus following tests aren't a proper wallet scan but they checks memory/db backend and also
 //! mempool/confirmation result in receiving a payment
 
+use waterfalls::server::Network;
+
 #[cfg(feature = "test_env")]
 #[tokio::test]
 async fn integration_memory() {
@@ -284,4 +286,69 @@ async fn test_no_txindex() {
     )
     .unwrap();
     let _tx = test_env.client().tx(txid).await.unwrap();
+}
+
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn test_lwk_wollet() {
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory().await;
+    let (_, wollet) = lwk_wollet::Wollet::test_wallet().unwrap();
+    let descriptor = wollet.descriptor().to_string();
+    let bitcoind_desc = wollet
+        .wollet_descriptor()
+        .bitcoin_descriptor_without_key_origin()
+        .to_string();
+    let address = wollet.address(None).unwrap();
+    let amount = 10_000;
+    test_env.send_to(address.address(), amount);
+    test_env
+        .client()
+        .wait_waterfalls_non_empty(&bitcoind_desc)
+        .await
+        .unwrap();
+
+    do_lwk_scan(
+        lwk_wollet::ElementsNetwork::default_regtest(),
+        &descriptor,
+        test_env.base_url(),
+        amount,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "requires internet"]
+async fn test_lwk_wollet_mainnet() {
+    let _ = env_logger::try_init();
+    do_lwk_scan(
+        lwk_wollet::ElementsNetwork::Liquid,
+        "ct(slip77(2411e278affa5c47010eab6d313c1ec66628ec0dd03b6fc98d1a05a0618719e6),elwpkh([a8874235/84'/1776'/0']xpub6DLHCiTPg67KE9ksCjNVpVHTRDHzhCSmoBTKzp2K4FxLQwQvvdNzuqxhK2f9gFVCN6Dori7j2JMLeDoB4VqswG7Et9tjqauAvbDmzF8NEPH/<0;1>/*))#upsg7h8m",
+        "https://waterfalls.liquidwebwallet.org/liquid/api/",
+        2899, // note this may change with funding/spending
+    )
+    .await;
+}
+
+async fn do_lwk_scan(
+    network: lwk_wollet::ElementsNetwork,
+    descriptor: &str,
+    url: &str,
+    expected_satoshi_balance: u64,
+) {
+    for waterfalls_active in [true, false] {
+        let mut lwk_client = lwk_wollet::clients::asyncr::EsploraClientBuilder::new(url, network)
+            .waterfalls(waterfalls_active)
+            .build();
+        let lwk_desc: lwk_wollet::WolletDescriptor = descriptor.parse().unwrap();
+        let mut lwk_wollet = lwk_wollet::Wollet::without_persist(network, lwk_desc).unwrap();
+        let update = lwk_client.full_scan(&lwk_wollet).await.unwrap().unwrap();
+        let _ = lwk_wollet.apply_update(update);
+        let balance = lwk_wollet.balance().unwrap();
+        assert_eq!(
+            balance.get(&network.policy_asset()).unwrap(),
+            &expected_satoshi_balance
+        );
+    }
 }
