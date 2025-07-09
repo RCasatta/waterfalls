@@ -4,6 +4,9 @@
 //! Thus following tests aren't a proper wallet scan but they checks memory/db backend and also
 //! mempool/confirmation result in receiving a payment
 
+use std::time::Duration;
+
+use tokio::time::sleep;
 use waterfalls::server::Network;
 
 #[cfg(feature = "test_env")]
@@ -291,29 +294,58 @@ async fn test_no_txindex() {
 #[cfg(feature = "test_env")]
 #[tokio::test]
 async fn test_lwk_wollet() {
+    use lwk_common::Signer;
+
     let _ = env_logger::try_init();
+    let network = lwk_wollet::ElementsNetwork::default_regtest();
 
     let test_env = launch_memory().await;
-    let (_, wollet) = lwk_wollet::Wollet::test_wallet().unwrap();
+    let (signer, mut wollet) = lwk_wollet::Wollet::test_wallet().unwrap();
     let descriptor = wollet.descriptor().to_string();
     let bitcoind_desc = wollet
         .wollet_descriptor()
         .bitcoin_descriptor_without_key_origin()
         .to_string();
     let address = wollet.address(None).unwrap();
-    let amount = 10_000;
-    test_env.send_to(address.address(), amount);
+    let initial_amount = 10_000;
+    test_env.send_to(address.address(), initial_amount);
     test_env
         .client()
         .wait_waterfalls_non_empty(&bitcoind_desc)
         .await
         .unwrap();
+    let waterfalls_url = test_env.base_url();
+    let mut lwk_client =
+        lwk_wollet::clients::asyncr::EsploraClientBuilder::new(waterfalls_url, network)
+            .waterfalls(true)
+            .build();
+
+    do_lwk_scan(network, &descriptor, waterfalls_url, initial_amount).await;
+
+    wollet_scan(&mut wollet, &mut lwk_client).await;
+
+    let sent_amount = 1000;
+    let node_address = test_env.get_new_address(None);
+    let mut pset = wollet
+        .tx_builder()
+        .add_lbtc_recipient(&node_address, sent_amount)
+        .unwrap()
+        .finish()
+        .unwrap();
+    let details = wollet.get_details(&pset).unwrap();
+
+    let signatures = signer.sign(&mut pset).unwrap();
+    assert_eq!(signatures, 1);
+    let tx = wollet.finalize(&mut pset).unwrap();
+    test_env.client().broadcast(&tx).await.unwrap();
+
+    wollet_scan(&mut wollet, &mut lwk_client).await;
 
     do_lwk_scan(
         lwk_wollet::ElementsNetwork::default_regtest(),
         &descriptor,
         test_env.base_url(),
-        amount,
+        initial_amount - sent_amount - details.balance.fee,
     )
     .await;
 }
@@ -343,12 +375,30 @@ async fn do_lwk_scan(
             .build();
         let lwk_desc: lwk_wollet::WolletDescriptor = descriptor.parse().unwrap();
         let mut lwk_wollet = lwk_wollet::Wollet::without_persist(network, lwk_desc).unwrap();
-        let update = lwk_client.full_scan(&lwk_wollet).await.unwrap().unwrap();
-        let _ = lwk_wollet.apply_update(update);
+        wollet_scan(&mut lwk_wollet, &mut lwk_client).await;
         let balance = lwk_wollet.balance().unwrap();
         assert_eq!(
             balance.get(&network.policy_asset()).unwrap(),
-            &expected_satoshi_balance
+            &expected_satoshi_balance,
+            "waterfalls_active: {}",
+            waterfalls_active
         );
+
+        // TODO add UTXO scan test once ready
     }
+}
+
+/// Scan the wollet until you find something
+async fn wollet_scan(
+    wollet: &mut lwk_wollet::Wollet,
+    lwk_client: &mut lwk_wollet::clients::asyncr::EsploraClient,
+) {
+    for _ in 0..100 {
+        if let Some(update) = lwk_client.full_scan(wollet).await.unwrap() {
+            let _ = wollet.apply_update(update);
+            return;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+    panic!("No update found in 10 seconds");
 }

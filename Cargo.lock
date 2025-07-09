@@ -3763,6 +3763,7 @@ dependencies = [
  "hyper-util",
  "lazy_static",
  "log",
+ "lwk_common",
  "lwk_wollet",
  "minicbor",
  "prometheus",
