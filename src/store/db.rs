@@ -222,7 +222,7 @@ impl Store for DBStore {
         let db_results = self.db.multi_get_cf(keys);
         let mut result = Vec::with_capacity(scripts.len());
         for db_result in db_results {
-            let db_result = db_result.unwrap();
+            let db_result = db_result?;
             match db_result {
                 None => result.push(vec![]),
                 Some(e) => {
