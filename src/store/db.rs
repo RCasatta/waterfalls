@@ -47,6 +47,8 @@ const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF];
 // height key for salting
 const SALT_KEY: &[u8] = b"S";
 
+const VEC_TX_SEEN_SIZE: usize = 36;
+
 impl DBStore {
     fn create_cf_descriptors() -> Vec<rocksdb::ColumnFamilyDescriptor> {
         COLUMN_FAMILIES
@@ -270,7 +272,7 @@ fn serialize_outpoint(o: &OutPoint) -> Vec<u8> {
 }
 
 fn vec_tx_seen_to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
-    let mut result = Vec::with_capacity(v.len() * 36);
+    let mut result = Vec::with_capacity(v.len() * VEC_TX_SEEN_SIZE);
     for TxSeen { txid, height, .. } in v {
         result.extend(txid.as_byte_array());
         result.extend(height.to_be_bytes());
@@ -279,12 +281,12 @@ fn vec_tx_seen_to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
 }
 
 fn vec_tx_seen_from_be_bytes(v: &[u8]) -> Result<Vec<TxSeen>> {
-    if v.len() % 36 != 0 {
+    if v.len() % VEC_TX_SEEN_SIZE != 0 {
         return Err(anyhow::anyhow!("invalid length"));
     }
-    let mut result = Vec::with_capacity(v.len() / 36);
+    let mut result = Vec::with_capacity(v.len() / VEC_TX_SEEN_SIZE);
 
-    for chunk in v.chunks(36) {
+    for chunk in v.chunks(VEC_TX_SEEN_SIZE) {
         let txid = Txid::from_slice(&chunk[..32])?;
         let height = Height::from_be_bytes(chunk[32..].try_into()?);
         result.push(TxSeen::new(txid, height))
