@@ -192,7 +192,7 @@ impl Store for DBStore {
         for outpoint in outpoints {
             keys.push((&cf, serialize_outpoint(outpoint)));
         }
-        let db_results = self.db.multi_get_cf(keys.clone());
+        let db_results = self.db.multi_get_cf(keys);
         let result: Vec<_> = db_results
             .into_iter()
             .map(|e| {
