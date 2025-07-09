@@ -156,7 +156,11 @@ impl DBStore {
             keys.push(*a.0);
         }
         for (script_hash, new_heights) in add {
-            batch.merge_cf(&cf, script_hash.to_be_bytes(), to_be_bytes(new_heights))
+            batch.merge_cf(
+                &cf,
+                script_hash.to_be_bytes(),
+                vec_tx_seen_to_be_bytes(new_heights),
+            )
         }
         self.db.write(batch)?;
         Ok(())
@@ -226,7 +230,7 @@ impl Store for DBStore {
             match db_result {
                 None => result.push(vec![]),
                 Some(e) => {
-                    let txs_seen = from_be_bytes(&e);
+                    let txs_seen = vec_tx_seen_from_be_bytes(&e);
                     result.push(txs_seen)
                 }
             }
@@ -265,7 +269,7 @@ fn serialize_outpoint(o: &OutPoint) -> Vec<u8> {
     v
 }
 
-fn to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
+fn vec_tx_seen_to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
     let mut result = Vec::with_capacity(v.len() * 36);
     for TxSeen { txid, height, .. } in v {
         result.extend(txid.as_byte_array());
@@ -274,7 +278,7 @@ fn to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
     result
 }
 
-fn from_be_bytes(v: &[u8]) -> Vec<TxSeen> {
+fn vec_tx_seen_from_be_bytes(v: &[u8]) -> Vec<TxSeen> {
     let mut result = Vec::with_capacity(v.len() / 36);
 
     for chunk in v.chunks(36) {
