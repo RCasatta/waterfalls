@@ -230,8 +230,8 @@ impl Store for DBStore {
             match db_result {
                 None => result.push(vec![]),
                 Some(e) => {
-                    let txs_seen = vec_tx_seen_from_be_bytes(&e);
-                    result.push(txs_seen)
+                    let txs_seen = vec_tx_seen_from_be_bytes(&e)?;
+                    result.push(txs_seen);
                 }
             }
         }
@@ -278,15 +278,18 @@ fn vec_tx_seen_to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
     result
 }
 
-fn vec_tx_seen_from_be_bytes(v: &[u8]) -> Vec<TxSeen> {
+fn vec_tx_seen_from_be_bytes(v: &[u8]) -> Result<Vec<TxSeen>> {
+    if v.len() % 36 != 0 {
+        return Err(anyhow::anyhow!("invalid length"));
+    }
     let mut result = Vec::with_capacity(v.len() / 36);
 
     for chunk in v.chunks(36) {
-        let txid = Txid::from_slice(&chunk[..32]).unwrap();
-        let height = Height::from_be_bytes(chunk[32..].try_into().unwrap());
+        let txid = Txid::from_slice(&chunk[..32])?;
+        let height = Height::from_be_bytes(chunk[32..].try_into()?);
         result.push(TxSeen::new(txid, height))
     }
-    result
+    Ok(result)
 }
 
 fn get_or_init_salt(db: &DB) -> Result<u64> {
