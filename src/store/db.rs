@@ -331,7 +331,7 @@ mod test {
     use std::{collections::HashMap, str::FromStr};
 
     use crate::store::{
-        db::{get_or_init_salt, TxSeen},
+        db::{get_or_init_salt, vec_tx_seen_from_be_bytes, vec_tx_seen_to_be_bytes, TxSeen},
         BlockMeta, Store,
     };
 
@@ -394,5 +394,38 @@ mod test {
 
         // let r = db._get_multi_block_hash(&[0, 1, 2]).unwrap();
         // assert_eq!(r, vec![BlockHash::all_zeros(); 3]);
+    }
+
+    #[test]
+    fn test_vec_tx_seen_round_trip() {
+        use bitcoin::key::rand::Rng;
+
+        let mut rng = bitcoin::key::rand::thread_rng();
+        let max_tests = 500; // Sensible number of tests
+
+        for _ in 0..max_tests {
+            let random_length = rng.gen_range(0..1000);
+            // Generate random bytes
+            let mut random_bytes = vec![0u8; random_length];
+            random_bytes.fill_with(|| rng.gen());
+
+            // Try to parse the random bytes
+            match vec_tx_seen_from_be_bytes(&random_bytes) {
+                Ok(parsed_tx_seen) => {
+                    // If parsing succeeded, reserialize and verify round-trip
+                    let reserialized = vec_tx_seen_to_be_bytes(&parsed_tx_seen);
+                    assert_eq!(
+                        random_bytes,
+                        reserialized,
+                        "Round-trip serialization failed for {} TxSeen entries",
+                        parsed_tx_seen.len()
+                    );
+                }
+                Err(_) => {
+                    // Parsing failed, which is expected for random data
+                    // This is fine - we're testing that valid data round-trips correctly
+                }
+            }
+        }
     }
 }
