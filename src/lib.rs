@@ -175,6 +175,12 @@ pub struct TxSeen {
     #[cbor(n(3))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_timestamp: Option<Timestamp>,
+
+    /// The vouts of the transaction where the script was seen.
+    /// It's persisted in the db and used for the utxo_scan but it's not returned from the API
+    #[cbor(n(4))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vouts: Option<Vec<u32>>,
 }
 impl TxSeen {
     pub fn new(txid: Txid, height: Height) -> Self {
@@ -183,6 +189,7 @@ impl TxSeen {
             height,
             block_hash: None,
             block_timestamp: None,
+            vouts: None,
         }
     }
 
@@ -264,6 +271,7 @@ impl From<WaterfallResponseV3> for WaterfallResponse {
                         height: value.blocks_meta[b[1]].h,
                         block_hash: Some(value.blocks_meta[b[1]].b),
                         block_timestamp: Some(value.blocks_meta[b[1]].t),
+                        vouts: None,
                     });
                 }
                 txs_seen_d.push(current_script);
