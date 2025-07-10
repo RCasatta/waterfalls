@@ -297,6 +297,11 @@ lazy_static! {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use bitcoin::hex::DisplayHex;
+    use prefix_uvarint::PrefixVarInt;
+
     use super::*;
 
     #[test]
@@ -310,5 +315,35 @@ mod tests {
         assert_eq!(s.len(), 3028);
         let v2_back: WaterfallResponse = v3.into();
         assert_eq!(v2, v2_back);
+    }
+
+    #[test]
+    fn test_prefix_uvarint() {
+        let mut value_buf = [0u8; prefix_uvarint::MAX_LEN];
+        assert_eq!(1.encode_prefix_varint(&mut value_buf), 1);
+        assert_eq!(10.encode_prefix_varint(&mut value_buf), 1);
+        assert_eq!(63.encode_prefix_varint(&mut value_buf), 1);
+        assert_eq!(64.encode_prefix_varint(&mut value_buf), 2);
+        assert_eq!(100.encode_prefix_varint(&mut value_buf), 2);
+        assert_eq!(1000.encode_prefix_varint(&mut value_buf), 2);
+        assert_eq!(10000.encode_prefix_varint(&mut value_buf), 3);
+        assert_eq!(100000.encode_prefix_varint(&mut value_buf), 3);
+        assert_eq!(1000000.encode_prefix_varint(&mut value_buf), 3);
+        assert_eq!(3_449_626.encode_prefix_varint(&mut value_buf), 4);
+        assert_eq!(33_449_626.encode_prefix_varint(&mut value_buf), 4);
+    }
+
+    #[test]
+    fn test_cbor_txseen() {
+        let txid =
+            Txid::from_str("0000000000000000000000000000000000000000000000000000000000000000")
+                .unwrap();
+        let txseen = TxSeen::new(txid, 3_000_001);
+        let cbor = minicbor::to_vec(&txseen).unwrap();
+        assert_eq!(
+            cbor.to_lower_hex_string(),
+            "82582000000000000000000000000000000000000000000000000000000000000000001a002dc6c1"
+        );
+        assert_eq!(cbor.len(), 40);
     }
 }
