@@ -333,17 +333,40 @@ mod tests {
     #[test]
     fn test_prefix_uvarint() {
         let mut value_buf = [0u8; prefix_uvarint::MAX_LEN];
-        assert_eq!(1.encode_prefix_varint(&mut value_buf), 1);
-        assert_eq!(10.encode_prefix_varint(&mut value_buf), 1);
-        assert_eq!(63.encode_prefix_varint(&mut value_buf), 1);
-        assert_eq!(64.encode_prefix_varint(&mut value_buf), 2);
-        assert_eq!(100.encode_prefix_varint(&mut value_buf), 2);
-        assert_eq!(1000.encode_prefix_varint(&mut value_buf), 2);
-        assert_eq!(10000.encode_prefix_varint(&mut value_buf), 3);
-        assert_eq!(100000.encode_prefix_varint(&mut value_buf), 3);
-        assert_eq!(1000000.encode_prefix_varint(&mut value_buf), 3);
-        assert_eq!(3_449_626.encode_prefix_varint(&mut value_buf), 4);
-        assert_eq!(33_449_626.encode_prefix_varint(&mut value_buf), 4);
+        assert_eq!(1u32.encode_prefix_varint(&mut value_buf), 1);
+        assert_eq!(10u32.encode_prefix_varint(&mut value_buf), 1);
+        assert_eq!(63u32.encode_prefix_varint(&mut value_buf), 1);
+        assert_eq!(64u32.encode_prefix_varint(&mut value_buf), 1);
+        assert_eq!(100u32.encode_prefix_varint(&mut value_buf), 1);
+        assert_eq!(127u32.encode_prefix_varint(&mut value_buf), 1);
+        assert_eq!(128u32.encode_prefix_varint(&mut value_buf), 2);
+        assert_eq!(1000u32.encode_prefix_varint(&mut value_buf), 2);
+        assert_eq!(10000u32.encode_prefix_varint(&mut value_buf), 2);
+        assert_eq!(100000u32.encode_prefix_varint(&mut value_buf), 3);
+        assert_eq!(1000000u32.encode_prefix_varint(&mut value_buf), 3);
+        assert_eq!(3_449_626u32.encode_prefix_varint(&mut value_buf), 4);
+        assert_eq!(33_449_626u32.encode_prefix_varint(&mut value_buf), 4);
+    }
+
+    #[test]
+    fn test_prefix_uvarint_concat() {
+        let mut vec = vec![0u8; 32];
+        let len1 = 1u32.encode_prefix_varint(&mut vec[..]);
+        assert_eq!(len1, 1);
+        let len2 = 10u32.encode_prefix_varint(&mut vec[len1..]);
+        assert_eq!(len2, 1);
+        let len3 = 100u32.encode_prefix_varint(&mut vec[len1 + len2..]);
+        assert_eq!(len3, 1);
+
+        let (height, len1) = u32::decode_prefix_varint(&vec[..]).unwrap();
+        assert_eq!(height, 1);
+        assert_eq!(len1, 1);
+        let (height, len2) = u32::decode_prefix_varint(&vec[len1..]).unwrap();
+        assert_eq!(height, 10);
+        assert_eq!(len2, 1);
+        let (height, len3) = u32::decode_prefix_varint(&vec[len1 + len2..]).unwrap();
+        assert_eq!(height, 100);
+        assert_eq!(len3, 1);
     }
 
     #[test]
