@@ -7,7 +7,6 @@
 use std::time::Duration;
 
 use tokio::time::sleep;
-use waterfalls::server::Network;
 
 #[cfg(feature = "test_env")]
 #[tokio::test]

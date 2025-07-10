@@ -34,7 +34,7 @@ const UTXO_CF: &str = "utxo"; // OutPoint -> ScriptHash
 // A single multiget on this is enough to compute the full get_history of a wallet.
 // In Liquid mainnet the db is about 748MB (2025-02-06)
 // In Bitcoin mainnet we have ~3B non-provably-unspendable-outputs (2025-02-06), so this table would be 3B*(8+32+4) = 132GB
-const HISTORY_CF: &str = "historyv2"; // ScriptHash -> Vec<(Txid, Height(varint))>
+const HISTORY_CF: &str = "historyv3"; // ScriptHash -> Vec<(Txid, Height(varint), Vec<Vout(varint)>>
 
 const OTHER_CF: &str = "other";
 
@@ -48,8 +48,7 @@ const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF];
 // height key for salting
 const SALT_KEY: &[u8] = b"S";
 
-const VEC_TX_SEEN_MAX_SIZE: usize = 41; // 32 bytes (txid) + 9 bytes (height) (most of the time height is much less)
-const VEC_TX_SEEN_MIN_SIZE: usize = 33; // 32 bytes (txid) + 1 byte (height)
+const VEC_TX_SEEN_REASONABLE_SIZE: usize = 40;
 
 impl DBStore {
     fn create_cf_descriptors() -> Vec<rocksdb::ColumnFamilyDescriptor> {
@@ -274,7 +273,10 @@ fn serialize_outpoint(o: &OutPoint) -> Vec<u8> {
 }
 
 fn vec_tx_seen_to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
-    let mut result = vec![0u8; v.len() * VEC_TX_SEEN_MAX_SIZE];
+    if v.is_empty() {
+        return vec![];
+    }
+    let mut result = vec![0u8; v.len() * VEC_TX_SEEN_REASONABLE_SIZE];
     let mut offset = 0;
     for TxSeen {
         txid,
@@ -283,18 +285,38 @@ fn vec_tx_seen_to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
         ..
     } in v
     {
+        if result.len() < offset + 32 {
+            // TODO: any better way?
+            result.resize(result.len() * 2, 0);
+        }
         result[offset..offset + 32].copy_from_slice(txid.as_byte_array());
         offset += 32;
+        if result.len() < offset + 9 {
+            // TODO: any better way?
+            result.resize(result.len() * 2, 0);
+        }
         let bytes_len = height.encode_prefix_varint(&mut result[offset..]);
         offset += bytes_len;
         match vouts {
             Some(vouts) => {
+                if result.len() < offset + 9 {
+                    // TODO: any better way?
+                    result.resize(result.len() * 2, 0);
+                }
                 offset += (vouts.len() as u32).encode_prefix_varint(&mut result[offset..]);
                 for vout in vouts {
+                    if result.len() < offset + 9 {
+                        // TODO: any better way?
+                        result.resize(result.len() * 2, 0);
+                    }
                     offset += vout.encode_prefix_varint(&mut result[offset..]);
                 }
             }
             None => {
+                if result.len() < offset + 9 {
+                    // TODO: any better way?
+                    result.resize(result.len() * 2, 0);
+                }
                 offset += 0.encode_prefix_varint(&mut result[offset..]);
             }
         }
@@ -307,7 +329,7 @@ fn vec_tx_seen_from_be_bytes(v: &[u8]) -> Result<Vec<TxSeen>> {
     if v.is_empty() {
         return Ok(vec![]);
     }
-    let mut result = Vec::with_capacity(v.len() / VEC_TX_SEEN_MIN_SIZE);
+    let mut result = Vec::with_capacity(v.len() / VEC_TX_SEEN_REASONABLE_SIZE);
     let mut offset = 0;
 
     loop {
@@ -373,11 +395,11 @@ fn concat_merge(
 #[cfg(test)]
 mod test {
     use elements::{hashes::Hash, BlockHash, OutPoint, Txid};
-    use std::{collections::HashMap, str::FromStr};
+    use std::collections::HashMap;
 
     use crate::store::{
         db::{get_or_init_salt, vec_tx_seen_from_be_bytes, vec_tx_seen_to_be_bytes, TxSeen},
-        BlockMeta, Store,
+        Store,
     };
 
     use super::DBStore;
@@ -442,36 +464,27 @@ mod test {
     }
 
     #[test]
-    #[ignore = "cannot do anymore after varint, generate random valid txseen and do the roundtrip instead"]
     fn test_vec_tx_seen_round_trip() {
+        use arbitrary::{Arbitrary, Unstructured};
         use bitcoin::key::rand::Rng;
 
         let mut rng = bitcoin::key::rand::thread_rng();
-        let max_tests = 500; // Sensible number of tests
+        let max_tests = 5_000; // Sensible number of tests
 
         for _ in 0..max_tests {
-            let random_length = rng.gen_range(0..1000);
-            // Generate random bytes
-            let mut random_bytes = vec![0u8; random_length];
-            random_bytes.fill_with(|| rng.gen());
+            // Generate random data for arbitrary
+            let data_size = rng.gen_range(100..1000);
+            let mut data = vec![0u8; data_size];
+            data.fill_with(|| rng.gen());
 
-            // Try to parse the random bytes
-            match vec_tx_seen_from_be_bytes(&random_bytes) {
-                Ok(parsed_tx_seen) => {
-                    // If parsing succeeded, reserialize and verify round-trip
-                    let reserialized = vec_tx_seen_to_be_bytes(&parsed_tx_seen);
-                    assert_eq!(
-                        random_bytes,
-                        reserialized,
-                        "Round-trip serialization failed for {} TxSeen entries",
-                        parsed_tx_seen.len()
-                    );
-                }
-                Err(_) => {
-                    // Parsing failed, which is expected for random data
-                    // This is fine - we're testing that valid data round-trips correctly
-                }
-            }
+            let mut unstructured = Unstructured::new(&data);
+
+            // Try to generate arbitrary TxSeen instances
+            let tx_seen_vec = Vec::<TxSeen>::arbitrary(&mut unstructured).unwrap();
+
+            let serialized = vec_tx_seen_to_be_bytes(&tx_seen_vec);
+            let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
+            assert_eq!(tx_seen_vec, deserialized, "Round-trip serialization failed",);
         }
     }
 

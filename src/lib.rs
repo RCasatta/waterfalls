@@ -7,6 +7,9 @@ use minicbor::{Decode, Encode};
 use prometheus::{labels, opts, register_counter, register_histogram_vec, Counter, HistogramVec};
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+use arbitrary::{Arbitrary, Unstructured};
+
 mod cbor;
 mod fetch;
 pub mod server;
@@ -182,6 +185,7 @@ pub struct TxSeen {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vouts: Option<Vec<u32>>,
 }
+
 impl TxSeen {
     pub fn new(txid: Txid, height: Height) -> Self {
         Self {
@@ -195,6 +199,33 @@ impl TxSeen {
 
     pub fn mempool(txid: Txid) -> TxSeen {
         TxSeen::new(txid, 0)
+    }
+}
+
+#[cfg(test)]
+impl<'a> Arbitrary<'a> for TxSeen {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        // Generate arbitrary bytes for Txid
+
+        use bitcoin::hashes::Hash;
+        let txid_bytes: [u8; 32] = u.arbitrary()?;
+        let txid = Txid::from_slice(&txid_bytes).unwrap();
+
+        // Limit height to a small value
+        let height: u32 = u.int_in_range(0..=u32::MAX)?;
+        let len = u.int_in_range(1..=10)?;
+        let mut v = Vec::with_capacity(len);
+        for _ in 0..len {
+            v.push(u.int_in_range(0..=1000u32)?);
+        }
+
+        Ok(TxSeen {
+            txid,
+            height,
+            block_hash: None,      // Not serialized
+            block_timestamp: None, // Not serialized
+            vouts: Some(v),
+        })
     }
 }
 

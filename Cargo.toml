@@ -53,6 +53,7 @@ criterion = "0.5.1"
 tempfile = "3.10.1"
 lwk_wollet = { version = "0.10.0", features = ["test_wallet"] }
 lwk_common = { version = "0.10.0" }
+arbitrary = { version = "1.4", features = ["derive"] }
 
 [features]
 default = ["test_env", "db"]
