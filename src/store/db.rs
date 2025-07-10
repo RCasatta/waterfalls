@@ -436,6 +436,7 @@ mod test {
         let txseen = TxSeen::new(Txid::all_zeros(), 0);
         let txs = vec![txseen.clone()];
         let serialized = vec_tx_seen_to_be_bytes(&txs);
+        assert_eq!(serialized.len(), 36);
         let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
         assert_eq!(txs, deserialized);
 
@@ -444,6 +445,7 @@ mod test {
         txseen.block_timestamp = Some(42);
         let txs = vec![txseen.clone()];
         let serialized = vec_tx_seen_to_be_bytes(&txs);
+        assert_eq!(serialized.len(), 36);
         let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
         assert_ne!(
             txs, deserialized,
@@ -454,7 +456,8 @@ mod test {
         txseen.vouts = Some(vec![0]);
         let txs = vec![txseen.clone()];
         let serialized = vec_tx_seen_to_be_bytes(&txs);
-        let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
+        assert_eq!(serialized.len(), 36);
+        // let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
         // assert_eq!(
         //     txs, deserialized,
         //     "vouts must be serialized"
