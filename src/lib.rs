@@ -163,6 +163,11 @@ pub struct TxSeen {
     #[cbor(n(1))]
     pub height: Height,
 
+    /// The block hash of block containing the transaction where the script was seen.
+    ///
+    /// The cbor index should be at the end because if you have a following field and this is None,
+    /// it is serialized as 32 zeros, if it's in the end instead the lower number of the array elements
+    /// make it guess is None without actually serializing it
     #[cbor(n(2), with = "cbor_opt_block_hash")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_hash: Option<BlockHash>,
