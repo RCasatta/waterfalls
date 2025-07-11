@@ -276,30 +276,35 @@ fn serialize_outpoint(o: &OutPoint) -> Vec<u8> {
 fn vec_tx_seen_to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
     let mut result = vec![0u8; v.len() * VEC_TX_SEEN_MAX_SIZE];
     let mut offset = 0;
-    for TxSeen { txid, height, .. } in v {
+    for TxSeen {
+        txid, height, v, ..
+    } in v
+    {
         result[offset..offset + 32].copy_from_slice(txid.as_byte_array());
         offset += 32;
-        let bytes_len = height.encode_prefix_varint(&mut result[offset..]);
-        offset += bytes_len;
+        offset += height.encode_prefix_varint(&mut result[offset..]);
+        offset += v.encode_prefix_varint(&mut result[offset..]);
     }
     result.truncate(offset);
     result
 }
 
-fn vec_tx_seen_from_be_bytes(v: &[u8]) -> Result<Vec<TxSeen>> {
-    if v.is_empty() {
+fn vec_tx_seen_from_be_bytes(s: &[u8]) -> Result<Vec<TxSeen>> {
+    if s.is_empty() {
         return Ok(vec![]);
     }
-    let mut result = Vec::with_capacity(v.len() / VEC_TX_SEEN_MIN_SIZE);
+    let mut result = Vec::with_capacity(s.len() / VEC_TX_SEEN_MIN_SIZE);
     let mut offset = 0;
 
     loop {
-        let txid = Txid::from_slice(&v[offset..offset + 32])?;
+        let txid = Txid::from_slice(&s[offset..offset + 32])?;
         offset += 32;
-        let (height, byte_len) = Height::decode_prefix_varint(&v[offset..])?;
+        let (height, byte_len) = Height::decode_prefix_varint(&s[offset..])?;
         offset += byte_len;
-        result.push(TxSeen::new(txid, height, 0)); // TODOV
-        if offset >= v.len() {
+        let (v, byte_len) = i32::decode_prefix_varint(&s[offset..])?;
+        offset += byte_len;
+        result.push(TxSeen::new(txid, height, v));
+        if offset >= s.len() {
             break;
         }
     }
@@ -449,7 +454,7 @@ mod test {
         let txseen = TxSeen::new(Txid::all_zeros(), 0, 0);
         let txs = vec![txseen.clone()];
         let serialized = vec_tx_seen_to_be_bytes(&txs);
-        assert_eq!(serialized.len(), 33);
+        assert_eq!(serialized.len(), 34);
         let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
         assert_eq!(txs, deserialized);
 
@@ -458,21 +463,18 @@ mod test {
         txseen.block_timestamp = Some(42);
         let txs = vec![txseen.clone()];
         let serialized = vec_tx_seen_to_be_bytes(&txs);
-        assert_eq!(serialized.len(), 33);
+        assert_eq!(serialized.len(), 34);
         let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
         assert_ne!(
             txs, deserialized,
             "block_hash and block_timestamp must not be serialized"
         );
 
-        let txseen = TxSeen::new(Txid::all_zeros(), 0, 0);
+        let txseen = TxSeen::new(Txid::all_zeros(), 0, 2);
         let txs = vec![txseen.clone()];
         let serialized = vec_tx_seen_to_be_bytes(&txs);
-        assert_eq!(serialized.len(), 33);
-        // let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
-        // assert_eq!(
-        //     txs, deserialized,
-        //     "vouts must be serialized"
-        // );
+        assert_eq!(serialized.len(), 34);
+        let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
+        assert_eq!(txs, deserialized, "v must be serialized");
     }
 }
