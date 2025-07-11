@@ -41,6 +41,9 @@ pub struct DescriptorRequest {
     /// The last known derivation index to scan up to, 0 if not specified
     /// This can be used to override the GAP_LIMIT
     to_index: u32,
+
+    /// If true, does not return txid of transactions having only spent outputs
+    utxo_only: bool,
 }
 
 /// Request to the waterfalls endpoint using a list of addresses

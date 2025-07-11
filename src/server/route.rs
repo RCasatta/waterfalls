@@ -254,6 +254,11 @@ fn parse_query(
         .map(|e| e.parse().unwrap_or(0))
         .unwrap_or(0u32);
 
+    let utxo_only = params
+        .get("utxo_only")
+        .map(|e| e.parse().unwrap_or(false))
+        .unwrap_or(false);
+
     let descriptor = params.remove("descriptor");
     let addresses = params.remove("addresses");
     match (descriptor, addresses) {
@@ -272,6 +277,7 @@ fn parse_query(
                 descriptor,
                 page,
                 to_index,
+                utxo_only,
             }))
         }
         (None, Some(addresses)) => {
@@ -429,6 +435,7 @@ async fn handle_waterfalls_req(
             descriptor,
             page,
             to_index,
+            utxo_only,
         }) => {
             for desc in descriptor.into_single_descriptors().unwrap().iter() {
                 let is_single_address = !desc.has_wildcard();
@@ -452,6 +459,9 @@ async fn handle_waterfalls_req(
                     if (is_last && start + GAP_LIMIT >= to_index) || is_single_address {
                         break;
                     }
+                }
+                if utxo_only {
+                    filter_utxo_only(&mut result, db)?;
                 }
                 map.insert(desc.to_string(), result);
             }
@@ -543,6 +553,10 @@ async fn handle_waterfalls_req(
     )
 }
 
+fn filter_utxo_only(result: &[Vec<TxSeen>], db: &crate::store::AnyStore) -> Result<(), Error> {
+    Ok(())
+}
+
 async fn find_scripts(
     state: &Arc<State>,
     db: &crate::store::AnyStore,
@@ -554,7 +568,7 @@ async fn find_scripts(
 
     for (conf, unconf) in seen_blockchain.iter_mut().zip(seen_mempool.iter()) {
         for txid in unconf {
-            conf.push(TxSeen::mempool(*txid, 0)) // TODO: compute vin/vout also for mempool
+            conf.push(TxSeen::mempool(*txid, 0)); // TODO: compute vin/vout also for mempool
         }
     }
     let is_last = seen_blockchain.iter().all(|e| e.is_empty());
