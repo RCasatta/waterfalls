@@ -334,14 +334,21 @@ impl WaterfallClient {
         &self,
         desc: &str,
     ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
-        self.waterfalls_version(desc, 2, None, None).await
+        self.waterfalls_version(desc, 2, None, None, false).await
     }
 
     pub async fn waterfalls_v1(
         &self,
         desc: &str,
     ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
-        self.waterfalls_version(desc, 1, None, None).await
+        self.waterfalls_version(desc, 1, None, None, false).await
+    }
+
+    pub async fn waterfalls_v2_utxo_only(
+        &self,
+        desc: &str,
+    ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
+        self.waterfalls_version(desc, 2, None, None, true).await
     }
 
     pub async fn waterfalls_version(
@@ -350,13 +357,14 @@ impl WaterfallClient {
         version: u8,
         page: Option<u32>,
         to_index: Option<u32>,
+        utxo_only: bool,
     ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         let descriptor_url = format!("{}/v{}/waterfalls", self.base_url, version);
 
-        let mut builder = self
-            .client
-            .get(&descriptor_url)
-            .query(&[("descriptor", desc)]);
+        let mut builder = self.client.get(&descriptor_url).query(&[
+            ("descriptor", desc),
+            ("utxo_only", utxo_only.to_string().as_str()),
+        ]);
 
         if let Some(to_index) = to_index {
             builder = builder.query(&[("to_index", to_index.to_string().as_str())]);

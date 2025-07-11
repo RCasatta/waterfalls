@@ -208,7 +208,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
 
     // Test using huge to_index will return paginated results
     let (result, _) = client
-        .waterfalls_version(&bitcoin_desc, 2, None, Some(1_000_000))
+        .waterfalls_version(&bitcoin_desc, 2, None, Some(1_000_000), false)
         .await
         .unwrap();
     assert_eq!(result.page, 0);
@@ -229,6 +229,15 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     assert_eq!(result.count_non_empty(), 1);
     let first = &first_script_result[0];
     assert_eq!(first.txid, expected_first.txid);
+
+    // Test utxo_only
+    let result1 = client
+        .waterfalls_v2_utxo_only(&bitcoin_desc)
+        .await
+        .unwrap()
+        .0;
+    let result2 = client.waterfalls_v2(&bitcoin_desc).await.unwrap().0;
+    assert_eq!(result1, result2);
 
     test_env.shutdown().await;
     assert!(true);
