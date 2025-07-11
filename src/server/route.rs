@@ -562,6 +562,11 @@ fn filter_utxo_only(
         .flat_map(|e| e.iter().filter_map(|f| f.outpoint()))
         .collect::<Vec<_>>();
     let utxos = db.get_utxos(&outpoints).unwrap();
+    log::info!(
+        "Got {} utxos over {} outpoints",
+        utxos.iter().filter(|u| u.is_some()).count(),
+        outpoints.len()
+    );
     let unspent: HashSet<_> = utxos
         .iter()
         .zip(outpoints.iter())
