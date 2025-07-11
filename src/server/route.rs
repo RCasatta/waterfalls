@@ -567,12 +567,15 @@ fn filter_utxo_only(
         .zip(outpoints.iter())
         .filter_map(|(u, o)| if u.is_some() { Some(o) } else { None })
         .collect();
+    let elements_before = result.iter().map(|e| e.len()).sum::<usize>();
     for e in result.iter_mut() {
         e.retain(|f| match f.outpoint() {
             Some(o) => unspent.contains(&o),
             None => false,
         });
     }
+    let elements_after = result.iter().map(|e| e.len()).sum::<usize>();
+    log::info!("Filtered {} elements", elements_before - elements_after);
     Ok(())
 }
 
