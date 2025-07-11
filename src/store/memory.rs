@@ -58,17 +58,17 @@ impl Store for MemoryStore {
     fn update(
         &self,
         block_meta: &BlockMeta,
-        utxo_spent: Vec<(elements::OutPoint, elements::Txid)>,
+        utxo_spent: Vec<(u32, elements::OutPoint, elements::Txid)>,
         history_map: std::collections::HashMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: std::collections::HashMap<elements::OutPoint, ScriptHash>,
     ) -> anyhow::Result<()> {
         let mut history_map = history_map;
         // // TODO should be a db tx
-        let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.0).collect();
+        let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.1).collect();
         let script_hashes = self.remove_utxos(&only_outpoints);
-        for (script_hash, (_, txid)) in script_hashes.into_iter().zip(utxo_spent) {
+        for (script_hash, (vin, _, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
-            el.push(TxSeen::new(txid, block_meta.height(), 0)); // TODOV
+            el.push(TxSeen::new(txid, block_meta.height(), -(vin as i32) - 1));
         }
 
         self.update_history(history_map);

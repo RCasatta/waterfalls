@@ -57,7 +57,7 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
             }
 
             if !tx.is_coinbase() {
-                for input in tx.input.iter() {
+                for (vin, input) in tx.input.iter().enumerate() {
                     if input.is_pegin() {
                         continue;
                     }
@@ -70,7 +70,7 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
                         None => {
                             log::debug!("removing {}", &input.previous_output);
                             if !skip_outpoint.contains(&input.previous_output) {
-                                utxo_spent.push((input.previous_output, txid))
+                                utxo_spent.push((vin as u32, input.previous_output, txid))
                             }
                         }
                     }

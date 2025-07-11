@@ -34,7 +34,7 @@ pub trait Store {
     fn update(
         &self,
         block_meta: &BlockMeta,
-        utxo_spent: Vec<(OutPoint, Txid)>,
+        utxo_spent: Vec<(u32, OutPoint, Txid)>,
         history_map: HashMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: HashMap<OutPoint, ScriptHash>,
     ) -> Result<()>;
@@ -76,7 +76,7 @@ impl Store for AnyStore {
     fn update(
         &self,
         block_meta: &BlockMeta,
-        utxo_spent: Vec<(OutPoint, Txid)>,
+        utxo_spent: Vec<(u32, OutPoint, Txid)>,
         history_map: HashMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: HashMap<OutPoint, ScriptHash>,
     ) -> Result<()> {
