@@ -59,6 +59,9 @@ default = ["test_env", "db"]
 db = ["rocksdb"]
 test_env = ["bitcoind"]
 
+[patch.crates-io]
+lwk_wollet = { git = "https://github.com/blockstream/lwk", rev = "e9d7d750fee3c6d81b363e1f6c2caa1408ddb82a" }
+
 [[bench]]
 name = "benches"
 harness = false

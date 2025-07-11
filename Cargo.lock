@@ -2044,8 +2044,7 @@ dependencies = [
 [[package]]
 name = "lwk_wollet"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8b931abf6849e2c14af01050906e8cb8faf6740c59016ff85782e905d472919"
+source = "git+https://github.com/blockstream/lwk?rev=e9d7d750fee3c6d81b363e1f6c2caa1408ddb82a#e9d7d750fee3c6d81b363e1f6c2caa1408ddb82a"
 dependencies = [
  "aes-gcm-siv",
  "age",

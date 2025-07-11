@@ -237,7 +237,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
         .unwrap()
         .0;
     let result2 = client.waterfalls_v2(&bitcoin_desc).await.unwrap().0;
-    assert_eq!(result1, result2);
+    assert_eq!(result1, result2); // we didn't spend anything from the wallet, thus they are the same
 
     test_env.shutdown().await;
     assert!(true);
@@ -349,13 +349,51 @@ async fn test_lwk_wollet() {
 
     wollet_scan(&mut wollet, &mut lwk_client).await;
 
+    let final_balance = initial_amount - sent_amount - details.balance.fee;
     do_lwk_scan(
         lwk_wollet::ElementsNetwork::default_regtest(),
         &descriptor,
         test_env.base_url(),
-        initial_amount - sent_amount - details.balance.fee,
+        final_balance,
     )
     .await;
+
+    test_env.node_generate(1).await; // TODO: should work also without this
+
+    let mut lwk_client_utxo_only =
+        lwk_wollet::clients::asyncr::EsploraClientBuilder::new(waterfalls_url, network)
+            .waterfalls(true)
+            .utxo_only(true)
+            .build();
+
+    // Create another Wollet using utxo_only client and compare results
+    let lwk_desc: lwk_wollet::WolletDescriptor = descriptor.parse().unwrap();
+    let mut wollet_utxo_only = lwk_wollet::Wollet::without_persist(network, lwk_desc).unwrap();
+    wollet_scan(&mut wollet_utxo_only, &mut lwk_client_utxo_only).await;
+
+    // The balance should match between regular and utxo_only scans
+    let balance_utxo_only = wollet_utxo_only.balance().unwrap();
+    assert_eq!(
+        balance_utxo_only.get(&network.policy_asset()).unwrap(),
+        &final_balance,
+        "Balance should match between regular and utxo_only scans"
+    );
+
+    // The transaction lists should be different because utxo_only should not include spent transactions
+    let txs_regular = wollet.transactions().unwrap();
+    let txs_utxo_only = wollet_utxo_only.transactions().unwrap();
+    assert_ne!(
+        txs_regular.len(),
+        txs_utxo_only.len(),
+        "Transaction lists should be different: utxo_only should have fewer transactions (excluding spent ones)"
+    );
+    assert!(
+        txs_utxo_only.len() < txs_regular.len(),
+        "utxo_only should have fewer transactions than regular scan"
+    );
+
+    test_env.shutdown().await;
+    assert!(true);
 }
 
 #[tokio::test]
