@@ -176,25 +176,28 @@ pub struct TxSeen {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_timestamp: Option<Timestamp>,
 
-    /// The vouts of the transaction where the script was seen.
-    /// It's persisted in the db and used for the utxo_scan but it's not returned from the API
+    /// Vout or Vin depending on wether this script is:
+    /// - Not defined when 0
+    /// - the script_pubkey in the (v-1) vout output of this transaction
+    /// - the script_pubkey of the previous output of the vin (-v-1) input of this transaction
     #[cbor(n(4))]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub vouts: Option<Vec<u32>>,
+    #[serde(skip)]
+    pub v: i32,
 }
+
 impl TxSeen {
-    pub fn new(txid: Txid, height: Height) -> Self {
+    pub fn new(txid: Txid, height: Height, v: i32) -> Self {
         Self {
             txid,
             height,
             block_hash: None,
             block_timestamp: None,
-            vouts: None,
+            v,
         }
     }
 
-    pub fn mempool(txid: Txid) -> TxSeen {
-        TxSeen::new(txid, 0)
+    pub fn mempool(txid: Txid, v: i32) -> TxSeen {
+        TxSeen::new(txid, 0, v)
     }
 }
 
@@ -271,7 +274,7 @@ impl From<WaterfallResponseV3> for WaterfallResponse {
                         height: value.blocks_meta[b[1]].h,
                         block_hash: Some(value.blocks_meta[b[1]].b),
                         block_timestamp: Some(value.blocks_meta[b[1]].t),
-                        vouts: None,
+                        v: 0, // TODOV
                     });
                 }
                 txs_seen_d.push(current_script);
@@ -374,7 +377,7 @@ mod tests {
         let txid =
             Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111")
                 .unwrap();
-        let txseen = TxSeen::new(txid, 3_000_001);
+        let txseen = TxSeen::new(txid, 3_000_001, 0); // TODOV
         let cbor = minicbor::to_vec(&txseen).unwrap();
         assert_eq!(
             cbor.to_lower_hex_string(),

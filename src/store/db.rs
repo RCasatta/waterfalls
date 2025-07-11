@@ -256,7 +256,7 @@ impl Store for DBStore {
         let script_hashes = self.remove_utxos(&only_outpoints)?;
         for (script_hash, (_, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
-            el.push(TxSeen::new(txid, block_meta.height()));
+            el.push(TxSeen::new(txid, block_meta.height(), 0)); // TODOV
         }
 
         self.set_hash_ts(block_meta);
@@ -298,7 +298,7 @@ fn vec_tx_seen_from_be_bytes(v: &[u8]) -> Result<Vec<TxSeen>> {
         offset += 32;
         let (height, byte_len) = Height::decode_prefix_varint(&v[offset..])?;
         offset += byte_len;
-        result.push(TxSeen::new(txid, height));
+        result.push(TxSeen::new(txid, height, 0)); // TODOV
         if offset >= v.len() {
             break;
         }
@@ -342,11 +342,11 @@ fn concat_merge(
 #[cfg(test)]
 mod test {
     use elements::{hashes::Hash, BlockHash, OutPoint, Txid};
-    use std::{collections::HashMap, str::FromStr};
+    use std::collections::HashMap;
 
     use crate::store::{
         db::{get_or_init_salt, vec_tx_seen_from_be_bytes, vec_tx_seen_to_be_bytes, TxSeen},
-        BlockMeta, Store,
+        Store,
     };
 
     use super::DBStore;
@@ -383,9 +383,9 @@ mod test {
         let txid = Txid::all_zeros();
 
         let mut new_history = HashMap::new();
-        let txs_seen = vec![TxSeen::new(txid, 2), TxSeen::new(txid, 5)];
+        let txs_seen = vec![TxSeen::new(txid, 2, 0), TxSeen::new(txid, 5, 0)];
         new_history.insert(7u64, txs_seen.clone());
-        new_history.insert(9u64, vec![TxSeen::new(txid, 5)]);
+        new_history.insert(9u64, vec![TxSeen::new(txid, 5, 0)]);
         db.update_history(&new_history).unwrap();
         let result = db.get_history(&[7]).unwrap();
         assert_eq!(result[0], txs_seen);
@@ -446,14 +446,14 @@ mod test {
 
     #[test]
     fn test_static_txseen_round_trip() {
-        let txseen = TxSeen::new(Txid::all_zeros(), 0);
+        let txseen = TxSeen::new(Txid::all_zeros(), 0, 0);
         let txs = vec![txseen.clone()];
         let serialized = vec_tx_seen_to_be_bytes(&txs);
         assert_eq!(serialized.len(), 33);
         let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
         assert_eq!(txs, deserialized);
 
-        let mut txseen = TxSeen::new(Txid::all_zeros(), 0);
+        let mut txseen = TxSeen::new(Txid::all_zeros(), 0, 0);
         txseen.block_hash = Some(BlockHash::all_zeros());
         txseen.block_timestamp = Some(42);
         let txs = vec![txseen.clone()];
@@ -465,8 +465,7 @@ mod test {
             "block_hash and block_timestamp must not be serialized"
         );
 
-        let mut txseen = TxSeen::new(Txid::all_zeros(), 0);
-        txseen.vouts = Some(vec![0]);
+        let txseen = TxSeen::new(Txid::all_zeros(), 0, 0);
         let txs = vec![txseen.clone()];
         let serialized = vec_tx_seen_to_be_bytes(&txs);
         assert_eq!(serialized.len(), 33);

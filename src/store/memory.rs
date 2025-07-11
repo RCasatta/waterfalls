@@ -68,7 +68,7 @@ impl Store for MemoryStore {
         let script_hashes = self.remove_utxos(&only_outpoints);
         for (script_hash, (_, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
-            el.push(TxSeen::new(txid, block_meta.height()));
+            el.push(TxSeen::new(txid, block_meta.height(), 0)); // TODOV
         }
 
         self.update_history(history_map);
