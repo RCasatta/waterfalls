@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::cbor::{cbor_block_hash, cbor_opt_block_hash, cbor_txid, cbor_txids};
-use elements::{BlockHash, Txid};
+use elements::{BlockHash, OutPoint, Txid};
 use lazy_static::lazy_static;
 use minicbor::{Decode, Encode};
 use prometheus::{labels, opts, register_counter, register_histogram_vec, Counter, HistogramVec};
@@ -201,6 +201,14 @@ impl TxSeen {
 
     pub fn mempool(txid: Txid, v: i32) -> TxSeen {
         TxSeen::new(txid, 0, v)
+    }
+
+    pub fn outpoint(&self) -> Option<OutPoint> {
+        if self.v > 0 {
+            Some(OutPoint::new(self.txid, self.v as u32 - 1))
+        } else {
+            None
+        }
     }
 }
 

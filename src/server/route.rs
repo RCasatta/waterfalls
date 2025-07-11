@@ -20,7 +20,7 @@ use hyper::{
 use prometheus::Encoder;
 use serde::Serialize;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     str::FromStr,
     sync::Arc,
     time::{Instant, SystemTime, UNIX_EPOCH},
@@ -553,7 +553,26 @@ async fn handle_waterfalls_req(
     )
 }
 
-fn filter_utxo_only(result: &[Vec<TxSeen>], db: &crate::store::AnyStore) -> Result<(), Error> {
+fn filter_utxo_only(
+    result: &mut Vec<Vec<TxSeen>>,
+    db: &crate::store::AnyStore,
+) -> Result<(), Error> {
+    let outpoints = result
+        .iter()
+        .flat_map(|e| e.iter().filter_map(|f| f.outpoint()))
+        .collect::<Vec<_>>();
+    let utxos = db.get_utxos(&outpoints).unwrap();
+    let unspent: HashSet<_> = utxos
+        .iter()
+        .zip(outpoints.iter())
+        .filter_map(|(u, o)| if u.is_some() { Some(o) } else { None })
+        .collect();
+    for e in result.iter_mut() {
+        e.retain(|f| match f.outpoint() {
+            Some(o) => unspent.contains(&o),
+            None => false,
+        });
+    }
     Ok(())
 }
 
