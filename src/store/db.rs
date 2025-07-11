@@ -29,19 +29,19 @@ pub struct DBStore {
 // this is needed for index building, not used on waterfall request
 // TODO Can we change this to Txid -> Vec<ScriptHash> (with script hash = 0 if spent) ? This would allow to compute a descriptor utxos via another multiget at the cost of complex/slower indexing.
 // In Bitcoin mainnet there are about 180M utxos, so this table would be 180M*(36+8) ~= 8GB
-const UTXO_CF: &str = "utxo"; // OutPoint -> ScriptHash
+pub(crate) const UTXO_CF: &str = "utxo"; // OutPoint -> ScriptHash
 
 // A single multiget on this is enough to compute the full get_history of a wallet.
 // In Liquid mainnet the db is about 748MB (2025-02-06)
 // In Bitcoin mainnet we have ~3B non-provably-unspendable-outputs (2025-02-06), so this table would be 3B*(8+32+4) = 132GB
-const HISTORY_CF: &str = "historyv2"; // ScriptHash -> Vec<(Txid, Height(varint))>
+pub(crate) const HISTORY_CF: &str = "historyv2"; // ScriptHash -> Vec<(Txid, Height(varint))>
 
-const OTHER_CF: &str = "other";
+pub(crate) const OTHER_CF: &str = "other";
 
 // when height exists, it also mean the indexing happened up to that height included
-const HASHES_CF: &str = "hashesv2"; // Height -> (BlockHash, Timestamp) // This is used on startup to load data into memory, not used on waterfall request
+pub(crate) const HASHES_CF: &str = "hashesv2"; // Height -> (BlockHash, Timestamp) // This is used on startup to load data into memory, not used on waterfall request
 
-const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF];
+pub(crate) const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF];
 
 // height key for indexed blocks
 // const INDEXED_KEY: &[u8] = b"I";

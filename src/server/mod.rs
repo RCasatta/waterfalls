@@ -206,6 +206,11 @@ fn get_store(args: &Arguments) -> Result<AnyStore, Error> {
 
     Ok(match args.db_dir.as_ref() {
         Some(p) => {
+            log::info!(
+                "Opening db in {:?} {} ",
+                p,
+                store::db::COLUMN_FAMILIES.join(", ")
+            );
             let mut path = p.clone();
             path.push("db");
             path.push(args.network.to_string());
