@@ -423,6 +423,20 @@ async fn test_lwk_wollet_huge_testnet() {
     .await;
 }
 
+#[tokio::test]
+#[ignore = "requires internet and testnet deployment"]
+async fn test_lwk_wollet_small_testnet() {
+    let _ = env_logger::try_init();
+    // full history is ~65 txs
+    do_lwk_scan(
+        lwk_wollet::ElementsNetwork::LiquidTestnet,
+        "ct(slip77(ac53739ddde9fdf6bba3dbc51e989b09aa8c9cdce7b7d7eddd49cec86ddf71f7),elwpkh([93970d14/84'/1'/0']tpubDC3BrFCCjXq4jAceV8k6UACxDDJCFb1eb7R7BiKYUGZdNagEhNfJoYtUrRdci9JFs1meiGGModvmNm8PrqkrEjJ6mpt6gA1DRNU8vu7GqXH/<0;1>/*))#u0y4axgs",
+        "https://waterfalls.liquidwebwallet.org/liquidtestnet-utxo-only/api/",
+        1070521,
+    )
+    .await;
+}
+
 async fn do_lwk_scan(
     network: lwk_wollet::ElementsNetwork,
     descriptor: &str,
