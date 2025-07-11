@@ -444,19 +444,24 @@ async fn do_lwk_scan(
     expected_satoshi_balance: u64,
 ) {
     for waterfalls_active in [true, false] {
-        let mut lwk_client = lwk_wollet::clients::asyncr::EsploraClientBuilder::new(url, network)
-            .waterfalls(waterfalls_active)
-            .build();
-        let lwk_desc: lwk_wollet::WolletDescriptor = descriptor.parse().unwrap();
-        let mut lwk_wollet = lwk_wollet::Wollet::without_persist(network, lwk_desc).unwrap();
-        wollet_scan(&mut lwk_wollet, &mut lwk_client).await;
-        let balance = lwk_wollet.balance().unwrap();
-        assert_eq!(
-            balance.get(&network.policy_asset()).unwrap(),
-            &expected_satoshi_balance,
-            "waterfalls_active: {}",
-            waterfalls_active
-        );
+        for utxo_only in [true, false] {
+            let mut lwk_client =
+                lwk_wollet::clients::asyncr::EsploraClientBuilder::new(url, network)
+                    .waterfalls(waterfalls_active)
+                    .utxo_only(utxo_only)
+                    .build();
+            let lwk_desc: lwk_wollet::WolletDescriptor = descriptor.parse().unwrap();
+            let mut lwk_wollet = lwk_wollet::Wollet::without_persist(network, lwk_desc).unwrap();
+            wollet_scan(&mut lwk_wollet, &mut lwk_client).await;
+            let balance = lwk_wollet.balance().unwrap();
+            assert_eq!(
+                balance.get(&network.policy_asset()).unwrap(),
+                &expected_satoshi_balance,
+                "waterfalls_active: {} utxo_only: {}",
+                waterfalls_active,
+                utxo_only
+            );
+        }
 
         // TODO add UTXO scan test once ready
     }
