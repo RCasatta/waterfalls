@@ -554,7 +554,7 @@ async fn find_scripts(
 
     for (conf, unconf) in seen_blockchain.iter_mut().zip(seen_mempool.iter()) {
         for txid in unconf {
-            conf.push(TxSeen::mempool(*txid, 0)) // TODOV
+            conf.push(TxSeen::mempool(*txid, 0)) // TODO: compute vin/vout also for mempool
         }
     }
     let is_last = seen_blockchain.iter().all(|e| e.is_empty());
