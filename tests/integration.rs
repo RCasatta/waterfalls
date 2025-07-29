@@ -4,7 +4,7 @@
 //! Thus following tests aren't a proper wallet scan but they checks memory/db backend and also
 //! mempool/confirmation result in receiving a payment
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::time::sleep;
 
@@ -419,6 +419,34 @@ async fn test_lwk_wollet_mainnet() {
     .await;
 }
 
+#[tokio::test]
+#[ignore = "requires internet and testnet deployment"]
+async fn test_lwk_wollet_huge_testnet() {
+    let _ = env_logger::try_init();
+    // full history is 6442 txs
+    do_lwk_scan(
+        lwk_wollet::ElementsNetwork::LiquidTestnet,
+        "ct(slip77(1bda6cd71a1e206e3eb793e5a4d98a46c3fa473c9ab7bdef9bb9c814764d6614),elwpkh([cb4ba44a/84'/1'/0']tpubDDrybtUajFcgXC85rvwPsh1oU7Azx4kJ9BAiRzMbByqK7UnVXY3gDRJPwEDfaQwguNUZFzrhavJGgEhbsfuebyxUSZQnjLezWVm2Vdqb7UM/<0;1>/*))#za9ktavp",
+        "https://waterfalls.liquidwebwallet.org/liquidtestnet-utxo-only/api/",
+        9361396473,
+    )
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "requires internet and testnet deployment"]
+async fn test_lwk_wollet_small_testnet() {
+    let _ = env_logger::try_init();
+    // full history is ~65 txs
+    do_lwk_scan(
+        lwk_wollet::ElementsNetwork::LiquidTestnet,
+        "ct(slip77(ac53739ddde9fdf6bba3dbc51e989b09aa8c9cdce7b7d7eddd49cec86ddf71f7),elwpkh([93970d14/84'/1'/0']tpubDC3BrFCCjXq4jAceV8k6UACxDDJCFb1eb7R7BiKYUGZdNagEhNfJoYtUrRdci9JFs1meiGGModvmNm8PrqkrEjJ6mpt6gA1DRNU8vu7GqXH/<0;1>/*))#u0y4axgs",
+        "https://waterfalls.liquidwebwallet.org/liquidtestnet-utxo-only/api/",
+        1070521,
+    )
+    .await;
+}
+
 async fn do_lwk_scan(
     network: lwk_wollet::ElementsNetwork,
     descriptor: &str,
@@ -426,20 +454,36 @@ async fn do_lwk_scan(
     expected_satoshi_balance: u64,
 ) {
     for waterfalls_active in [true, false] {
-        let mut lwk_client = lwk_wollet::clients::asyncr::EsploraClientBuilder::new(url, network)
-            .waterfalls(waterfalls_active)
-            .build()
-            .unwrap();
-        let lwk_desc: lwk_wollet::WolletDescriptor = descriptor.parse().unwrap();
-        let mut lwk_wollet = lwk_wollet::Wollet::without_persist(network, lwk_desc).unwrap();
-        wollet_scan(&mut lwk_wollet, &mut lwk_client).await;
-        let balance = lwk_wollet.balance().unwrap();
-        assert_eq!(
-            balance.get(&network.policy_asset()).unwrap(),
-            &expected_satoshi_balance,
-            "waterfalls_active: {}",
-            waterfalls_active
-        );
+        for utxo_only in [true, false] {
+            if !waterfalls_active && utxo_only {
+                continue;
+            }
+            let start = Instant::now();
+            let mut lwk_client =
+                lwk_wollet::clients::asyncr::EsploraClientBuilder::new(url, network)
+                    .waterfalls(waterfalls_active)
+                    .utxo_only(utxo_only)
+                    .concurrency(4)
+                    .build()
+                    .unwrap();
+            let lwk_desc: lwk_wollet::WolletDescriptor = descriptor.parse().unwrap();
+            let mut lwk_wollet = lwk_wollet::Wollet::without_persist(network, lwk_desc).unwrap();
+            wollet_scan(&mut lwk_wollet, &mut lwk_client).await;
+            let duration = start.elapsed();
+            let txs = lwk_wollet.transactions().unwrap().len();
+
+            let balance = lwk_wollet.balance().unwrap();
+            let policy_balance = balance.get(&network.policy_asset()).unwrap();
+            println!(
+                "Scan completed in {:?} - waterfalls_active: {}, utxo_only: {} txs: {} balance: {}",
+                duration, waterfalls_active, utxo_only, txs, policy_balance
+            );
+            assert_eq!(
+                policy_balance, &expected_satoshi_balance,
+                "waterfalls_active: {} utxo_only: {}",
+                waterfalls_active, utxo_only
+            );
+        }
 
         // TODO add UTXO scan test once ready
     }
