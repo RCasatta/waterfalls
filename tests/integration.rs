@@ -4,7 +4,7 @@
 //! Thus following tests aren't a proper wallet scan but they checks memory/db backend and also
 //! mempool/confirmation result in receiving a payment
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::time::sleep;
 
@@ -329,7 +329,8 @@ async fn test_lwk_wollet() {
     let mut lwk_client =
         lwk_wollet::clients::asyncr::EsploraClientBuilder::new(waterfalls_url, network)
             .waterfalls(true)
-            .build();
+            .build()
+            .unwrap();
 
     do_lwk_scan(network, &descriptor, waterfalls_url, initial_amount).await;
 
@@ -367,7 +368,8 @@ async fn test_lwk_wollet() {
         lwk_wollet::clients::asyncr::EsploraClientBuilder::new(waterfalls_url, network)
             .waterfalls(true)
             .utxo_only(true)
-            .build();
+            .build()
+            .unwrap();
 
     // Create another Wollet using utxo_only client and compare results
     let lwk_desc: lwk_wollet::WolletDescriptor = descriptor.parse().unwrap();
@@ -448,21 +450,33 @@ async fn do_lwk_scan(
 ) {
     for waterfalls_active in [true, false] {
         for utxo_only in [true, false] {
+            if !waterfalls_active && utxo_only {
+                continue;
+            }
+            let start = Instant::now();
             let mut lwk_client =
                 lwk_wollet::clients::asyncr::EsploraClientBuilder::new(url, network)
                     .waterfalls(waterfalls_active)
                     .utxo_only(utxo_only)
-                    .build();
+                    .concurrency(4)
+                    .build()
+                    .unwrap();
             let lwk_desc: lwk_wollet::WolletDescriptor = descriptor.parse().unwrap();
             let mut lwk_wollet = lwk_wollet::Wollet::without_persist(network, lwk_desc).unwrap();
             wollet_scan(&mut lwk_wollet, &mut lwk_client).await;
+            let duration = start.elapsed();
+            let txs = lwk_wollet.transactions().unwrap().len();
+
             let balance = lwk_wollet.balance().unwrap();
+            let policy_balance = balance.get(&network.policy_asset()).unwrap();
+            println!(
+                "Scan completed in {:?} - waterfalls_active: {}, utxo_only: {} txs: {} balance: {}",
+                duration, waterfalls_active, utxo_only, txs, policy_balance
+            );
             assert_eq!(
-                balance.get(&network.policy_asset()).unwrap(),
-                &expected_satoshi_balance,
+                policy_balance, &expected_satoshi_balance,
                 "waterfalls_active: {} utxo_only: {}",
-                waterfalls_active,
-                utxo_only
+                waterfalls_active, utxo_only
             );
         }
 

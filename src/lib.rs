@@ -209,7 +209,11 @@ impl TxSeen {
 
     pub fn outpoint(&self) -> Option<OutPoint> {
         if self.v > 0 {
-            Some(OutPoint::new(self.txid, self.v as u32 - 1))
+            self.v
+                .try_into()
+                .ok()
+                .and_then(|v: u32| v.checked_sub(1))
+                .map(|vout| OutPoint::new(self.txid, vout))
         } else {
             None
         }

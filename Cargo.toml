@@ -60,7 +60,7 @@ db = ["rocksdb"]
 test_env = ["bitcoind"]
 
 [patch.crates-io]
-lwk_wollet = { git = "https://github.com/blockstream/lwk", rev = "0883ba4bc819b1fd1f59595e4cbd22c327e732ec" }
+lwk_wollet = { git = "https://github.com/blockstream/lwk", rev = "450ea9109b793ce546481a69a718563f89e66d65" }
 # lwk_wollet = { path = "../lwk/lwk_wollet" }
 
 [[bench]]
