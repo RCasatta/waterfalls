@@ -386,10 +386,9 @@ impl WaterfallClient {
         bitcoin_desc: &str,
     ) -> anyhow::Result<WaterfallResponse> {
         for _ in 0..50 {
-            if let Ok(res) = self.waterfalls_v2(bitcoin_desc).await {
-                if !res.0.is_empty() {
-                    return Ok(res.0);
-                }
+            let res = self.waterfalls_v2(bitcoin_desc).await.unwrap();
+            if !res.0.is_empty() {
+                return Ok(res.0);
             }
 
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
