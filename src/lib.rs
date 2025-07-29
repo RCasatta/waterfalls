@@ -20,6 +20,10 @@ type ScriptHash = u64;
 type Height = u32;
 type Timestamp = u32;
 
+fn is_zero(value: &i32) -> bool {
+    *value == 0
+}
+
 /// Request to the waterfalls endpoint
 #[derive(Debug)]
 pub enum WaterfallRequest {
@@ -184,7 +188,7 @@ pub struct TxSeen {
     /// - the script_pubkey in the (v-1) vout output of this transaction
     /// - the script_pubkey of the previous output of the vin (-v-1) input of this transaction
     #[cbor(n(4))]
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "is_zero", default)]
     pub v: i32,
 }
 
@@ -285,7 +289,7 @@ impl From<WaterfallResponseV3> for WaterfallResponse {
                         height: value.blocks_meta[b[1]].h,
                         block_hash: Some(value.blocks_meta[b[1]].b),
                         block_timestamp: Some(value.blocks_meta[b[1]].t),
-                        v: 0, // TODOV
+                        v: 0,
                     });
                 }
                 txs_seen_d.push(current_script);
