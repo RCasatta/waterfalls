@@ -231,13 +231,21 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     assert_eq!(first.txid, expected_first.txid);
 
     // Test utxo_only
-    let result1 = client
+    let mut result1 = client
         .waterfalls_v2_utxo_only(&bitcoin_desc)
         .await
         .unwrap()
         .0;
     let result2 = client.waterfalls_v2(&bitcoin_desc).await.unwrap().0;
-    assert_eq!(result1, result2); // we didn't spend anything from the wallet, thus they are the same
+    assert_ne!(result1, result2); // they are not the same because of v
+    result1.txs_seen.iter_mut().for_each(|(_, v)| {
+        v.iter_mut().for_each(|a| {
+            a.iter_mut().for_each(|b| {
+                b.v = 0;
+            });
+        });
+    });
+    assert_eq!(result1, result2); // we didn't spend anything from the wallet, thus after zeroing v they are the same
 
     test_env.shutdown().await;
     assert!(true);
