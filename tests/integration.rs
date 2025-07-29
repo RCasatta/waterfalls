@@ -325,6 +325,7 @@ async fn test_lwk_wollet() {
     let address = wollet.address(None).unwrap();
     let initial_amount = 10_000;
     test_env.send_to(address.address(), initial_amount);
+    test_env.node_generate(1).await;
     test_env
         .client()
         .wait_waterfalls_non_empty(&bitcoind_desc)
@@ -355,6 +356,8 @@ async fn test_lwk_wollet() {
     assert_eq!(signatures, 1);
     let tx = wollet.finalize(&mut pset).unwrap();
     test_env.client().broadcast(&tx).await.unwrap();
+    test_env.node_generate(1).await;
+    sleep(Duration::from_secs(2)).await;
 
     wollet_scan(&mut wollet, &mut lwk_client).await;
 
