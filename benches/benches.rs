@@ -1,3 +1,4 @@
+use bitcoin::key::Secp256k1;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use elements_miniscript::Descriptor;
@@ -23,7 +24,19 @@ pub fn descriptor(c: &mut Criterion) {
         b.iter(|| {
             let r = desc.at_derivation_index(i).unwrap();
             i += 1;
-            black_box(r.script_pubkey());
+            black_box(r.script_pubkey()); // bulk of the time is spent here, because the pubkey is derived here
+        });
+    })
+    .bench_function("create verification only context", |b: &mut criterion::Bencher<'_>| {
+        b.iter(|| {
+            let secp = Secp256k1::verification_only();
+            black_box(secp);
+        });
+    })
+    .bench_function("create secp context", |b: &mut criterion::Bencher<'_>| {
+        b.iter(|| {
+            let secp = Secp256k1::new();
+            black_box(secp);
         });
     });
 }
