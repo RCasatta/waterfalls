@@ -429,6 +429,7 @@ async fn handle_waterfalls_req(
         .start_timer();
 
     let mut map = BTreeMap::new();
+    let mut utxo_only_req = false;
 
     match inputs {
         WaterfallRequest::Descriptor(DescriptorRequest {
@@ -437,6 +438,7 @@ async fn handle_waterfalls_req(
             to_index,
             utxo_only,
         }) => {
+            utxo_only_req = utxo_only;
             for desc in descriptor.into_single_descriptors().unwrap().iter() {
                 let is_single_address = !desc.has_wildcard();
                 let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
@@ -478,6 +480,7 @@ async fn handle_waterfalls_req(
     };
 
     // enrich with block hashes and timestamps
+    // remove v if it's a full history scan
     {
         let blocks_hash_ts = state.blocks_hash_ts.lock().await;
         for v in map.values_mut() {
@@ -488,6 +491,11 @@ async fn handle_waterfalls_req(
                         let (hash, ts) = blocks_hash_ts[tx_seen.height as usize];
                         tx_seen.block_hash = Some(hash);
                         tx_seen.block_timestamp = Some(ts);
+
+                        if !utxo_only_req {
+                            // setting v to 0 will avoid to serialize it since is not needed for full history scan
+                            tx_seen.v = 0;
+                        }
                     }
                 }
             }
