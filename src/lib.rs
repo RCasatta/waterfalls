@@ -304,11 +304,7 @@ impl TxSeen {
     }
 
     pub fn outpoint(&self) -> Option<OutPoint> {
-        if self.v.vout().is_some() {
-            Some(OutPoint::new(self.txid, self.v.vout().unwrap()))
-        } else {
-            None
-        }
+        self.v.vout().map(|vout| OutPoint::new(self.txid, vout))
     }
 }
 
