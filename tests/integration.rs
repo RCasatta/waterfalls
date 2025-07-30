@@ -356,7 +356,7 @@ async fn test_lwk_wollet() {
     assert_eq!(signatures, 1);
     let tx = wollet.finalize(&mut pset).unwrap();
     test_env.client().broadcast(&tx).await.unwrap();
-    test_env.node_generate(1).await;
+    // test_env.node_generate(1).await;
     sleep(Duration::from_secs(2)).await;
 
     wollet_scan(&mut wollet, &mut lwk_client).await;
