@@ -78,7 +78,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     use elements::{bitcoin::secp256k1, AddressParams};
     use elements_miniscript::{ConfidentialDescriptor, DescriptorPublicKey};
     use std::str::FromStr;
-    use waterfalls::{server::encryption::encrypt, WaterfallResponse};
+    use waterfalls::{server::encryption::encrypt, WaterfallResponse, V};
     let secp = secp256k1::Secp256k1::new();
     let client = test_env.client();
 
@@ -241,7 +241,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     result1.txs_seen.iter_mut().for_each(|(_, v)| {
         v.iter_mut().for_each(|a| {
             a.iter_mut().for_each(|b| {
-                b.v = 0;
+                b.v = V::Undefined;
             });
         });
     });

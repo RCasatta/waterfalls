@@ -3,7 +3,7 @@ use crate::{
     server::{sign::sign_response, Error, State},
     store::Store,
     AddressesRequest, DescriptorRequest, TxSeen, WaterfallRequest, WaterfallResponse,
-    WaterfallResponseV3,
+    WaterfallResponseV3, V,
 };
 use age::x25519::Identity;
 use elements::{
@@ -494,7 +494,7 @@ async fn handle_waterfalls_req(
 
                         if !utxo_only_req {
                             // setting v to 0 will avoid to serialize it since is not needed for full history scan
-                            tx_seen.v = 0;
+                            tx_seen.v = V::Undefined;
                         }
                     }
                 }
@@ -585,7 +585,7 @@ fn filter_utxo_only(
                 } else {
                     // For mempool transactions (height == 0), keep outputs (positive v)
                     // as they represent unconfirmed UTXOs that should be included
-                    f.v > 0
+                    f.v.vout().is_some()
                 }
             }
             None => {

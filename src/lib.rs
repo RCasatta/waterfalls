@@ -20,10 +20,6 @@ type ScriptHash = u64;
 type Height = u32;
 type Timestamp = u32;
 
-fn is_zero(value: &i32) -> bool {
-    *value == 0
-}
-
 /// Request to the waterfalls endpoint
 #[derive(Debug)]
 pub enum WaterfallRequest {
@@ -163,6 +159,106 @@ impl WaterfallResponseV3 {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum V {
+    Undefined,
+    Vin(u32),
+    Vout(u32),
+}
+
+impl Serialize for V {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_i32(self.raw())
+    }
+}
+
+impl<'de> Deserialize<'de> for V {
+    fn deserialize<D>(deserializer: D) -> Result<V, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = i32::deserialize(deserializer)?;
+        Ok(V::from_raw(raw))
+    }
+}
+
+impl<Ctx> Encode<Ctx> for V {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        _ctx: &mut Ctx,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.i32(self.raw())?;
+        Ok(())
+    }
+}
+
+impl<'b, Ctx> Decode<'b, Ctx> for V {
+    fn decode(
+        d: &mut minicbor::Decoder<'b>,
+        _ctx: &mut Ctx,
+    ) -> Result<Self, minicbor::decode::Error> {
+        let inner = d.i32()?;
+        Ok(V::from_raw(inner))
+    }
+}
+
+impl V {
+    /// Creates a V from a raw i32 value (for deserialization)
+    pub fn from_raw(raw: i32) -> Self {
+        match raw {
+            0 => V::Undefined,
+            i if i > 0 => V::Vout((i - 1) as u32),
+            i => V::Vin((-i - 1) as u32),
+        }
+    }
+
+    /// Returns the vout index if this V represents an output
+    pub fn vout(&self) -> Option<u32> {
+        match self {
+            V::Vout(index) => Some(*index),
+            _ => None,
+        }
+    }
+
+    /// Returns the vin index if this V represents an input
+    pub fn vin(&self) -> Option<u32> {
+        match self {
+            V::Vin(index) => Some(*index),
+            _ => None,
+        }
+    }
+
+    /// Returns true if this V is undefined (value is 0)
+    pub fn is_undefined(&self) -> bool {
+        matches!(self, V::Undefined)
+    }
+
+    /// Returns the raw inner value
+    pub fn raw(&self) -> i32 {
+        match self {
+            V::Undefined => 0,
+            V::Vin(index) => -((index + 1) as i32),
+            V::Vout(index) => (index + 1) as i32,
+        }
+    }
+}
+
+impl Default for V {
+    fn default() -> Self {
+        V::Undefined
+    }
+}
+
+impl From<i32> for V {
+    fn from(v: i32) -> Self {
+        Self::from_raw(v)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Encode, Decode)]
 pub struct TxSeen {
     #[cbor(n(0), with = "cbor_txid")]
@@ -188,12 +284,12 @@ pub struct TxSeen {
     /// - the script_pubkey in the (v-1) vout output of this transaction
     /// - the script_pubkey of the previous output of the vin (-v-1) input of this transaction
     #[cbor(n(4))]
-    #[serde(skip_serializing_if = "is_zero", default)]
-    pub v: i32,
+    #[serde(skip_serializing_if = "V::is_undefined", default)]
+    pub v: V,
 }
 
 impl TxSeen {
-    pub fn new(txid: Txid, height: Height, v: i32) -> Self {
+    pub fn new(txid: Txid, height: Height, v: V) -> Self {
         Self {
             txid,
             height,
@@ -203,13 +299,13 @@ impl TxSeen {
         }
     }
 
-    pub fn mempool(txid: Txid, v: i32) -> TxSeen {
+    pub fn mempool(txid: Txid, v: V) -> TxSeen {
         TxSeen::new(txid, 0, v)
     }
 
     pub fn outpoint(&self) -> Option<OutPoint> {
-        if self.v > 0 {
-            Some(OutPoint::new(self.txid, self.v as u32 - 1))
+        if self.v.vout().is_some() {
+            Some(OutPoint::new(self.txid, self.v.vout().unwrap()))
         } else {
             None
         }
@@ -289,7 +385,7 @@ impl From<WaterfallResponseV3> for WaterfallResponse {
                         height: value.blocks_meta[b[1]].h,
                         block_hash: Some(value.blocks_meta[b[1]].b),
                         block_timestamp: Some(value.blocks_meta[b[1]].t),
-                        v: 0,
+                        v: V::Undefined,
                     });
                 }
                 txs_seen_d.push(current_script);
@@ -392,7 +488,7 @@ mod tests {
         let txid =
             Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111")
                 .unwrap();
-        let txseen = TxSeen::new(txid, 3_000_001, 0); // TODOV
+        let txseen = TxSeen::new(txid, 3_000_001, V::Undefined); // Was 0, meaning undefined
         let cbor = minicbor::to_vec(&txseen).unwrap();
 
         // TODO current cbor serialization is bad cause it's serializing v and thus also Blockhash

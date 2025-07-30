@@ -6,6 +6,7 @@ use fxhash::FxHasher;
 use crate::ScriptHash;
 
 use super::{BlockMeta, Store, TxSeen};
+use crate::V;
 
 #[derive(Debug)]
 pub struct MemoryStore {
@@ -68,7 +69,7 @@ impl Store for MemoryStore {
         let script_hashes = self.remove_utxos(&only_outpoints);
         for (script_hash, (vin, _, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
-            el.push(TxSeen::new(txid, block_meta.height(), -(vin as i32) - 1));
+            el.push(TxSeen::new(txid, block_meta.height(), V::Vin(vin)));
         }
 
         self.update_history(history_map);

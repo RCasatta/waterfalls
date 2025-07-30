@@ -7,7 +7,7 @@ use elements::{OutPoint, Transaction, Txid};
 
 use crate::{
     store::{AnyStore, Store},
-    ScriptHash, TxSeen,
+    ScriptHash, TxSeen, V,
 };
 
 pub struct Mempool {
@@ -134,7 +134,7 @@ impl Mempool {
             let txid_positions = self.hash_txids.get(h).cloned().unwrap_or(vec![]);
             let tx_seens: Vec<TxSeen> = txid_positions
                 .into_iter()
-                .map(|(txid, position)| TxSeen::mempool(txid, position))
+                .map(|(txid, position)| TxSeen::mempool(txid, V::from_raw(position)))
                 .collect();
             result.push(tx_seens);
         }

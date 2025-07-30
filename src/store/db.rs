@@ -8,6 +8,8 @@ use elements::{
 use fxhash::FxHasher;
 use rocksdb::{BoundColumnFamily, MergeOperands, Options, DB};
 
+use crate::V;
+
 use prefix_uvarint::PrefixVarInt;
 use std::{collections::HashMap, hash::Hasher, path::Path, sync::Arc};
 
@@ -256,7 +258,7 @@ impl Store for DBStore {
         let script_hashes = self.remove_utxos(&only_outpoints)?;
         for (script_hash, (vin, _, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
-            el.push(TxSeen::new(txid, block_meta.height(), -(vin as i32) - 1));
+            el.push(TxSeen::new(txid, block_meta.height(), V::Vin(vin)));
         }
 
         self.set_hash_ts(block_meta);
@@ -283,7 +285,7 @@ fn vec_tx_seen_to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
         result[offset..offset + 32].copy_from_slice(txid.as_byte_array());
         offset += 32;
         offset += height.encode_prefix_varint(&mut result[offset..]);
-        offset += v.encode_prefix_varint(&mut result[offset..]);
+        offset += v.raw().encode_prefix_varint(&mut result[offset..]);
     }
     result.truncate(offset);
     result
@@ -303,7 +305,7 @@ fn vec_tx_seen_from_be_bytes(s: &[u8]) -> Result<Vec<TxSeen>> {
         offset += byte_len;
         let (v, byte_len) = i32::decode_prefix_varint(&s[offset..])?;
         offset += byte_len;
-        result.push(TxSeen::new(txid, height, v));
+        result.push(TxSeen::new(txid, height, V::from_raw(v)));
         if offset >= s.len() {
             break;
         }
@@ -353,6 +355,7 @@ mod test {
         db::{get_or_init_salt, vec_tx_seen_from_be_bytes, vec_tx_seen_to_be_bytes, TxSeen},
         Store,
     };
+    use crate::V;
 
     use super::DBStore;
 
@@ -388,9 +391,12 @@ mod test {
         let txid = Txid::all_zeros();
 
         let mut new_history = HashMap::new();
-        let txs_seen = vec![TxSeen::new(txid, 2, 0), TxSeen::new(txid, 5, 0)];
+        let txs_seen = vec![
+            TxSeen::new(txid, 2, V::Undefined),
+            TxSeen::new(txid, 5, V::Undefined),
+        ];
         new_history.insert(7u64, txs_seen.clone());
-        new_history.insert(9u64, vec![TxSeen::new(txid, 5, 0)]);
+        new_history.insert(9u64, vec![TxSeen::new(txid, 5, V::Undefined)]);
         db.update_history(&new_history).unwrap();
         let result = db.get_history(&[7]).unwrap();
         assert_eq!(result[0], txs_seen);
@@ -451,14 +457,14 @@ mod test {
 
     #[test]
     fn test_static_txseen_round_trip() {
-        let txseen = TxSeen::new(Txid::all_zeros(), 0, 0);
+        let txseen = TxSeen::new(Txid::all_zeros(), 0, V::Undefined);
         let txs = vec![txseen.clone()];
         let serialized = vec_tx_seen_to_be_bytes(&txs);
         assert_eq!(serialized.len(), 34);
         let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
         assert_eq!(txs, deserialized);
 
-        let mut txseen = TxSeen::new(Txid::all_zeros(), 0, 0);
+        let mut txseen = TxSeen::new(Txid::all_zeros(), 0, V::Undefined);
         txseen.block_hash = Some(BlockHash::all_zeros());
         txseen.block_timestamp = Some(42);
         let txs = vec![txseen.clone()];
@@ -470,7 +476,7 @@ mod test {
             "block_hash and block_timestamp must not be serialized"
         );
 
-        let txseen = TxSeen::new(Txid::all_zeros(), 0, 2);
+        let txseen = TxSeen::new(Txid::all_zeros(), 0, V::Vout(1));
         let txs = vec![txseen.clone()];
         let serialized = vec_tx_seen_to_be_bytes(&txs);
         assert_eq!(serialized.len(), 34);

@@ -2,7 +2,7 @@ use crate::{
     fetch::Client,
     server::{Error, State},
     store::{BlockMeta, Store},
-    TxSeen,
+    TxSeen, V,
 };
 use elements::{hex::ToHex, OutPoint, Txid};
 use std::{
@@ -49,7 +49,7 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
                 let script_hash = db.hash(&output.script_pubkey);
                 log::debug!("{} hash is {script_hash}", &output.script_pubkey.to_hex());
                 let el = history_map.entry(script_hash).or_insert(vec![]);
-                el.push(TxSeen::new(txid, block_height, (j as i32) + 1));
+                el.push(TxSeen::new(txid, block_height, V::Vout(j as u32)));
 
                 let out_point = OutPoint::new(txid, j as u32);
                 log::debug!("inserting {out_point}");
@@ -65,7 +65,7 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
                         Some(script_hash) => {
                             // also the spending tx must be indexed
                             let el = history_map.entry(script_hash).or_insert(vec![]);
-                            el.push(TxSeen::new(txid, block_height, (vin as i32) - 1));
+                            el.push(TxSeen::new(txid, block_height, V::Vin(vin as u32)));
                         }
                         None => {
                             log::debug!("removing {}", &input.previous_output);
