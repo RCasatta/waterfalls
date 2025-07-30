@@ -543,6 +543,9 @@ async fn handle_waterfalls_req(
             .to_vec()
     };
 
+    let m = sign_response(&state.secp, &state.wif_key, &result);
+    let m = m.to_msg_sig_address(state.address());
+
     log::info!(
         "returning: {elements} elements, elapsed: {}ms",
         start.elapsed().as_millis()
@@ -550,8 +553,6 @@ async fn handle_waterfalls_req(
     crate::WATERFALLS_COUNTER.inc();
     timer.observe_duration();
 
-    let m = sign_response(&state.secp, &state.wif_key, &result);
-    let m = m.to_msg_sig_address(state.address());
     any_resp(
         result,
         hyper::StatusCode::OK,
