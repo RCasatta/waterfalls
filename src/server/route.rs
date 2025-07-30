@@ -380,8 +380,8 @@ async fn handle_single_address(
         .collect();
 
     let seen_mempool = state.mempool.lock().await.seen(&script_hash).remove(0);
-    result.extend(seen_mempool.iter().map(|e| EsploraTx {
-        txid: *e,
+    result.extend(seen_mempool.iter().map(|tx_seen| EsploraTx {
+        txid: tx_seen.txid,
         status: Status {
             block_height: Some(-1),
             block_hash: None,
@@ -595,8 +595,8 @@ async fn find_scripts(
     let seen_mempool = state.mempool.lock().await.seen(&scripts);
 
     for (conf, unconf) in seen_blockchain.iter_mut().zip(seen_mempool.iter()) {
-        for txid in unconf {
-            conf.push(TxSeen::mempool(*txid, 0)); // TODO: compute vin/vout also for mempool
+        for tx_seen in unconf {
+            conf.push(tx_seen.clone());
         }
     }
     let is_last = seen_blockchain.iter().all(|e| e.is_empty());
