@@ -578,8 +578,21 @@ fn filter_utxo_only(
         .collect();
     for e in result.iter_mut() {
         e.retain(|f| match f.outpoint() {
-            Some(o) => unspent.contains(&o),
-            None => false,
+            Some(o) => {
+                // For confirmed transactions, check if UTXO exists in DB
+                if f.height > 0 {
+                    unspent.contains(&o)
+                } else {
+                    // For mempool transactions (height == 0), keep outputs (positive v)
+                    // as they represent unconfirmed UTXOs that should be included
+                    f.v > 0
+                }
+            }
+            None => {
+                // This handles mempool inputs (negative v) and transactions with v=0
+                // For utxo_only mode, we don't want to include spending transactions
+                false
+            }
         });
     }
     Ok(())
