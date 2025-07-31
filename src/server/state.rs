@@ -1,5 +1,5 @@
 use crate::{
-    server::Mempool,
+    server::{derivation_cache::DerivationCache, Mempool},
     store::{AnyStore, BlockMeta},
     Timestamp,
 };
@@ -24,6 +24,8 @@ pub struct State {
     pub secp: Secp256k1<All>,
 
     pub max_addresses: usize,
+
+    pub derivation_cache: Mutex<DerivationCache>,
 }
 
 impl State {
@@ -41,6 +43,7 @@ impl State {
             blocks_hash_ts: Mutex::new(Vec::new()),
             secp: bitcoin::key::Secp256k1::new(),
             max_addresses,
+            derivation_cache: Mutex::new(DerivationCache::new()),
         })
     }
 

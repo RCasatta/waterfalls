@@ -20,6 +20,7 @@ use route::infallible_route;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
+mod derivation_cache;
 pub mod encryption;
 mod mempool;
 pub mod preload;
