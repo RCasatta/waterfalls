@@ -23,7 +23,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     str::FromStr,
     sync::Arc,
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::Mutex;
 
@@ -422,6 +422,7 @@ async fn handle_waterfalls_req(
     let db = &state.store;
     let start = Instant::now();
     let page = inputs.page();
+    let mut derivations_duration = Duration::from_secs(0);
 
     // TODO add label with batches?
     let timer = crate::WATERFALLS_HISTOGRAM
@@ -447,8 +448,9 @@ async fn handle_waterfalls_req(
 
                     let start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
                     for index in start..start + GAP_LIMIT {
-                        let (script_pubkey, _duration) =
+                        let (script_pubkey, duration) =
                             calculate_script_pubkey_with_timing(desc, index).unwrap();
+                        derivations_duration += duration;
                         log::debug!("{}/{} {}", desc, index, script_pubkey);
                         scripts.push(db.hash(&script_pubkey));
                         if is_single_address {
@@ -547,8 +549,9 @@ async fn handle_waterfalls_req(
     let m = m.to_msg_sig_address(state.address());
 
     log::info!(
-        "returning: {elements} elements, elapsed: {}ms",
-        start.elapsed().as_millis()
+        "returning: {elements} elements, elapsed: {}ms (of which {}ms for derivations)",
+        start.elapsed().as_millis(),
+        derivations_duration.as_millis()
     );
     crate::WATERFALLS_COUNTER.inc();
     timer.observe_duration();
