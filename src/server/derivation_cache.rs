@@ -1,9 +1,7 @@
 use std::{
     collections::HashMap,
-    hash::{Hash, Hasher},
+    hash::{DefaultHasher, Hash, Hasher},
 };
-
-use fxhash::FxHasher;
 
 use crate::ScriptHash;
 
@@ -28,7 +26,7 @@ impl DerivationCache {
     }
 
     pub fn hash(desc: &str, index: u32) -> DescIndexHash {
-        let mut hasher = FxHasher::default();
+        let mut hasher = DefaultHasher::default();
         desc.hash(&mut hasher);
         index.hash(&mut hasher);
         hasher.finish()
