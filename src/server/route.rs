@@ -1,6 +1,6 @@
 use crate::{
     fetch::Client,
-    server::{sign::sign_response, Error, State},
+    server::{derivation_cache::DerivationCache, sign::sign_response, Error, State},
     store::Store,
     AddressesRequest, DescriptorRequest, TxSeen, WaterfallRequest, WaterfallResponse,
     WaterfallResponseV3, V,
@@ -441,18 +441,30 @@ async fn handle_waterfalls_req(
         }) => {
             utxo_only_req = utxo_only;
             for desc in descriptor.into_single_descriptors().unwrap().iter() {
+                let desc_str = desc.to_string();
                 let is_single_address = !desc.has_wildcard();
                 let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
                 for batch in 0..MAX_BATCH {
                     let mut scripts = Vec::with_capacity(GAP_LIMIT as usize);
 
                     let start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
+                    let mut derivation_cache = state.derivation_cache.lock().await;
                     for index in start..start + GAP_LIMIT {
-                        let (script_pubkey, duration) =
-                            calculate_script_pubkey_with_timing(desc, index).unwrap();
-                        derivations_duration += duration;
-                        log::debug!("{}/{} {}", desc, index, script_pubkey);
-                        scripts.push(db.hash(&script_pubkey));
+                        let der_ind_hash = DerivationCache::hash(&desc_str, index);
+                        let script_hash = match derivation_cache.get(der_ind_hash) {
+                            Some(script_hash) => script_hash,
+                            None => {
+                                let (script_pubkey, duration) =
+                                    calculate_script_pubkey_with_timing(desc, index).unwrap();
+                                derivations_duration += duration;
+                                log::debug!("{}/{} {}", desc, index, script_pubkey);
+                                let script_hash = db.hash(&script_pubkey);
+                                derivation_cache.add(der_ind_hash, script_hash);
+                                script_hash
+                            }
+                        };
+
+                        scripts.push(script_hash);
                         if is_single_address {
                             break;
                         }
