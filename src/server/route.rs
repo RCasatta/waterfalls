@@ -447,8 +447,8 @@ async fn handle_waterfalls_req(
 
                     let start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
                     for index in start..start + GAP_LIMIT {
-                        let l = desc.at_derivation_index(index).unwrap();
-                        let script_pubkey = l.script_pubkey();
+                        let (script_pubkey, _duration) =
+                            calculate_script_pubkey_with_timing(desc, index).unwrap();
                         log::debug!("{}/{} {}", desc, index, script_pubkey);
                         scripts.push(db.hash(&script_pubkey));
                         if is_single_address {
@@ -615,6 +615,18 @@ async fn find_scripts(
     let is_last = seen_blockchain.iter().all(|e| e.is_empty());
     result.extend(seen_blockchain);
     is_last
+}
+
+fn calculate_script_pubkey_with_timing(
+    desc: &elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>,
+    index: u32,
+) -> Result<(elements::Script, std::time::Duration), elements_miniscript::descriptor::ConversionError>
+{
+    let start = Instant::now();
+    let l = desc.at_derivation_index(index)?;
+    let script_pubkey = l.script_pubkey();
+    let duration = start.elapsed();
+    Ok((script_pubkey, duration))
 }
 
 /// This function is used to wrap the route function so that it never returns an error but always a response
