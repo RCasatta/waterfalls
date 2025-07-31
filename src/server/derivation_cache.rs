@@ -10,7 +10,7 @@ use crate::ScriptHash;
 pub type DescIndexHash = u64;
 
 pub struct DerivationCache {
-    cache: HashMap<DescIndexHash, ScriptHash>,
+    cache: HashMap<DescIndexHash, ScriptHash>, // TODO use passthrough hasher
 }
 
 impl DerivationCache {
