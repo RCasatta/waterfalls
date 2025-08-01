@@ -41,6 +41,20 @@ impl Client {
                 .clone()
                 .unwrap_or(format!("{BS}/liquidtestnet/api")),
             Network::ElementsRegtest => args.esplora_url.clone().unwrap_or(format!("{LOCAL}:3000")),
+
+            Network::Bitcoin => args
+                .esplora_url
+                .clone()
+                .unwrap_or(format!("{BS}/bitcoin/api")),
+            Network::BitcoinTestnet => args
+                .esplora_url
+                .clone()
+                .unwrap_or(format!("{BS}/testnet/api")),
+            Network::BitcoinRegtest => args.esplora_url.clone().unwrap_or(format!("{LOCAL}:3000")),
+            Network::BitcoinSignet => args
+                .esplora_url
+                .clone()
+                .unwrap_or(format!("{BS}/signet/api")),
         };
         let use_esplora = args.use_esplora;
         let base_url = if use_esplora {

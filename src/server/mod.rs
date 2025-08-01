@@ -36,6 +36,10 @@ pub enum Network {
     Liquid,
     LiquidTestnet,
     ElementsRegtest,
+    Bitcoin,
+    BitcoinTestnet,
+    BitcoinRegtest,
+    BitcoinSignet,
 }
 
 #[derive(clap::Parser, Clone, Default)]
@@ -127,6 +131,10 @@ impl std::fmt::Display for Network {
             Network::Liquid => "liquid",
             Network::LiquidTestnet => "liquid-testnet",
             Network::ElementsRegtest { .. } => "elements-regtest",
+            Network::Bitcoin => "bitcoin",
+            Network::BitcoinTestnet => "bitcoin-testnet",
+            Network::BitcoinRegtest => "bitcoin-regtest",
+            Network::BitcoinSignet => "bitcoin-signet",
         };
         write!(f, "{}", s)
     }
@@ -146,11 +154,16 @@ impl Network {
         }
     }
 
+    // TODO rename to default_node_listen_port
     pub fn default_elements_listen_port(&self) -> u16 {
         match self {
             Network::Liquid => 7041,
             Network::LiquidTestnet => 7039,
             Network::ElementsRegtest => 7043, // TODO: check this
+            Network::Bitcoin => 8332,
+            Network::BitcoinTestnet => 18332,
+            Network::BitcoinRegtest => 18443,
+            Network::BitcoinSignet => 38332,
         }
     }
 
@@ -159,6 +172,10 @@ impl Network {
             Network::Liquid => 3100,
             Network::LiquidTestnet => 3101,
             Network::ElementsRegtest => 3102,
+            Network::Bitcoin => 3103,
+            Network::BitcoinTestnet => 3104,
+            Network::BitcoinRegtest => 3105,
+            Network::BitcoinSignet => 3106,
         }
     }
 
@@ -167,6 +184,8 @@ impl Network {
             Network::Liquid => &AddressParams::LIQUID,
             Network::LiquidTestnet => &AddressParams::LIQUID_TESTNET,
             Network::ElementsRegtest => &AddressParams::ELEMENTS,
+
+            _ => todo!(),
         }
     }
 }
