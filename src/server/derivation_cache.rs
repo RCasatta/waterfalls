@@ -1,4 +1,4 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{BuildHasher, DefaultHasher, Hash, Hasher};
 
 use lrumap::LruHashMap;
 
@@ -7,13 +7,38 @@ use crate::{cache_counter, ScriptHash};
 pub type DescIndexHash = u64;
 
 pub struct DerivationCache {
-    cache: LruHashMap<DescIndexHash, ScriptHash>, // TODO use passthrough hasher
+    cache: LruHashMap<DescIndexHash, ScriptHash, PassthroughHasher>,
+}
+
+#[derive(Default)]
+struct PassthroughHasher(u64);
+
+impl BuildHasher for PassthroughHasher {
+    type Hasher = PassthroughHasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        PassthroughHasher(0)
+    }
+}
+
+impl Hasher for PassthroughHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, _bytes: &[u8]) {
+        panic!("passtrough hasher should not pass here!")
+    }
+
+    fn write_u64(&mut self, i: u64) {
+        self.0 = i;
+    }
 }
 
 impl DerivationCache {
     pub fn new() -> Self {
         Self {
-            cache: LruHashMap::new(1_000_000), // TODO make this configurable
+            cache: LruHashMap::with_hasher(1_000_000, PassthroughHasher(0)), // TODO make this configurable
         }
     }
     pub fn add(&mut self, x: DescIndexHash, script_pubkey: ScriptHash) {
