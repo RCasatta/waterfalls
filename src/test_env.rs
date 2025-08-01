@@ -119,7 +119,9 @@ async fn inner_launch_with_node(elementsd: &BitcoinD, path: Option<PathBuf>) -> 
 }
 
 pub fn launch_bitcoin<S: AsRef<OsStr>>(exe: S) -> BitcoinD {
-    BitcoinD::with_conf(exe, &Conf::default()).unwrap()
+    let mut conf = Conf::default();
+    conf.args = vec!["-regtest", "-fallbackfee=0.0001", "-rest=1", "-txindex=1"];
+    BitcoinD::with_conf(exe, &conf).unwrap()
 }
 pub fn launch_elements<S: AsRef<OsStr>>(exe: S) -> BitcoinD {
     let mut conf = Conf::default();
