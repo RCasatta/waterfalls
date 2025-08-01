@@ -46,6 +46,7 @@ minicbor = { version = "0.23", default-features = false, features = [
     "derive",
 ] }
 prefix_uvarint = "0.6.1"
+lrumap = "0.1.0"
 
 
 [dev-dependencies]
