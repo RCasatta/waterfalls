@@ -4,7 +4,10 @@ use crate::cbor::{cbor_block_hash, cbor_opt_block_hash, cbor_txid, cbor_txids};
 use elements::{BlockHash, OutPoint, Txid};
 use lazy_static::lazy_static;
 use minicbor::{Decode, Encode};
-use prometheus::{labels, opts, register_counter, register_histogram_vec, Counter, HistogramVec};
+use prometheus::{
+    labels, opts, register_counter, register_histogram_vec, register_int_counter_vec, Counter,
+    HistogramVec, IntCounterVec,
+};
 use serde::{Deserialize, Serialize};
 
 mod cbor;
@@ -416,6 +419,19 @@ lazy_static! {
         &["handler"]
     )
     .unwrap();
+    static ref WATERFALLS_CACHE_COUNTER: IntCounterVec = register_int_counter_vec!(
+        "fbbe_cache_counter",
+        "Hit/Miss of FBBE caches",
+        &["name", "event"]
+    )
+    .unwrap();
+}
+
+pub(crate) fn cache_counter(cache_name: &str, hit_miss: bool) {
+    let hit_miss = if hit_miss { "hit" } else { "miss" };
+    crate::WATERFALLS_CACHE_COUNTER
+        .with_label_values(&[cache_name, hit_miss])
+        .inc();
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
 };
 
-use crate::ScriptHash;
+use crate::{cache_counter, ScriptHash};
 
 pub type DescIndexHash = u64;
 
@@ -22,7 +22,10 @@ impl DerivationCache {
         self.cache.insert(x, script_pubkey);
     }
     pub fn get(&self, x: DescIndexHash) -> Option<ScriptHash> {
-        self.cache.get(&x).cloned()
+        let val = self.cache.get(&x).cloned();
+        let hit_miss = val.is_some();
+        cache_counter("derivation_cache", hit_miss);
+        val
     }
 
     pub fn hash(desc: &str, index: u32) -> DescIndexHash {
