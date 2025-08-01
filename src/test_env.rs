@@ -62,6 +62,7 @@ pub async fn launch_with_node(elementsd: &BitcoinD) -> TestEnv {
 async fn inner_launch_with_node(elementsd: &BitcoinD, path: Option<PathBuf>) -> TestEnv {
     let mut args = Arguments {
         node_url: Some(elementsd.rpc_url()),
+        derivation_cache_capacity: 10000,
         ..Default::default()
     };
     let available_port = get_available_port().unwrap();
