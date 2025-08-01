@@ -6,6 +6,13 @@ use crate::{cache_counter, ScriptHash};
 
 pub type DescIndexHash = u64;
 
+/// A cache mapping (descriptor/derivation indices) -> script hashes.
+///
+/// This is used to avoid re-calculating the same script hashes for the same descriptor/derivation indices.
+///
+/// The cache is a LRU cache to hard cap the memory usage.
+///
+/// The cache use a PassthroughHasher because the key is already a hash.
 pub struct DerivationCache {
     cache: LruHashMap<DescIndexHash, ScriptHash, PassthroughHasher>,
 }
