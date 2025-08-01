@@ -90,6 +90,10 @@ pub struct Arguments {
     /// If true, add CORS headers to responses
     #[arg(env, long)]
     pub add_cors: bool,
+
+    /// Maximum capacity for the derivation cache
+    #[arg(env, long, default_value = "1000000")]
+    pub derivation_cache_capacity: usize,
 }
 
 impl Arguments {
@@ -245,7 +249,13 @@ pub async fn inner_main(
         .wif_key
         .unwrap_or_else(|| PrivateKey::generate(network_kind));
 
-    let state = Arc::new(State::new(store, key, wif_key, args.max_addresses)?);
+    let state = Arc::new(State::new(
+        store,
+        key,
+        wif_key,
+        args.max_addresses,
+        args.derivation_cache_capacity,
+    )?);
 
     {
         let state = state.clone();

@@ -34,6 +34,7 @@ impl State {
         key: Identity,
         wif_key: PrivateKey,
         max_addresses: usize,
+        derivation_cache_capacity: usize,
     ) -> Result<Self, Error> {
         Ok(State {
             key,
@@ -43,7 +44,7 @@ impl State {
             blocks_hash_ts: Mutex::new(Vec::new()),
             secp: bitcoin::key::Secp256k1::new(),
             max_addresses,
-            derivation_cache: Mutex::new(DerivationCache::new(1_000_000)),
+            derivation_cache: Mutex::new(DerivationCache::new(derivation_cache_capacity)),
         })
     }
 
