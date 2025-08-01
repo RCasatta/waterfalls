@@ -43,9 +43,9 @@ impl Hasher for PassthroughHasher {
 }
 
 impl DerivationCache {
-    pub fn new() -> Self {
+    pub fn new(capacity: usize) -> Self {
         Self {
-            cache: LruHashMap::with_hasher(1_000_000, PassthroughHasher(0)), // TODO make this configurable
+            cache: LruHashMap::with_hasher(capacity, PassthroughHasher(0)),
         }
     }
     pub fn add(&mut self, x: DescIndexHash, script_pubkey: ScriptHash) {
