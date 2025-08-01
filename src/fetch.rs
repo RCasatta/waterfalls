@@ -286,7 +286,10 @@ mod test {
 
     use elements::{BlockHash, Txid};
 
-    use crate::server::{Arguments, Network};
+    use crate::{
+        server::{Arguments, Network},
+        test_env,
+    };
 
     use super::Client;
 
@@ -303,6 +306,19 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_client_local_elements() {
+        let elementsd = test_env::launch_elements(
+            std::env::var("ELEMENTSD_EXEC").expect("ELEMENTSD_EXEC must be set"),
+        );
+        let mut args = Arguments::default();
+        args.use_esplora = false;
+        args.network = Network::ElementsRegtest;
+        args.node_url = Some(elementsd.rpc_url());
+        let client = Client::new(&args);
+        test(client, args.network).await;
+    }
+
+    #[tokio::test]
     #[ignore = "connects to local node instance"]
     async fn test_client_local() {
         let mut args = Arguments::default();
@@ -316,16 +332,23 @@ mod test {
     }
 
     async fn test(client: Client, network: Network) {
-        let (genesis_hash, genesis_txid) = if network == Network::LiquidTestnet {
-            (
-                "a771da8e52ee6ad581ed1e9a99825e5b3b7992225534eaa2ae23244fe26ab1c1",
-                "0471d2f856b3fdbc4397af272bee1660b77aaf9a4aeb86fdd96110ce00f2b158",
-            )
-        } else {
-            (
+        let (genesis_hash, genesis_txid) = match network {
+            Network::Liquid => (
                 "1466275836220db2944ca059a3a10ef6fd2ea684b0688d2c379296888a206003",
                 "45de9fd4cb0f2a63b3afc68d26403f0d3c773d6cf2f42508bd8e7d7704f267d7",
-            )
+            ),
+            Network::LiquidTestnet => (
+                "a771da8e52ee6ad581ed1e9a99825e5b3b7992225534eaa2ae23244fe26ab1c1",
+                "0471d2f856b3fdbc4397af272bee1660b77aaf9a4aeb86fdd96110ce00f2b158",
+            ),
+            Network::ElementsRegtest => (
+                "c7af03b0774a3498a574902bd41045c1633fd40b69ca163345c5d9c78bfd6af7",
+                "81c9570df1135a6bb7fb0f77a273561fddfd87bc62e7f265e94ffb01474ae578",
+            ),
+            Network::Bitcoin => todo!(),
+            Network::BitcoinTestnet => todo!(),
+            Network::BitcoinRegtest => todo!(),
+            Network::BitcoinSignet => todo!(),
         };
 
         let genesis_hash = BlockHash::from_str(&genesis_hash).unwrap();
@@ -335,6 +358,10 @@ mod test {
         assert_eq!(genesis_hash, fetched, "network:{network}");
         let genesis_block = client.block(genesis_hash).await.unwrap();
         assert_eq!(genesis_block.block_hash(), genesis_hash);
+        let block = client.block(genesis_hash).await.unwrap();
+        assert_eq!(block.block_hash(), genesis_hash);
+        assert_eq!(block.txdata[0].txid(), genesis_txid);
+
         let genesis_tx = client.tx(genesis_txid).await.unwrap();
         assert_eq!(genesis_tx.txid(), genesis_txid);
         client.mempool().await.unwrap();
