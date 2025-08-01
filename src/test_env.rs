@@ -118,7 +118,10 @@ async fn inner_launch_with_node(elementsd: &BitcoinD, path: Option<PathBuf>) -> 
     test_env
 }
 
-async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv<'static> {
+pub fn launch_bitcoin<S: AsRef<OsStr>>(exe: S) -> BitcoinD {
+    BitcoinD::with_conf(exe, &Conf::default()).unwrap()
+}
+pub fn launch_elements<S: AsRef<OsStr>>(exe: S) -> BitcoinD {
     let mut conf = Conf::default();
     let args = vec![
         "-fallbackfee=0.0001",
@@ -134,7 +137,11 @@ async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv
     conf.view_stdout = std::env::var("RUST_LOG").is_ok();
     conf.network = "liquidregtest";
 
-    let elementsd = BitcoinD::with_conf(exe, &conf).unwrap();
+    BitcoinD::with_conf(exe, &conf).unwrap()
+}
+
+async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv<'static> {
+    let elementsd = launch_elements(exe);
     // Use Box::leak to create a static reference
     let elementsd_ref = Box::leak(Box::new(elementsd));
     inner_launch_with_node(elementsd_ref, path).await
