@@ -420,8 +420,8 @@ lazy_static! {
     )
     .unwrap();
     static ref WATERFALLS_CACHE_COUNTER: IntCounterVec = register_int_counter_vec!(
-        "fbbe_cache_counter",
-        "Hit/Miss of FBBE caches",
+        "waterfalls_cache_counter",
+        "Hit/Miss of Waterfalls caches",
         &["name", "event"]
     )
     .unwrap();
