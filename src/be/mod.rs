@@ -1,6 +1,8 @@
 mod block;
+mod transaction;
 
 pub use block::Block;
+pub use transaction::{Input, Output, Transaction};
 
 use crate::server::Network;
 

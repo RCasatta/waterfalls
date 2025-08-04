@@ -1,5 +1,7 @@
 use bitcoin::hashes::Hash;
 
+use crate::be;
+
 pub enum Block {
     Bitcoin(bitcoin::Block),
     Elements(elements::Block),
@@ -13,7 +15,7 @@ impl Block {
         }
     }
 
-    pub(crate) fn _block_hash(&self) -> elements::BlockHash {
+    pub(crate) fn block_hash(&self) -> elements::BlockHash {
         match self {
             Block::Bitcoin(block) => {
                 let hash = block.block_hash();
@@ -28,6 +30,23 @@ impl Block {
         match self {
             Block::Bitcoin(block) => block.header.time,
             Block::Elements(block) => block.header.time,
+        }
+    }
+
+    pub(crate) fn transactions(&self) -> Vec<be::Transaction> {
+        match self {
+            Block::Bitcoin(block) => block
+                .txdata
+                .iter()
+                .cloned()
+                .map(|tx| be::Transaction::Bitcoin(tx))
+                .collect(),
+            Block::Elements(block) => block
+                .txdata
+                .iter()
+                .cloned()
+                .map(|tx| be::Transaction::Elements(tx))
+                .collect(),
         }
     }
 }

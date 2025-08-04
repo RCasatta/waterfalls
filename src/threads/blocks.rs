@@ -1,5 +1,5 @@
 use crate::{
-    be::{self, Family},
+    be::Family,
     fetch::Client,
     server::{Error, State},
     store::{BlockMeta, Store},
@@ -42,21 +42,15 @@ pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<
 
         let time = block.time();
 
-        //TODO
-        let block = match block {
-            be::Block::Bitcoin(_block) => todo!(),
-            be::Block::Elements(block) => block,
-        };
-
-        for tx in block.txdata.iter() {
+        for tx in block.transactions().into_iter() {
             txs_count += 1;
             let txid = tx.txid();
-            for (j, output) in tx.output.iter().enumerate() {
-                if output.is_null_data() || output.is_fee() || output.script_pubkey.is_empty() {
+            for (j, output) in tx.outputs().into_iter().enumerate() {
+                if output.skip_indexing() {
                     continue;
                 }
-                let script_hash = db.hash(&output.script_pubkey);
-                log::debug!("{} hash is {script_hash}", &output.script_pubkey.to_hex());
+                let script_hash = db.hash(&output.script_pubkey());
+                log::debug!("{} hash is {script_hash}", &output.script_pubkey().to_hex());
                 let el = history_map.entry(script_hash).or_insert(vec![]);
                 el.push(TxSeen::new(txid, block_height, V::Vout(j as u32)));
 
@@ -66,20 +60,21 @@ pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<
             }
 
             if !tx.is_coinbase() {
-                for (vin, input) in tx.input.iter().enumerate() {
-                    if input.is_pegin() {
+                for (vin, input) in tx.inputs().into_iter().enumerate() {
+                    if input.skip_indexing() {
                         continue;
                     }
-                    match utxo_created.remove(&input.previous_output) {
+                    let previous_output = input.previous_output();
+                    match utxo_created.remove(&previous_output) {
                         Some(script_hash) => {
                             // also the spending tx must be indexed
                             let el = history_map.entry(script_hash).or_insert(vec![]);
                             el.push(TxSeen::new(txid, block_height, V::Vin(vin as u32)));
                         }
                         None => {
-                            log::debug!("removing {}", &input.previous_output);
-                            if !skip_outpoint.contains(&input.previous_output) {
-                                utxo_spent.push((vin as u32, input.previous_output, txid))
+                            log::debug!("removing {}", &previous_output);
+                            if !skip_outpoint.contains(&previous_output) {
+                                utxo_spent.push((vin as u32, previous_output, txid))
                             }
                         }
                     }
