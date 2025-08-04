@@ -1,4 +1,5 @@
 use crate::{
+    be::{self, Family},
     fetch::Client,
     server::{Error, State},
     store::{BlockMeta, Store},
@@ -12,13 +13,13 @@ use std::{
     time::Instant,
 };
 
-pub(crate) async fn blocks_infallible(shared_state: Arc<State>, client: Client) {
-    if let Err(e) = index(shared_state, client).await {
+pub(crate) async fn blocks_infallible(shared_state: Arc<State>, client: Client, family: Family) {
+    if let Err(e) = index(shared_state, client, family).await {
         log::error!("{:?}", e);
     }
 }
 
-pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
+pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<(), Error> {
     let db = &state.store;
     let next_height = state.blocks_hash_ts.lock().await.len() as u32;
 
@@ -37,7 +38,15 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
         }
         let block_hash = client.block_hash_or_wait(block_height).await;
 
-        let block = client.block_or_wait(block_hash).await;
+        let block = client.block_or_wait(block_hash, family).await;
+
+        let time = block.time();
+
+        //TODO
+        let block = match block {
+            be::Block::Bitcoin(_block) => todo!(),
+            be::Block::Elements(block) => block,
+        };
 
         for tx in block.txdata.iter() {
             txs_count += 1;
@@ -78,7 +87,7 @@ pub async fn index(state: Arc<State>, client: Client) -> Result<(), Error> {
             }
         }
 
-        let meta = BlockMeta::new(block_height, block.block_hash(), block.header.time);
+        let meta = BlockMeta::new(block_height, block.block_hash(), time);
         state.set_hash_ts(&meta).await;
         db.update(&meta, utxo_spent, history_map, utxo_created)
             .map_err(|_| Error::Other)?; // TODO

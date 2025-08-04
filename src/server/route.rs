@@ -7,7 +7,7 @@ use crate::{
 };
 use age::x25519::Identity;
 use elements::{
-    encode::{serialize, serialize_hex, Decodable},
+    encode::{serialize, Decodable},
     Address, AddressParams, BlockHash, Transaction, Txid,
 };
 use elements_miniscript::DescriptorPublicKey;
@@ -203,10 +203,10 @@ pub async fn route(
                     let block = client
                         .lock()
                         .await
-                        .block(block_hash) // TODO should ask only header
+                        .block(block_hash, network.into()) // TODO should ask only header
                         .await
                         .map_err(|_| Error::CannotFindBlockHeader)?;
-                    let result = serialize_hex(&block.header);
+                    let result = block.header_hex();
                     any_resp(
                         result.into_bytes(),
                         StatusCode::OK,

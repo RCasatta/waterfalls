@@ -284,7 +284,7 @@ pub async fn inner_main(
     let _h1 = {
         let state = state.clone();
         let client: Client = Client::new(&args);
-        tokio::spawn(async move { blocks_infallible(state, client).await })
+        tokio::spawn(async move { blocks_infallible(state, client, args.network.into()).await })
     };
 
     let _h2 = {
