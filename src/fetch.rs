@@ -374,7 +374,7 @@ mod test {
         assert_eq!(genesis_block.block_hash(), genesis_hash);
         let block = client.block(genesis_hash, network.into()).await.unwrap();
         assert_eq!(block.block_hash(), genesis_hash);
-        // assert_eq!(block.txdata[0].txid(), genesis_txid); // TODO
+        assert_eq!(block.transactions()[0].txid(), genesis_txid);
 
         let genesis_tx = client.tx(genesis_txid).await.unwrap();
         assert_eq!(genesis_tx.txid(), genesis_txid);
