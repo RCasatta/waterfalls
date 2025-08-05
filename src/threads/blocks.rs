@@ -85,7 +85,7 @@ pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<
         let meta = BlockMeta::new(block_height, block.block_hash(), time);
         state.set_hash_ts(&meta).await;
         db.update(&meta, utxo_spent, history_map, utxo_created)
-            .map_err(|_| Error::Other)?; // TODO
+            .map_err(|e| Error::String(format!("error updating db: {e}")))?;
     }
     Ok(())
 }
