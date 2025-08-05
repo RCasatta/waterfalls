@@ -53,7 +53,7 @@ pub struct DescriptorRequest {
 /// Request to the waterfalls endpoint using a list of addresses
 #[derive(Debug)]
 pub struct AddressesRequest {
-    addresses: Vec<elements::Address>,
+    addresses: Vec<be::Address>,
 
     /// Requested page, 0 if not specified
     /// The first returned index is equal to `page * 10000`

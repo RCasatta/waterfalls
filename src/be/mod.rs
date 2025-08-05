@@ -1,7 +1,9 @@
+mod address;
 mod block;
 mod block_header;
 mod transaction;
 
+pub use address::Address;
 pub use block::Block;
 pub use block_header::BlockHeader;
 pub use transaction::{Input, Output, Transaction};
