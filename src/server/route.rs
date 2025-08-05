@@ -197,13 +197,13 @@ pub async fn route(
                 }
                 (Some(""), Some("block"), Some(v), Some("header"), None) => {
                     let block_hash = BlockHash::from_str(v).map_err(|_| Error::InvalidBlockHash)?;
-                    let block = client
+                    let header = client
                         .lock()
                         .await
-                        .block(block_hash, network.into()) // TODO should ask only header
+                        .block_header(block_hash, network.into())
                         .await
                         .map_err(|_| Error::CannotFindBlockHeader)?;
-                    let result = block.header_hex();
+                    let result = header.serialize_hex();
                     any_resp(
                         result.into_bytes(),
                         StatusCode::OK,

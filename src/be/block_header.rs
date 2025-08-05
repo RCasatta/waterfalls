@@ -13,4 +13,11 @@ impl BlockHeader {
             BlockHeader::Elements(header) => header.block_hash(),
         }
     }
+
+    pub(crate) fn serialize_hex(&self) -> String {
+        match self {
+            BlockHeader::Bitcoin(header) => bitcoin::consensus::encode::serialize_hex(header),
+            BlockHeader::Elements(header) => elements::encode::serialize_hex(header),
+        }
+    }
 }

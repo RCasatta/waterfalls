@@ -13,13 +13,6 @@ pub(crate) fn elements_block_hash(hash: bitcoin::BlockHash) -> elements::BlockHa
 }
 
 impl Block {
-    pub fn header_hex(&self) -> String {
-        match self {
-            Block::Bitcoin(block) => bitcoin::consensus::encode::serialize_hex(&block.header),
-            Block::Elements(block) => elements::encode::serialize_hex(&block.header),
-        }
-    }
-
     pub fn header(&self) -> be::BlockHeader {
         match self {
             Block::Bitcoin(block) => be::BlockHeader::Bitcoin(block.header.clone()),
