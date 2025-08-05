@@ -246,8 +246,6 @@ pub async fn inner_main(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     args.is_valid()?;
 
-    // TODO test rest connection to the node
-
     let store = get_store(&args)?;
 
     let key = args.server_key.clone().unwrap_or_else(Identity::generate);
