@@ -49,7 +49,6 @@ impl DerivationCache {
         }
     }
     pub fn add(&mut self, x: DescIndexHash, script_pubkey: ScriptHash) {
-        // TODO this should delete old entries to avoid growing indefinitely
         self.cache.push(x, script_pubkey);
     }
     pub fn get(&mut self, x: DescIndexHash) -> Option<ScriptHash> {
