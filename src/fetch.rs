@@ -131,11 +131,11 @@ impl Client {
                 let block = <bitcoin::Block as bitcoin::consensus::Decodable>::consensus_decode(
                     &mut bytes.as_ref(),
                 )?;
-                Ok(be::Block::Bitcoin(block))
+                Ok(be::Block::Bitcoin(Box::new(block)))
             }
             Family::Elements => {
                 let block = elements::Block::consensus_decode(bytes.as_ref())?;
-                Ok(be::Block::Elements(block))
+                Ok(be::Block::Elements(Box::new(block)))
             }
         }
     }
@@ -178,7 +178,7 @@ impl Client {
                     <bitcoin::block::Header as bitcoin::consensus::Decodable>::consensus_decode(
                         &mut &bytes[..],
                     )?;
-                Ok(be::BlockHeader::Bitcoin(header))
+                Ok(be::BlockHeader::Bitcoin(Box::new(header)))
             }
             Family::Elements => {
                 let bytes = if self.use_esplora {
@@ -189,7 +189,7 @@ impl Client {
                     resp.bytes().await?.to_vec()
                 };
                 let header = elements::BlockHeader::consensus_decode(&bytes[..])?;
-                Ok(be::BlockHeader::Elements(header))
+                Ok(be::BlockHeader::Elements(Box::new(header)))
             }
         }
     }

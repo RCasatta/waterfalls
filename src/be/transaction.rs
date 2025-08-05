@@ -6,13 +6,13 @@ pub enum Transaction {
 }
 
 pub enum Output {
-    Bitcoin(bitcoin::TxOut),
-    Elements(elements::TxOut),
+    Bitcoin(Box<bitcoin::TxOut>),
+    Elements(Box<elements::TxOut>),
 }
 
 pub enum Input {
-    Bitcoin(bitcoin::TxIn),
-    Elements(elements::TxIn),
+    Bitcoin(Box<bitcoin::TxIn>),
+    Elements(Box<elements::TxIn>),
 }
 
 fn elements_txid(txid: bitcoin::Txid) -> elements::Txid {
@@ -41,13 +41,13 @@ impl Transaction {
                 .output
                 .iter()
                 .cloned()
-                .map(be::Output::Bitcoin)
+                .map(|output| be::Output::Bitcoin(Box::new(output)))
                 .collect(),
             Transaction::Elements(tx) => tx
                 .output
                 .iter()
                 .cloned()
-                .map(be::Output::Elements)
+                .map(|output| be::Output::Elements(Box::new(output)))
                 .collect(),
         }
     }
@@ -58,13 +58,13 @@ impl Transaction {
                 .input
                 .iter()
                 .cloned()
-                .map(be::Input::Bitcoin)
+                .map(|input| be::Input::Bitcoin(Box::new(input)))
                 .collect(),
             Transaction::Elements(tx) => tx
                 .input
                 .iter()
                 .cloned()
-                .map(be::Input::Elements)
+                .map(|input| be::Input::Elements(Box::new(input)))
                 .collect(),
         }
     }

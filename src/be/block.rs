@@ -4,8 +4,8 @@ use crate::be;
 
 #[derive(Debug, Clone)]
 pub enum Block {
-    Bitcoin(bitcoin::Block),
-    Elements(elements::Block),
+    Bitcoin(Box<bitcoin::Block>),
+    Elements(Box<elements::Block>),
 }
 
 pub(crate) fn elements_block_hash(hash: bitcoin::BlockHash) -> elements::BlockHash {
@@ -15,8 +15,8 @@ pub(crate) fn elements_block_hash(hash: bitcoin::BlockHash) -> elements::BlockHa
 impl Block {
     pub fn header(&self) -> be::BlockHeader {
         match self {
-            Block::Bitcoin(block) => be::BlockHeader::Bitcoin(block.header),
-            Block::Elements(block) => be::BlockHeader::Elements(block.header.clone()),
+            Block::Bitcoin(block) => be::BlockHeader::Bitcoin(Box::new(block.header)),
+            Block::Elements(block) => be::BlockHeader::Elements(Box::new(block.header.clone())),
         }
     }
 

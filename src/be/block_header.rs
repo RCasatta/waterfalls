@@ -2,8 +2,8 @@ use crate::be::block::elements_block_hash;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockHeader {
-    Bitcoin(bitcoin::block::Header),
-    Elements(elements::BlockHeader),
+    Bitcoin(Box<bitcoin::block::Header>),
+    Elements(Box<elements::BlockHeader>),
 }
 
 impl BlockHeader {
@@ -16,8 +16,10 @@ impl BlockHeader {
 
     pub(crate) fn serialize_hex(&self) -> String {
         match self {
-            BlockHeader::Bitcoin(header) => bitcoin::consensus::encode::serialize_hex(header),
-            BlockHeader::Elements(header) => elements::encode::serialize_hex(header),
+            BlockHeader::Bitcoin(header) => {
+                bitcoin::consensus::encode::serialize_hex(header.as_ref())
+            }
+            BlockHeader::Elements(header) => elements::encode::serialize_hex(header.as_ref()),
         }
     }
 }
