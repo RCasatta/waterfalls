@@ -12,7 +12,6 @@ use crate::threads::blocks::blocks_infallible;
 use crate::threads::mempool::mempool_sync_infallible;
 use age::x25519::Identity;
 use bitcoin::{NetworkKind, PrivateKey};
-use elements::AddressParams;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
@@ -175,16 +174,6 @@ impl Network {
             Network::BitcoinTestnet => 3104,
             Network::BitcoinRegtest => 3105,
             Network::BitcoinSignet => 3106,
-        }
-    }
-
-    fn address_params(&self) -> &'static AddressParams {
-        match self {
-            Network::Liquid => &AddressParams::LIQUID,
-            Network::LiquidTestnet => &AddressParams::LIQUID_TESTNET,
-            Network::ElementsRegtest => &AddressParams::ELEMENTS,
-
-            _ => todo!(),
         }
     }
 }

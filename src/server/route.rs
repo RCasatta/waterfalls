@@ -7,7 +7,7 @@ use crate::{
     WaterfallResponseV3, V,
 };
 use age::x25519::Identity;
-use elements::{encode::Decodable, Address, BlockHash, Transaction, Txid};
+use elements::{encode::Decodable, BlockHash, Transaction, Txid};
 use elements_miniscript::DescriptorPublicKey;
 use http_body_util::{BodyExt, Full};
 use hyper::{
@@ -176,10 +176,9 @@ pub async fn route(
                 }
                 //address/ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh/txs
                 (Some(""), Some("address"), Some(addr), Some("txs"), None) => {
-                    let addr = Address::from_str(addr)
-                        .map_err(|e| Error::InvalidAddress(e.to_string()))?;
+                    let addr = be::Address::from_str(addr, network)?;
 
-                    handle_single_address(state, &addr, network).await
+                    handle_single_address(state, &addr).await
                 }
 
                 (Some(""), Some("tx"), Some(v), Some("raw"), None) => {
@@ -337,8 +336,7 @@ fn any_resp(
 
 async fn handle_single_address(
     state: &Arc<State>,
-    address: &Address,
-    network: Network,
+    address: &be::Address,
 ) -> Result<Response<Full<Bytes>>, Error> {
     #[derive(Serialize)]
     struct EsploraTx {
@@ -350,11 +348,6 @@ async fn handle_single_address(
     struct Status {
         block_height: Option<i32>,
         block_hash: Option<BlockHash>,
-    }
-
-    // Check network compatibility
-    if address.params != network.address_params() {
-        return Err(Error::WrongNetwork);
     }
 
     let db = &state.store;
