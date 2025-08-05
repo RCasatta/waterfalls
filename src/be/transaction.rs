@@ -68,6 +68,13 @@ impl Transaction {
                 .collect(),
         }
     }
+
+    pub(crate) fn serialize(&self) -> Vec<u8> {
+        match self {
+            Transaction::Bitcoin(tx) => bitcoin::consensus::serialize(tx),
+            Transaction::Elements(tx) => elements::encode::serialize(tx),
+        }
+    }
 }
 
 impl Output {
