@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
+use bitcoin::hex::FromHex;
 use elements::{
     encode::{serialize_hex, Decodable},
     BlockHash, Transaction, Txid,
@@ -135,6 +136,60 @@ impl Client {
             Family::Elements => {
                 let block = elements::Block::consensus_decode(bytes.as_ref())?;
                 Ok(be::Block::Elements(block))
+            }
+        }
+    }
+
+    /// GET /rest/headers/<BLOCK-HASH>.<bin|hex|json>
+    /// GET /block/:hash/header
+    pub async fn block_header(
+        &self,
+        hash: BlockHash,
+        family: Family,
+    ) -> Result<be::BlockHeader, Box<dyn std::error::Error + Send + Sync>> {
+        let base = &self.base_url;
+        let url = if self.use_esplora {
+            format!("{base}/block/{hash}/header")
+        } else {
+            match family {
+                // see https://github.com/bitcoin/bitcoin/blob/master/doc/REST-interface.md#blockheaders
+                Family::Bitcoin => format!("{base}/rest/headers/{hash}.bin",),
+                Family::Elements => format!("{base}/rest/headers/1/{hash}.bin",), // pre bitcoin 24.0
+            }
+        };
+        let resp = self.client.get(&url).send().await?;
+        let status = resp.status();
+        if status == 404 {
+            return Err(format!("{url} return not found.").into());
+        } else if status != 200 {
+            return Err(format!("{url} return unexpected status {status}").into());
+        }
+
+        match family {
+            Family::Bitcoin => {
+                let bytes = if self.use_esplora {
+                    let text = resp.text().await?;
+                    Vec::<u8>::from_hex(&text)
+                        .map_err(|_| anyhow!("failing converting {text} to bytes"))?
+                } else {
+                    resp.bytes().await?.to_vec()
+                };
+                let header =
+                    <bitcoin::block::Header as bitcoin::consensus::Decodable>::consensus_decode(
+                        &mut &bytes[..],
+                    )?;
+                Ok(be::BlockHeader::Bitcoin(header))
+            }
+            Family::Elements => {
+                let bytes = if self.use_esplora {
+                    let text = resp.text().await?;
+                    Vec::<u8>::from_hex(&text)
+                        .map_err(|_| anyhow!("failing converting {text} to bytes"))?
+                } else {
+                    resp.bytes().await?.to_vec()
+                };
+                let header = elements::BlockHeader::consensus_decode(&bytes[..])?;
+                Ok(be::BlockHeader::Elements(header))
             }
         }
     }
@@ -338,7 +393,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_client_local_elements() {
+    async fn test_client_local_regtest_elements() {
         let elementsd = test_env::launch_elements(
             std::env::var("ELEMENTSD_EXEC").expect("ELEMENTSD_EXEC must be set"),
         );
@@ -455,5 +510,12 @@ mod test {
             let another_tx = client.tx(another_txid, network.into()).await.unwrap();
             assert_eq!(another_tx.txid(), another_txid);
         }
+
+        let header = client
+            .block_header(genesis_hash, network.into())
+            .await
+            .unwrap();
+        assert_eq!(block.header(), header);
+        assert_eq!(header.block_hash(), genesis_hash, "network:{network}");
     }
 }

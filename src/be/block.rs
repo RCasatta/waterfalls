@@ -8,6 +8,10 @@ pub enum Block {
     Elements(elements::Block),
 }
 
+pub(crate) fn elements_block_hash(hash: bitcoin::BlockHash) -> elements::BlockHash {
+    elements::BlockHash::from_slice(hash.as_ref()).expect("every 32 bytes is a valid block hash")
+}
+
 impl Block {
     pub fn header_hex(&self) -> String {
         match self {
@@ -16,13 +20,16 @@ impl Block {
         }
     }
 
+    pub fn header(&self) -> be::BlockHeader {
+        match self {
+            Block::Bitcoin(block) => be::BlockHeader::Bitcoin(block.header.clone()),
+            Block::Elements(block) => be::BlockHeader::Elements(block.header.clone()),
+        }
+    }
+
     pub(crate) fn block_hash(&self) -> elements::BlockHash {
         match self {
-            Block::Bitcoin(block) => {
-                let hash = block.block_hash();
-                elements::BlockHash::from_slice(hash.as_ref())
-                    .expect("every 32 bytes is a valid block hash")
-            }
+            Block::Bitcoin(block) => elements_block_hash(block.block_hash()),
             Block::Elements(block) => block.block_hash(),
         }
     }
