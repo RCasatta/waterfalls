@@ -189,7 +189,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     assert_eq!(result.count_non_empty(), 1);
 
     // Test address_txs
-    let address_txs = client.address_txs(&addr).await.unwrap();
+    let address_txs = client.address_txs(&addr.to_unconfidential()).await.unwrap();
     assert!(address_txs.contains(&initial_txid.to_string()));
 
     // Create two transactions in the same block the second one is spending an output of the first one
@@ -202,7 +202,10 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     let new_address = test_env.get_new_address(None);
     let txid2 = send_to_address(&other_wallet, &new_address, 0.0096);
     test_env.node_generate(1).await;
-    let address_txs = client.address_txs(&address_spent_same_block).await.unwrap();
+    let address_txs = client
+        .address_txs(&address_spent_same_block.to_unconfidential())
+        .await
+        .unwrap();
     assert!(address_txs.contains(&txid1.to_string()));
     assert!(address_txs.contains(&txid2.to_string()));
 
