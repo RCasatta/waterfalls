@@ -179,18 +179,37 @@ impl Client {
     pub async fn tx(
         &self,
         txid: Txid,
-    ) -> Result<Transaction, Box<dyn std::error::Error + Send + Sync>> {
+        family: Family,
+    ) -> Result<be::Transaction, Box<dyn std::error::Error + Send + Sync>> {
         let base = &self.base_url;
         let url = if self.use_esplora {
             format!("{base}/tx/{txid}/raw")
         } else {
             format!("{base}/rest/tx/{txid}.bin",)
         };
+        let resp = self.client.get(&url).send().await?;
 
-        let bytes = self.client.get(&url).send().await?.bytes().await?;
+        let status = resp.status();
+        if status == 404 {
+            return Err(format!("Transaction {txid} not found").into());
+        } else if status != 200 {
+            return Err(format!("Request failed with status {status}").into());
+        }
 
-        let tx = Transaction::consensus_decode(bytes.as_ref())?;
-        Ok(tx)
+        let bytes = resp.bytes().await?;
+
+        match family {
+            Family::Bitcoin => {
+                let tx = <bitcoin::Transaction as bitcoin::consensus::Decodable>::consensus_decode(
+                    &mut bytes.as_ref(),
+                )?;
+                Ok(be::Transaction::Bitcoin(tx))
+            }
+            Family::Elements => {
+                let tx = elements::Transaction::consensus_decode(bytes.as_ref())?;
+                Ok(be::Transaction::Elements(tx))
+            }
+        }
     }
 
     /// POST /tx
@@ -278,9 +297,9 @@ impl Client {
         }
     }
 
-    pub(crate) async fn tx_or_wait(&self, txid: Txid) -> Transaction {
+    pub(crate) async fn tx_or_wait(&self, txid: Txid, family: Family) -> be::Transaction {
         loop {
-            match self.tx(txid).await {
+            match self.tx(txid, family).await {
                 Ok(t) => return t,
                 Err(e) => {
                     log::warn!("Failing for tx({txid}) err {e:?}");
@@ -345,6 +364,20 @@ mod test {
         }
     }
 
+    #[tokio::test]
+    async fn test_client_local_bitcoin() {
+        let _ = env_logger::try_init();
+        let bitcoind = test_env::launch_bitcoin(
+            std::env::var("BITCOIND_EXEC").expect("BITCOIND_EXEC must be set"),
+        );
+        let mut args = Arguments::default();
+        args.use_esplora = false;
+        args.network = Network::BitcoinRegtest;
+        args.node_url = Some(bitcoind.rpc_url());
+        let client = Client::new(&args);
+        test(client, args.network).await;
+    }
+
     async fn test(client: Client, network: Network) {
         let (genesis_hash, genesis_txid) = match network {
             Network::Liquid => (
@@ -361,7 +394,10 @@ mod test {
             ),
             Network::Bitcoin => todo!(),
             Network::BitcoinTestnet => todo!(),
-            Network::BitcoinRegtest => todo!(),
+            Network::BitcoinRegtest => (
+                "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206",
+                "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",
+            ),
             Network::BitcoinSignet => todo!(),
         };
 
@@ -371,13 +407,25 @@ mod test {
         let fetched = client.block_hash(0).await.unwrap().unwrap();
         assert_eq!(genesis_hash, fetched, "network:{network}");
         let genesis_block = client.block(genesis_hash, network.into()).await.unwrap();
+        log::debug!("genesis_block: {genesis_block:?}");
         assert_eq!(genesis_block.block_hash(), genesis_hash);
         let block = client.block(genesis_hash, network.into()).await.unwrap();
         assert_eq!(block.block_hash(), genesis_hash);
         assert_eq!(block.transactions()[0].txid(), genesis_txid);
 
-        let genesis_tx = client.tx(genesis_txid).await.unwrap();
-        assert_eq!(genesis_tx.txid(), genesis_txid);
+        // Genesis transaction cannot be fetched via REST API in Bitcoin networks
+        // It's only available embedded within the genesis block
+        match network.into() {
+            crate::be::Family::Elements => {
+                let genesis_tx = client.tx(genesis_txid, network.into()).await.unwrap();
+                assert_eq!(genesis_tx.txid(), genesis_txid);
+            }
+            crate::be::Family::Bitcoin => {
+                // Skip genesis transaction fetch for Bitcoin networks
+                // The genesis transaction is special and not indexed in Bitcoin Core
+                log::debug!("Skipping genesis transaction fetch for Bitcoin network");
+            }
+        }
         client.mempool().await.unwrap();
     }
 }

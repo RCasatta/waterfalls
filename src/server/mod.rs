@@ -290,7 +290,9 @@ pub async fn inner_main(
     let _h2 = {
         let state = state.clone();
         let client = Client::new(&args);
-        tokio::spawn(async move { mempool_sync_infallible(state, client).await })
+        tokio::spawn(
+            async move { mempool_sync_infallible(state, client, args.network.into()).await },
+        )
     };
 
     let addr = args.listen.unwrap_or(SocketAddr::from((

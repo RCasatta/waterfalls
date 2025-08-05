@@ -3,9 +3,10 @@ use std::{
     iter,
 };
 
-use elements::{OutPoint, Transaction, Txid};
+use elements::{OutPoint, Txid};
 
 use crate::{
+    be,
     store::{AnyStore, Store},
     ScriptHash, TxSeen, V,
 };
@@ -48,17 +49,18 @@ impl Mempool {
             .retain(|k, _| !txids.contains(&k.txid));
     }
 
-    pub fn add(&mut self, db: &AnyStore, txs: &[Transaction]) {
-        let txs_map: HashMap<Txid, &Transaction> = txs.iter().map(|tx| (tx.txid(), tx)).collect();
+    pub fn add(&mut self, db: &AnyStore, txs: &[be::Transaction]) {
+        let txs_map: HashMap<Txid, &be::Transaction> =
+            txs.iter().map(|tx| (tx.txid(), tx)).collect();
 
         // update the unconfirmed utxo set
         let outputs_created = txs_map
             .iter()
-            .flat_map(|(txid, tx)| tx.output.iter().enumerate().zip(iter::repeat(txid)))
+            .flat_map(|(txid, tx)| tx.outputs().into_iter().enumerate().zip(iter::repeat(txid)))
             .map(|((vout, txout), txid)| {
                 (
                     OutPoint::new(*txid, vout as u32),
-                    db.hash(&txout.script_pubkey),
+                    db.hash(&txout.script_pubkey()),
                 )
             });
         self.outpoints_created.extend(outputs_created);
@@ -71,18 +73,18 @@ impl Mempool {
 
         let prevouts: Vec<OutPoint> = txs
             .iter()
-            .flat_map(|e| e.input.iter())
-            .map(|i| i.previous_output)
+            .flat_map(|e| e.inputs().into_iter())
+            .map(|i| i.previous_output())
             .collect();
         let spending_script_hashes = db.get_utxos(&prevouts).unwrap();
 
         let mut prevouts_index = 0usize;
         for (txid, tx) in txs_map {
-            for (vin, input) in tx.input.iter().enumerate() {
+            for (vin, input) in tx.inputs().iter().enumerate() {
                 let e = match spending_script_hashes[prevouts_index] {
                     Some(e) => e,
                     None => {
-                        match self.outpoints_created.get(&input.previous_output) {
+                        match self.outpoints_created.get(&input.previous_output()) {
                             Some(e) => *e,
                             None => {
                                 // in optimal condition should never happen, however, for example at startup we may have incomplete mempool data
@@ -102,8 +104,8 @@ impl Mempool {
                 prevouts_index += 1;
             }
 
-            for (vout, output) in tx.output.iter().enumerate() {
-                let e = db.hash(&output.script_pubkey);
+            for (vout, output) in tx.outputs().iter().enumerate() {
+                let e = db.hash(&output.script_pubkey());
                 txid_hashes.entry(txid).or_default().insert(e);
                 // Positive position for outputs: vout + 1
                 txid_script_positions

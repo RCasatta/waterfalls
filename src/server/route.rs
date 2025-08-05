@@ -6,10 +6,7 @@ use crate::{
     WaterfallResponseV3, V,
 };
 use age::x25519::Identity;
-use elements::{
-    encode::{serialize, Decodable},
-    Address, AddressParams, BlockHash, Transaction, Txid,
-};
+use elements::{encode::Decodable, Address, AddressParams, BlockHash, Transaction, Txid};
 use elements_miniscript::DescriptorPublicKey;
 use http_body_util::{BodyExt, Full};
 use hyper::{
@@ -180,7 +177,7 @@ pub async fn route(
 
                 (Some(""), Some("tx"), Some(v), Some("raw"), None) => {
                     let txid = Txid::from_str(v).map_err(|_| Error::InvalidTxid)?;
-                    let tx = match client.lock().await.tx(txid).await {
+                    let tx = match client.lock().await.tx(txid, network.into()).await {
                         Ok(tx) => tx,
                         Err(e) => {
                             log::warn!(
@@ -189,7 +186,7 @@ pub async fn route(
                             return Err(Error::CannotFindTx);
                         }
                     };
-                    let result = serialize(&tx);
+                    let result = tx.serialize();
                     any_resp(
                         result,
                         StatusCode::OK,

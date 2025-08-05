@@ -2,6 +2,7 @@ use bitcoin::hashes::Hash;
 
 use crate::be;
 
+#[derive(Debug, Clone)]
 pub enum Block {
     Bitcoin(bitcoin::Block),
     Elements(elements::Block),

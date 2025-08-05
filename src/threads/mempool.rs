@@ -1,14 +1,18 @@
-use crate::{fetch::Client, server::Error, server::State};
+use crate::{
+    be::Family,
+    fetch::Client,
+    server::{Error, State},
+};
 use std::{collections::HashSet, sync::Arc};
 use tokio::time::sleep;
 
-pub(crate) async fn mempool_sync_infallible(state: Arc<State>, client: Client) {
-    if let Err(e) = mempool_sync(state, client).await {
+pub(crate) async fn mempool_sync_infallible(state: Arc<State>, client: Client, family: Family) {
+    if let Err(e) = mempool_sync(state, client, family).await {
         log::error!("{:?}", e);
     }
 }
 
-async fn mempool_sync(state: Arc<State>, client: Client) -> Result<(), Error> {
+async fn mempool_sync(state: Arc<State>, client: Client, family: Family) -> Result<(), Error> {
     let db = &state.store;
     let mut mempool_txids = HashSet::new();
     loop {
@@ -30,7 +34,7 @@ async fn mempool_sync(state: Arc<State>, client: Client) -> Result<(), Error> {
 
                 let mut txs = vec![];
                 for new_txid in new {
-                    let tx = client.tx_or_wait(*new_txid).await;
+                    let tx = client.tx_or_wait(*new_txid, family).await;
                     txs.push(tx)
                 }
                 {
