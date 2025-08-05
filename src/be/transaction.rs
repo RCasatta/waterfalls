@@ -94,7 +94,7 @@ impl Output {
 impl Input {
     pub(crate) fn skip_indexing(&self) -> bool {
         match self {
-            Input::Bitcoin(_) => todo!(),
+            Input::Bitcoin(_) => false,
             Input::Elements(input) => input.is_pegin(),
         }
     }
