@@ -164,7 +164,9 @@ impl WaterfallResponseV3 {
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Default)]
 pub enum V {
+    #[default]
     Undefined,
     Vin(u32),
     Vout(u32),
@@ -251,11 +253,6 @@ impl V {
     }
 }
 
-impl Default for V {
-    fn default() -> Self {
-        V::Undefined
-    }
-}
 
 impl From<i32> for V {
     fn from(v: i32) -> Self {

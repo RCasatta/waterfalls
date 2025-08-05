@@ -15,7 +15,7 @@ pub(crate) fn elements_block_hash(hash: bitcoin::BlockHash) -> elements::BlockHa
 impl Block {
     pub fn header(&self) -> be::BlockHeader {
         match self {
-            Block::Bitcoin(block) => be::BlockHeader::Bitcoin(block.header.clone()),
+            Block::Bitcoin(block) => be::BlockHeader::Bitcoin(block.header),
             Block::Elements(block) => be::BlockHeader::Elements(block.header.clone()),
         }
     }
@@ -40,13 +40,13 @@ impl Block {
                 .txdata
                 .iter()
                 .cloned()
-                .map(|tx| be::Transaction::Bitcoin(tx))
+                .map(be::Transaction::Bitcoin)
                 .collect(),
             Block::Elements(block) => block
                 .txdata
                 .iter()
                 .cloned()
-                .map(|tx| be::Transaction::Elements(tx))
+                .map(be::Transaction::Elements)
                 .collect(),
         }
     }

@@ -41,13 +41,13 @@ impl Transaction {
                 .output
                 .iter()
                 .cloned()
-                .map(|output| be::Output::Bitcoin(output))
+                .map(be::Output::Bitcoin)
                 .collect(),
             Transaction::Elements(tx) => tx
                 .output
                 .iter()
                 .cloned()
-                .map(|output| be::Output::Elements(output))
+                .map(be::Output::Elements)
                 .collect(),
         }
     }
@@ -58,13 +58,13 @@ impl Transaction {
                 .input
                 .iter()
                 .cloned()
-                .map(|input| be::Input::Bitcoin(input))
+                .map(be::Input::Bitcoin)
                 .collect(),
             Transaction::Elements(tx) => tx
                 .input
                 .iter()
                 .cloned()
-                .map(|input| be::Input::Elements(input))
+                .map(be::Input::Elements)
                 .collect(),
         }
     }
@@ -112,7 +112,7 @@ impl Input {
                 elements_txid(input.previous_output.txid),
                 input.previous_output.vout,
             ),
-            Input::Elements(input) => input.previous_output.clone(),
+            Input::Elements(input) => input.previous_output,
         }
     }
 }
