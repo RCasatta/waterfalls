@@ -354,14 +354,16 @@ mod test {
     #[tokio::test]
     #[ignore = "connects to local node instance"]
     async fn test_client_local() {
-        let mut args = Arguments::default();
-        args.use_esplora = false;
-
         for network in [Network::Liquid, Network::LiquidTestnet] {
-            args.network = network;
-            let client = Client::new(&args);
+            let client = init_client(network);
             test(client, network).await;
         }
+    }
+    fn init_client(network: Network) -> Client {
+        let mut args = Arguments::default();
+        args.use_esplora = false;
+        args.network = network;
+        Client::new(&args)
     }
 
     #[tokio::test]
