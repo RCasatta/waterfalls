@@ -45,10 +45,7 @@ impl Client {
                 .unwrap_or(format!("{BS}/liquidtestnet/api")),
             Network::ElementsRegtest => args.esplora_url.clone().unwrap_or(format!("{LOCAL}:3000")),
 
-            Network::Bitcoin => args
-                .esplora_url
-                .clone()
-                .unwrap_or(format!("{BS}/bitcoin/api")),
+            Network::Bitcoin => args.esplora_url.clone().unwrap_or(format!("{BS}/api")),
             Network::BitcoinTestnet => args
                 .esplora_url
                 .clone()
@@ -329,11 +326,13 @@ mod test {
     #[tokio::test]
     #[ignore = "connects to prod server"]
     async fn test_client_esplora() {
+        let _ = env_logger::try_init();
         let mut args = Arguments::default();
         args.use_esplora = true;
-        for network in [Network::Liquid, Network::LiquidTestnet] {
+        for network in [Network::Bitcoin, Network::Liquid, Network::LiquidTestnet] {
             args.network = network;
             let client = Client::new(&args);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             test(client, network).await;
         }
     }
