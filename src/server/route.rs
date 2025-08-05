@@ -566,10 +566,7 @@ async fn handle_waterfalls_req(
     )
 }
 
-fn filter_utxo_only(
-    result: &mut Vec<Vec<TxSeen>>,
-    db: &crate::store::AnyStore,
-) -> Result<(), Error> {
+fn filter_utxo_only(result: &mut [Vec<TxSeen>], db: &crate::store::AnyStore) -> Result<(), Error> {
     let outpoints = result
         .iter()
         .flat_map(|e| e.iter().filter_map(|f| f.outpoint()))
