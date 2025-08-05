@@ -353,12 +353,25 @@ mod test {
 
     #[tokio::test]
     #[ignore = "connects to local node instance"]
-    async fn test_client_local() {
-        for network in [Network::Liquid, Network::LiquidTestnet] {
-            let client = init_client(network);
-            test(client, network).await;
-        }
+    async fn test_client_local_liquid() {
+        let client = init_client(Network::Liquid);
+        test(client, Network::Liquid).await;
     }
+
+    #[tokio::test]
+    #[ignore = "connects to local node instance"]
+    async fn test_client_local_liquid_testnet() {
+        let client = init_client(Network::LiquidTestnet);
+        test(client, Network::LiquidTestnet).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "connects to local node instance"]
+    async fn test_client_local_bitcoin() {
+        let client = init_client(Network::Bitcoin);
+        test(client, Network::Bitcoin).await;
+    }
+
     fn init_client(network: Network) -> Client {
         let mut args = Arguments::default();
         args.use_esplora = false;
@@ -367,7 +380,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_client_local_bitcoin() {
+    async fn test_client_local_regtest_bitcoin() {
         let _ = env_logger::try_init();
         let bitcoind = test_env::launch_bitcoin(
             std::env::var("BITCOIND_EXEC").expect("BITCOIND_EXEC must be set"),
@@ -381,24 +394,32 @@ mod test {
     }
 
     async fn test(client: Client, network: Network) {
-        let (genesis_hash, genesis_txid) = match network {
+        let (genesis_hash, genesis_txid, another_txid) = match network {
             Network::Liquid => (
                 "1466275836220db2944ca059a3a10ef6fd2ea684b0688d2c379296888a206003",
                 "45de9fd4cb0f2a63b3afc68d26403f0d3c773d6cf2f42508bd8e7d7704f267d7",
+                None,
             ),
             Network::LiquidTestnet => (
                 "a771da8e52ee6ad581ed1e9a99825e5b3b7992225534eaa2ae23244fe26ab1c1",
                 "0471d2f856b3fdbc4397af272bee1660b77aaf9a4aeb86fdd96110ce00f2b158",
+                None,
             ),
             Network::ElementsRegtest => (
                 "c7af03b0774a3498a574902bd41045c1633fd40b69ca163345c5d9c78bfd6af7",
                 "81c9570df1135a6bb7fb0f77a273561fddfd87bc62e7f265e94ffb01474ae578",
+                None,
             ),
-            Network::Bitcoin => todo!(),
+            Network::Bitcoin => (
+                "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f",
+                "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",
+                Some("0e3e2357e806b6cdb1f70b54c3a3a17b6714ee1f0e68bebb44a74b1efd512098"),
+            ),
             Network::BitcoinTestnet => todo!(),
             Network::BitcoinRegtest => (
                 "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206",
                 "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",
+                None,
             ),
             Network::BitcoinSignet => todo!(),
         };
@@ -429,5 +450,11 @@ mod test {
             }
         }
         client.mempool().await.unwrap();
+
+        if let Some(another_txid) = another_txid {
+            let another_txid = Txid::from_str(another_txid).unwrap();
+            let another_tx = client.tx(another_txid, network.into()).await.unwrap();
+            assert_eq!(another_tx.txid(), another_txid);
+        }
     }
 }
