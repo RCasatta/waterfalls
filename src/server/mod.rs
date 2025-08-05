@@ -154,8 +154,7 @@ impl Network {
         }
     }
 
-    // TODO rename to default_node_listen_port
-    pub fn default_elements_listen_port(&self) -> u16 {
+    pub fn default_node_listen_port(&self) -> u16 {
         match self {
             Network::Liquid => 7041,
             Network::LiquidTestnet => 7039,

@@ -61,7 +61,7 @@ impl Client {
             esplora_url.clone()
         } else {
             let node_url = args.node_url.clone();
-            let port = args.network.default_elements_listen_port();
+            let port = args.network.default_node_listen_port();
             node_url.unwrap_or(format!("{LOCAL}:{port}"))
         };
         log::info!("connecting to {base_url}");
