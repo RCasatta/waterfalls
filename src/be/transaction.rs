@@ -73,7 +73,9 @@ impl Transaction {
 impl Output {
     pub(crate) fn skip_indexing(&self) -> bool {
         match self {
-            Output::Bitcoin(_) => todo!(),
+            Output::Bitcoin(output) => {
+                output.script_pubkey.is_empty() || output.script_pubkey.is_op_return()
+            }
             Output::Elements(output) => {
                 output.is_null_data() || output.is_fee() || output.script_pubkey.is_empty()
             }
