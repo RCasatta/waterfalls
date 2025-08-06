@@ -124,7 +124,20 @@ impl Client {
         } else {
             format!("{base}/rest/block/{hash}.bin",)
         };
-        let bytes = self.client.get(&url).send().await?.bytes().await?;
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("failing for {url}"))?;
+        let status = resp.status();
+        if status == 404 {
+            return Err(format!("{url} return not found.").into());
+        } else if status != 200 {
+            return Err(format!("{url} return unexpected status {status}").into());
+        }
+
+        let bytes = resp.bytes().await?;
 
         match family {
             Family::Bitcoin => {
@@ -320,7 +333,7 @@ impl Client {
             match self.block(block_hash, family).await {
                 Ok(b) => return b,
                 Err(e) => {
-                    log::warn!("Failing for block({block_hash}) err {e:?}");
+                    log::warn!("Failing for block({block_hash}) err {e:?} family:{family:?}");
                     sleep(std::time::Duration::from_secs(1)).await
                 }
             }

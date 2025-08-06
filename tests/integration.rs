@@ -7,6 +7,7 @@
 use std::time::{Duration, Instant};
 
 use tokio::time::sleep;
+use waterfalls::Family;
 
 #[cfg(feature = "test_env")]
 #[tokio::test]
@@ -25,14 +26,14 @@ async fn integration_db() {
     let tempdir = tempfile::TempDir::new().unwrap();
     let path = tempdir.path().to_path_buf();
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
-    let test_env = waterfalls::test_env::launch(exe, Some(path)).await;
+    let test_env = waterfalls::test_env::launch(exe, Some(path), Family::Elements).await;
     do_test(test_env).await;
 }
 
 #[cfg(all(feature = "test_env", feature = "db"))]
 async fn launch_memory() -> waterfalls::test_env::TestEnv<'static> {
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
-    waterfalls::test_env::launch(exe, None).await
+    waterfalls::test_env::launch(exe, None, Family::Elements).await
 }
 
 #[cfg(all(feature = "test_env", not(feature = "db")))]
@@ -200,7 +201,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     let address_spent_same_block = get_new_address(&other_wallet);
     let txid1 = send_to_address(&other_wallet, &address_spent_same_block, 0.0098);
     let new_address = test_env.get_new_address(None);
-    let txid2 = send_to_address(&other_wallet, &new_address, 0.0096);
+    let txid2 = send_to_address(&other_wallet, new_address.elements().unwrap(), 0.0096);
     test_env.node_generate(1).await;
     let address_txs = client
         .address_txs(&address_spent_same_block.to_unconfidential())
@@ -258,6 +259,8 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
 #[cfg(feature = "test_env")]
 #[tokio::test]
 async fn test_no_rest() {
+    use waterfalls::Family;
+
     let _ = env_logger::try_init();
 
     // CODE duplicated from inner_launch, with rest=1 commented
@@ -276,7 +279,8 @@ async fn test_no_rest() {
     conf.network = "liquidregtest";
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
     let elementsd = bitcoind::BitcoinD::with_conf(exe, &conf).unwrap();
-    let _test_env = waterfalls::test_env::launch_with_node(&elementsd, None).await;
+    let _test_env =
+        waterfalls::test_env::launch_with_node(&elementsd, None, Family::Elements).await;
 }
 
 #[ignore = "Test to examine the log manually"]
@@ -302,7 +306,7 @@ async fn test_no_txindex() {
     conf.network = "liquidregtest";
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
     let elementsd = bitcoind::BitcoinD::with_conf(exe, &conf).unwrap();
-    let test_env = waterfalls::test_env::launch_with_node(&elementsd, None).await;
+    let test_env = waterfalls::test_env::launch_with_node(&elementsd, None, Family::Elements).await;
     let txid = elements::Txid::from_str(
         "0000000000000000000000000000000000000000000000000000000000000000",
     )
@@ -349,7 +353,7 @@ async fn test_lwk_wollet() {
     let node_address = test_env.get_new_address(None);
     let mut pset = wollet
         .tx_builder()
-        .add_lbtc_recipient(&node_address, sent_amount)
+        .add_lbtc_recipient(node_address.elements().unwrap(), sent_amount)
         .unwrap()
         .finish()
         .unwrap();

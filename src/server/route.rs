@@ -294,6 +294,9 @@ fn parse_query(
                 .split(',')
                 .map(|e| be::Address::from_str(e, network))
                 .collect::<Result<Vec<_>, _>>()?;
+            for addr in addresses.iter() {
+                addr.ensure_not_blinded()?;
+            }
             if addresses.len() > max_addresses {
                 return Err(Error::TooManyAddresses);
             }

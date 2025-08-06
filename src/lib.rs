@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::cbor::{cbor_block_hash, cbor_opt_block_hash, cbor_txid, cbor_txids};
+pub use be::Family;
 use elements::{BlockHash, OutPoint, Txid};
 use lazy_static::lazy_static;
 use minicbor::{Decode, Encode};
@@ -163,8 +164,7 @@ impl WaterfallResponseV3 {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-#[derive(Default)]
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub enum V {
     #[default]
     Undefined,
@@ -252,7 +252,6 @@ impl V {
         }
     }
 }
-
 
 impl From<i32> for V {
     fn from(v: i32) -> Self {

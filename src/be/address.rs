@@ -30,6 +30,26 @@ impl Address {
             Address::Elements(addr) => addr.script_pubkey().clone(),
         }
     }
+
+    pub fn elements(&self) -> Option<&elements::Address> {
+        match self {
+            Address::Bitcoin(_) => None,
+            Address::Elements(addr) => Some(addr),
+        }
+    }
+
+    pub fn ensure_not_blinded(&self) -> Result<(), Error> {
+        match self {
+            Address::Bitcoin(_) => Ok(()),
+            Address::Elements(addr) => {
+                if addr.is_blinded() {
+                    Err(Error::AddressCannotBeBlinded)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
 }
 
 impl std::fmt::Display for Address {
@@ -53,9 +73,6 @@ fn liquid_address(s: &str, params: &'static AddressParams) -> Result<Address, Er
     let addr = elements::Address::from_str(s).map_err(|e| Error::String(format!("{e:?}")))?;
     if addr.params != params {
         return Err(Error::WrongNetwork);
-    }
-    if addr.is_blinded() {
-        return Err(Error::AddressCannotBeBlinded);
     }
     Ok(Address::Elements(addr))
 }
@@ -255,8 +272,11 @@ mod tests {
     fn test_blinded_address_error() {
         // Blinded liquid address should fail
         let blinded_addr = "lq1qqgyxa469eaugae2sz3q8qzaqy0v57ecuekzyngfac5nw4z87yqskc5tp2wtueqq6am0x062zewkrl9lr0cqwvw0j9633xqe2e";
-        let result = Address::from_str(blinded_addr, Network::Liquid);
-        assert_eq!(result, Err(Error::AddressCannotBeBlinded));
+        let result = Address::from_str(blinded_addr, Network::Liquid).unwrap();
+        assert_eq!(
+            result.ensure_not_blinded(),
+            Err(Error::AddressCannotBeBlinded)
+        );
     }
 
     #[test]

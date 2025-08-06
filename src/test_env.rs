@@ -1,4 +1,5 @@
 use crate::{
+    be::{self, Family},
     server::{inner_main, sign::p2pkh, Arguments, Network},
     WaterfallResponse, WaterfallResponseV3,
 };
@@ -11,7 +12,7 @@ use std::{
 };
 
 use age::x25519::{Identity, Recipient};
-use anyhow::bail;
+use anyhow::{bail, Context};
 use bitcoin::{key::Secp256k1, secp256k1::All, NetworkKind, PrivateKey};
 use bitcoind::{
     bitcoincore_rpc::{bitcoin::hex::FromHex, Client, RpcApi},
@@ -29,7 +30,7 @@ use tokio::sync::oneshot::{self, Receiver, Sender};
 
 pub struct TestEnv<'a> {
     #[allow(dead_code)]
-    elementsd: &'a BitcoinD,
+    node: &'a BitcoinD,
     handle: tokio::task::JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>,
     tx: Sender<()>,
     client: WaterfallClient,
@@ -37,31 +38,40 @@ pub struct TestEnv<'a> {
     server_key: Identity,
     wif_key: PrivateKey,
     secp: Secp256k1<All>,
+    family: Family,
 }
 
 #[cfg(feature = "db")]
-pub async fn launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv<'static> {
-    inner_launch(exe, path).await
+pub async fn launch<S: AsRef<OsStr>>(
+    exe: S,
+    path: Option<PathBuf>,
+    family: Family,
+) -> TestEnv<'static> {
+    inner_launch(exe, path, family).await
 }
 
 #[cfg(not(feature = "db"))]
-pub async fn launch<S: AsRef<OsStr>>(exe: S) -> TestEnv<'static> {
-    inner_launch(exe, None).await
+pub async fn launch<S: AsRef<OsStr>>(exe: S, family: Family) -> TestEnv<'static> {
+    inner_launch(exe, None, family).await
 }
 
 #[cfg(feature = "db")]
-pub async fn launch_with_node(elementsd: &BitcoinD, path: Option<PathBuf>) -> TestEnv {
-    inner_launch_with_node(elementsd, path).await
+pub async fn launch_with_node(
+    elementsd: &BitcoinD,
+    path: Option<PathBuf>,
+    family: Family,
+) -> TestEnv {
+    inner_launch_with_node(elementsd, path, family).await
 }
 
 #[cfg(not(feature = "db"))]
-pub async fn launch_with_node(elementsd: &BitcoinD) -> TestEnv {
-    inner_launch_with_node(elementsd, None).await
+pub async fn launch_with_node(elementsd: &BitcoinD, family: Family) -> TestEnv {
+    inner_launch_with_node(elementsd, None, family).await
 }
 
-async fn inner_launch_with_node(elementsd: &BitcoinD, path: Option<PathBuf>) -> TestEnv {
+async fn inner_launch_with_node(node: &BitcoinD, path: Option<PathBuf>, family: Family) -> TestEnv {
     let mut args = Arguments {
-        node_url: Some(elementsd.rpc_url()),
+        node_url: Some(node.rpc_url()),
         derivation_cache_capacity: 10000,
         ..Default::default()
     };
@@ -69,14 +79,17 @@ async fn inner_launch_with_node(elementsd: &BitcoinD, path: Option<PathBuf>) -> 
     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), available_port);
     let base_url = format!("http://{socket_addr}");
     args.listen = Some(socket_addr);
-    args.network = Network::ElementsRegtest;
+    args.network = match family {
+        Family::Bitcoin => Network::BitcoinRegtest,
+        Family::Elements => Network::ElementsRegtest,
+    };
     let server_key = Identity::generate();
     args.server_key = Some(server_key.clone());
     let wif_key = PrivateKey::generate(NetworkKind::Test);
     args.wif_key = Some(wif_key);
     args.max_addresses = 100;
 
-    let cookie = std::fs::read_to_string(&elementsd.params.cookie_file).unwrap();
+    let cookie = std::fs::read_to_string(&node.params.cookie_file).unwrap();
     args.rpc_user_password = Some(cookie);
 
     #[cfg(feature = "db")]
@@ -97,7 +110,7 @@ async fn inner_launch_with_node(elementsd: &BitcoinD, path: Option<PathBuf>) -> 
     let secp = Secp256k1::new();
 
     let test_env = TestEnv {
-        elementsd,
+        node,
         handle,
         tx,
         client,
@@ -105,14 +118,19 @@ async fn inner_launch_with_node(elementsd: &BitcoinD, path: Option<PathBuf>) -> 
         server_key,
         wif_key,
         secp,
+        family,
     };
 
     test_env.node_generate(1).await;
-    test_env
-        .elementsd
-        .client
-        .call::<Value>("rescanblockchain", &[])
-        .unwrap();
+
+    if let Family::Elements = family {
+        test_env
+            .node
+            .client
+            .call::<Value>("rescanblockchain", &[])
+            .unwrap();
+    }
+
     test_env.node_generate(1).await;
 
     test_env
@@ -142,17 +160,31 @@ pub fn launch_elements<S: AsRef<OsStr>>(exe: S) -> BitcoinD {
     BitcoinD::with_conf(exe, &conf).unwrap()
 }
 
-async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>) -> TestEnv<'static> {
-    let elementsd = launch_elements(exe);
+async fn inner_launch<S: AsRef<OsStr>>(
+    exe: S,
+    path: Option<PathBuf>,
+    family: Family,
+) -> TestEnv<'static> {
+    let elementsd = match family {
+        Family::Bitcoin => launch_bitcoin(exe),
+        Family::Elements => launch_elements(exe),
+    };
     // Use Box::leak to create a static reference
     let elementsd_ref = Box::leak(Box::new(elementsd));
-    inner_launch_with_node(elementsd_ref, path).await
+    inner_launch_with_node(elementsd_ref, path, family).await
 }
 
 impl<'a> TestEnv<'a> {
     pub async fn shutdown(self) {
         self.tx.send(()).unwrap();
         let _ = self.handle.await.unwrap();
+    }
+
+    fn network(&self) -> Network {
+        match self.family {
+            Family::Bitcoin => Network::BitcoinRegtest,
+            Family::Elements => Network::ElementsRegtest,
+        }
     }
 
     pub fn client(&self) -> &WaterfallClient {
@@ -175,30 +207,33 @@ impl<'a> TestEnv<'a> {
         let amount = Amount::from_sat(satoshis);
         let btc = amount.to_string_in(Denomination::Bitcoin);
         let val = self
-            .elementsd
+            .node
             .client
             .call::<Value>("sendtoaddress", &[address.to_string().into(), btc.into()])
             .unwrap();
         Txid::from_str(val.as_str().unwrap()).unwrap()
     }
 
-    pub fn get_new_address(&self, kind: Option<&str>) -> Address {
+    pub fn get_new_address(&self, kind: Option<&str>) -> be::Address {
         let kind = kind.unwrap_or("p2sh-segwit");
         let addr: Value = self
-            .elementsd
+            .node
             .client
             .call("getnewaddress", &["label".into(), kind.into()])
             .unwrap();
-        Address::from_str(addr.as_str().unwrap()).unwrap()
+        be::Address::from_str(addr.as_str().unwrap(), self.network()).unwrap()
     }
 
     /// generate `block_num` blocks and wait the waterfalls server had indexed them
     pub async fn node_generate(&self, block_num: u32) {
         let (prev_height, _) = self.client.wait_tip_height_hash(None).await.unwrap();
-        let address = self.get_new_address(None).to_string();
-        self.elementsd
+        let address = self.get_new_address(None);
+        self.node
             .client
-            .call::<Value>("generatetoaddress", &[block_num.into(), address.into()])
+            .call::<Value>(
+                "generatetoaddress",
+                &[block_num.into(), address.to_string().into()],
+            )
             .unwrap();
         self.client
             .wait_tip_height_hash(Some(prev_height + block_num))
@@ -207,22 +242,22 @@ impl<'a> TestEnv<'a> {
     }
 
     pub fn list_unspent(&self) -> Vec<Input> {
-        let val = self.elementsd.client.call("listunspent", &[]).unwrap();
+        let val = self.node.client.call("listunspent", &[]).unwrap();
         serde_json::from_value(val).unwrap()
     }
 
     pub fn create_self_transanction(&self) -> elements::Transaction {
         let inputs = self.list_unspent();
         let inputs_sum: f64 = inputs.iter().map(|i| i.amount).sum();
-        let change = self.get_new_address(None);
+        let change = self.get_new_address(None).to_string();
         let fee = 0.00001000;
         let to_send = inputs_sum - fee;
 
         let param1 = serde_json::to_value(inputs).unwrap();
-        let param2 = serde_json::json!([{change.to_string(): to_send},{"fee": fee}]);
+        let param2 = serde_json::json!([{change: to_send},{"fee": fee}]);
 
         let val = self
-            .elementsd
+            .node
             .client
             .call::<Value>("createrawtransaction", &[param1, param2])
             .unwrap();
@@ -234,7 +269,7 @@ impl<'a> TestEnv<'a> {
     pub fn blind_raw_transanction(&self, tx: &elements::Transaction) -> elements::Transaction {
         let hex = serialize_hex(tx);
         let val = self
-            .elementsd
+            .node
             .client
             .call::<Value>(
                 "blindrawtransaction",
@@ -247,7 +282,7 @@ impl<'a> TestEnv<'a> {
     }
 
     pub fn create_other_wallet(&self) -> Client {
-        self.elementsd.create_wallet("other_wallet").unwrap()
+        self.node.create_wallet("other_wallet").unwrap()
     }
 
     pub fn sign_raw_transanction_with_wallet(
@@ -256,7 +291,7 @@ impl<'a> TestEnv<'a> {
     ) -> elements::Transaction {
         let hex = serialize_hex(tx);
         let val = self
-            .elementsd
+            .node
             .client
             .call::<Value>(
                 "signrawtransactionwithwallet",
@@ -388,7 +423,11 @@ impl WaterfallClient {
         let headers = response.headers().clone();
 
         let body = response.text().await?;
-        Ok((serde_json::from_str(&body)?, headers))
+        Ok((
+            serde_json::from_str(&body)
+                .with_context(|| format!("failing parsing json for {desc} body:{body}"))?,
+            headers,
+        ))
     }
 
     pub async fn wait_waterfalls_non_empty(
