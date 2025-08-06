@@ -50,6 +50,11 @@ impl Address {
             }
         }
     }
+
+    pub fn to_unconfidential(&self) -> Option<Address> {
+        self.elements()
+            .map(|addr| Address::Elements(addr.to_unconfidential()))
+    }
 }
 
 impl std::fmt::Display for Address {

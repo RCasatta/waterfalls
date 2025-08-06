@@ -11,7 +11,7 @@ use prometheus::{
 };
 use serde::{Deserialize, Serialize};
 
-mod be;
+pub mod be;
 mod cbor;
 mod fetch;
 pub mod server;

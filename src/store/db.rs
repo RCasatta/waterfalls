@@ -3,7 +3,7 @@ use elements::{
     encode::Encodable,
     hashes::Hash,
     secp256k1_zkp::rand::{thread_rng, Rng},
-    BlockHash, OutPoint, Script, Txid,
+    BlockHash, OutPoint, Txid,
 };
 use fxhash::FxHasher;
 use rocksdb::{BoundColumnFamily, MergeOperands, Options, DB};

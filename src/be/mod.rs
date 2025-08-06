@@ -7,7 +7,7 @@ mod transaction;
 pub use address::Address;
 pub use block::Block;
 pub use block_header::BlockHeader;
-pub use descriptor::Descriptor;
+pub use descriptor::{bitcoin_descriptor, Descriptor};
 pub use transaction::{Input, Output, Transaction};
 
 use crate::server::Network;

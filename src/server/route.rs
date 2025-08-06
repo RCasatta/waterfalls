@@ -8,7 +8,6 @@ use crate::{
 };
 use age::x25519::Identity;
 use elements::{encode::Decodable, BlockHash, Transaction, Txid};
-use elements_miniscript::DescriptorPublicKey;
 use http_body_util::{BodyExt, Full};
 use hyper::{
     body::{Bytes, Incoming},

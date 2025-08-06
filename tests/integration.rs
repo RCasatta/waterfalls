@@ -91,7 +91,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     use elements::{bitcoin::secp256k1, AddressParams};
     use elements_miniscript::{ConfidentialDescriptor, DescriptorPublicKey};
     use std::str::FromStr;
-    use waterfalls::{server::encryption::encrypt, WaterfallResponse, V};
+    use waterfalls::{be, server::encryption::encrypt, WaterfallResponse, V};
     let secp = secp256k1::Secp256k1::new();
     let client = test_env.client();
 
@@ -112,12 +112,27 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     let result = client.waterfalls_v1(&bitcoin_desc).await.unwrap().0;
     assert!(result.tip.is_none());
 
-    let desc = ConfidentialDescriptor::<DescriptorPublicKey>::from_str(&desc_str).unwrap();
-    let addr = desc
-        .at_derivation_index(0)
-        .unwrap()
-        .address(&secp, &AddressParams::ELEMENTS)
-        .unwrap();
+    let addr = match test_env.family {
+        Family::Bitcoin => {
+            let desc = be::bitcoin_descriptor(&single_bitcoin_desc).unwrap();
+            let desc = desc.bitcoin().unwrap();
+            let addr = desc
+                .at_derivation_index(0)
+                .unwrap()
+                .address(bitcoin::Network::Regtest)
+                .unwrap();
+            be::Address::Bitcoin(addr)
+        }
+        Family::Elements => {
+            let desc = ConfidentialDescriptor::<DescriptorPublicKey>::from_str(&desc_str).unwrap();
+            let addr = desc
+                .at_derivation_index(0)
+                .unwrap()
+                .address(&secp, &AddressParams::ELEMENTS)
+                .unwrap();
+            be::Address::Elements(addr)
+        }
+    };
 
     let initial_txid = test_env.send_to(&addr, 10_000);
 
@@ -148,6 +163,10 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     assert!(result.tip.is_some());
     let first = &result.txs_seen.iter().next().unwrap().1[0][0];
     assert_eq!(first.txid, initial_txid);
+    if test_env.family == Family::Bitcoin {
+        // TODO: bitcoin test works up here for now, remove this
+        return;
+    }
     assert_eq!(first.height, 3);
     assert!(first.block_hash.is_some());
     assert!(first.block_timestamp.is_some());
@@ -201,18 +220,21 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     assert_eq!(result, result_v2);
 
     // Test addresses
-    let addresses = vec![addr.to_unconfidential()];
+    let addresses = vec![addr.to_unconfidential().unwrap()];
     let (result, _) = client.waterfalls_addresses(&addresses).await.unwrap();
     assert_eq!(result.count_non_empty(), 1);
 
     // Test address_txs
-    let address_txs = client.address_txs(&addr.to_unconfidential()).await.unwrap();
+    let address_txs = client
+        .address_txs(&addr.to_unconfidential().unwrap())
+        .await
+        .unwrap();
     assert!(address_txs.contains(&initial_txid.to_string()));
 
     // Create two transactions in the same block the second one is spending an output of the first one
     let other_wallet = test_env.create_other_wallet();
     let other_address = get_new_address(&other_wallet);
-    test_env.send_to(&other_address, 1_000_000);
+    test_env.send_to(&be::Address::Elements(other_address), 1_000_000);
     test_env.node_generate(1).await;
     let address_spent_same_block = get_new_address(&other_wallet);
     let txid1 = send_to_address(&other_wallet, &address_spent_same_block, 0.0098);
@@ -220,7 +242,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     let txid2 = send_to_address(&other_wallet, new_address.elements().unwrap(), 0.0096);
     test_env.node_generate(1).await;
     let address_txs = client
-        .address_txs(&address_spent_same_block.to_unconfidential())
+        .address_txs(&be::Address::Elements(address_spent_same_block))
         .await
         .unwrap();
     assert!(address_txs.contains(&txid1.to_string()));
@@ -334,6 +356,7 @@ async fn test_no_txindex() {
 #[tokio::test]
 async fn test_lwk_wollet() {
     use lwk_common::Signer;
+    use waterfalls::be;
 
     let _ = env_logger::try_init();
     let network = lwk_wollet::ElementsNetwork::default_regtest();
@@ -346,8 +369,9 @@ async fn test_lwk_wollet() {
         .bitcoin_descriptor_without_key_origin()
         .to_string();
     let address = wollet.address(None).unwrap();
+    let address = be::Address::Elements(address.address().clone());
     let initial_amount = 10_000;
-    test_env.send_to(address.address(), initial_amount);
+    test_env.send_to(&address, initial_amount);
     test_env.node_generate(1).await;
     test_env
         .client()

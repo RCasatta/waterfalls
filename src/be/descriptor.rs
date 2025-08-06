@@ -1,5 +1,3 @@
-use elements::Script;
-
 use crate::server::{Error, Network};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -95,7 +93,7 @@ impl std::fmt::Display for Descriptor {
     }
 }
 
-fn bitcoin_descriptor(s: &str) -> Result<Descriptor, Error> {
+pub fn bitcoin_descriptor(s: &str) -> Result<Descriptor, Error> {
     let desc = s
         .parse::<miniscript::descriptor::Descriptor<miniscript::DescriptorPublicKey>>()
         .map_err(|e| Error::String(format!("{e:?}")))?;

@@ -21,7 +21,7 @@ use bitcoind::{
 use elements::{
     bitcoin::{Amount, Denomination},
     encode::{serialize_hex, Decodable},
-    Address, BlockHash, BlockHeader, Transaction, Txid,
+    BlockHash, BlockHeader, Transaction, Txid,
 };
 use hyper::HeaderMap;
 use serde::{Deserialize, Serialize};
@@ -129,6 +129,8 @@ async fn inner_launch_with_node(node: &BitcoinD, path: Option<PathBuf>, family: 
             .client
             .call::<Value>("rescanblockchain", &[])
             .unwrap();
+    } else {
+        test_env.node_generate(101).await;
     }
 
     test_env.node_generate(1).await;
@@ -203,7 +205,7 @@ impl<'a> TestEnv<'a> {
         &self.base_url
     }
 
-    pub fn send_to(&self, address: &elements::Address, satoshis: u64) -> Txid {
+    pub fn send_to(&self, address: &be::Address, satoshis: u64) -> Txid {
         let amount = Amount::from_sat(satoshis);
         let btc = amount.to_string_in(Denomination::Bitcoin);
         let val = self
@@ -352,7 +354,7 @@ impl WaterfallClient {
     /// it accepts a list of addresses to search in the mempool and in the blockchain
     pub async fn waterfalls_addresses(
         &self,
-        addressess: &[Address],
+        addressess: &[be::Address],
     ) -> anyhow::Result<(WaterfallResponseV3, HeaderMap)> {
         // this code is duplicated from waterfalls_version but we need to use the v3 endpoint which return a different object
         let descriptor_url = format!("{}/v3/waterfalls", self.base_url);
@@ -527,7 +529,7 @@ impl WaterfallClient {
         }
     }
 
-    pub async fn address_txs(&self, address: &elements::Address) -> anyhow::Result<String> {
+    pub async fn address_txs(&self, address: &be::Address) -> anyhow::Result<String> {
         let url = format!("{}/address/{}/txs", self.base_url, address);
         println!("url: {}", url);
         let response = self.client.get(&url).send().await?;

@@ -5,7 +5,7 @@ use crate::{
     store::{BlockMeta, Store},
     TxSeen, V,
 };
-use elements::{hex::ToHex, OutPoint, Txid};
+use elements::{OutPoint, Txid};
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,

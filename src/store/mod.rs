@@ -1,6 +1,6 @@
 use crate::{Height, ScriptHash, Timestamp, TxSeen};
 use anyhow::Result;
-use elements::{BlockHash, OutPoint, Script, Txid};
+use elements::{BlockHash, OutPoint, Txid};
 use std::collections::HashMap;
 
 #[cfg(feature = "db")]
