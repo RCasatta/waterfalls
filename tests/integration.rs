@@ -41,7 +41,10 @@ async fn integration_db() {
 
 #[cfg(all(feature = "test_env", feature = "db"))]
 async fn launch_memory(family: Family) -> waterfalls::test_env::TestEnv<'static> {
-    let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
+    let exe = match family {
+        Family::Bitcoin => std::env::var("BITCOIND_EXEC").unwrap(),
+        Family::Elements => std::env::var("ELEMENTSD_EXEC").unwrap(),
+    };
     waterfalls::test_env::launch(exe, None, family).await
 }
 
