@@ -252,12 +252,19 @@ impl<'a> TestEnv<'a> {
         let to_send = inputs_sum - fee;
 
         let param1 = serde_json::to_value(inputs).unwrap();
-        let param2 = serde_json::json!([{change: to_send},{"fee": fee}]);
+
+        let params = match self.family {
+            Family::Bitcoin => vec![param1],
+            Family::Elements => {
+                let param2 = serde_json::json!([{change: to_send},{"fee": fee}]);
+                vec![param1, param2]
+            }
+        };
 
         let val = self
             .node
             .client
-            .call::<Value>("createrawtransaction", &[param1, param2])
+            .call::<Value>("createrawtransaction", &params)
             .unwrap();
         let tx_hex = val.as_str().unwrap();
         let bytes = Vec::<u8>::from_hex(tx_hex).unwrap();
