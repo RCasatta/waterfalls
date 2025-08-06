@@ -226,19 +226,19 @@ impl<'a> TestEnv<'a> {
 
     /// generate `block_num` blocks and wait the waterfalls server had indexed them
     pub async fn node_generate(&self, block_num: u32) {
-        let (prev_height, _) = self.client.wait_tip_height_hash(None).await.unwrap();
         let address = self.get_new_address(None);
-        self.node
+        let hash = self
+            .node
             .client
             .call::<Value>(
                 "generatetoaddress",
                 &[block_num.into(), address.to_string().into()],
             )
             .unwrap();
-        self.client
-            .wait_tip_height_hash(Some(prev_height + block_num))
-            .await
-            .unwrap();
+        let hash = hash.as_array().unwrap().last().unwrap().as_str().unwrap();
+        let hash = BlockHash::from_str(hash).unwrap();
+
+        self.client.wait_tip_hash(hash).await.unwrap();
     }
 
     pub fn list_unspent(&self) -> Vec<Input> {
@@ -453,36 +453,18 @@ impl WaterfallClient {
         Ok(BlockHash::from_str(&text)?)
     }
 
-    pub async fn tip_height_hash(&self) -> anyhow::Result<(u32, BlockHash)> {
-        let hash = self.tip_hash().await?;
-        let height = self.height(hash).await?;
-        Ok((height, hash))
-    }
-
-    pub async fn wait_tip_height_hash(
-        &self,
-        up_to: Option<u32>,
-    ) -> anyhow::Result<(u32, BlockHash)> {
+    pub async fn wait_tip_hash(&self, hash: BlockHash) -> anyhow::Result<()> {
         for _ in 0..50 {
-            if let Ok((height, hash)) = self.tip_height_hash().await {
-                match up_to.as_ref() {
-                    Some(expected) => {
-                        if height == *expected {
-                            return Ok((height, hash));
-                        }
-                    }
-                    None => return Ok((height, hash)),
+            if let Ok(current) = self.tip_hash().await {
+                if current == hash {
+                    return Ok(());
                 }
             }
 
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
-        log::error!("no tip height after 10s");
-        panic!("no tip height after 10s")
-    }
-
-    pub async fn height(&self, block_hash: BlockHash) -> anyhow::Result<u32> {
-        Ok(self.header(block_hash).await?.height)
+        log::error!("no tip hash after 10s");
+        panic!("no tip hash after 10s")
     }
     pub async fn header(&self, block_hash: BlockHash) -> anyhow::Result<BlockHeader> {
         let url = format!("{}/block/{}/header", self.base_url, block_hash);
