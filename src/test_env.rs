@@ -123,17 +123,13 @@ async fn inner_launch_with_node(node: &BitcoinD, path: Option<PathBuf>, family: 
 
     test_env.node_generate(1).await;
 
-    if let Family::Elements = family {
-        test_env
-            .node
-            .client
-            .call::<Value>("rescanblockchain", &[])
-            .unwrap();
-    } else {
-        test_env.node_generate(101).await;
-    }
+    test_env
+        .node
+        .client
+        .call::<Value>("rescanblockchain", &[])
+        .unwrap();
 
-    test_env.node_generate(1).await;
+    test_env.node_generate(101).await;
 
     test_env
 }

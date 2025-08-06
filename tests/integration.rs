@@ -163,11 +163,8 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     assert!(result.tip.is_some());
     let first = &result.txs_seen.iter().next().unwrap().1[0][0];
     assert_eq!(first.txid, initial_txid);
-    if test_env.family == Family::Bitcoin {
-        // TODO: bitcoin test works up here for now, remove this
-        return;
-    }
-    assert_eq!(first.height, 3);
+
+    assert_eq!(first.height, 103);
     assert!(first.block_hash.is_some());
     assert!(first.block_timestamp.is_some());
 
@@ -180,7 +177,11 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
 
     // Test broadcast is working
     let unspent = test_env.list_unspent();
-    assert_eq!(unspent.len(), 1);
+    let expected_unspent = match test_env.family {
+        Family::Bitcoin => 3,
+        Family::Elements => 1,
+    };
+    assert_eq!(unspent.len(), expected_unspent);
     let tx_unblind = test_env.create_self_transanction();
 
     let tx_blind = test_env.blind_raw_transanction(&tx_unblind);
