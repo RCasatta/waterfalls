@@ -11,10 +11,19 @@ use waterfalls::Family;
 
 #[cfg(feature = "test_env")]
 #[tokio::test]
-async fn integration_memory() {
+async fn integration_memory_elements() {
     let _ = env_logger::try_init();
 
-    let test_env = launch_memory().await;
+    let test_env = launch_memory(Family::Elements).await;
+    do_test(test_env).await;
+}
+
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn integration_memory_bitcoin() {
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory(Family::Bitcoin).await;
     do_test(test_env).await;
 }
 
@@ -31,9 +40,9 @@ async fn integration_db() {
 }
 
 #[cfg(all(feature = "test_env", feature = "db"))]
-async fn launch_memory() -> waterfalls::test_env::TestEnv<'static> {
+async fn launch_memory(family: Family) -> waterfalls::test_env::TestEnv<'static> {
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
-    waterfalls::test_env::launch(exe, None, Family::Elements).await
+    waterfalls::test_env::launch(exe, None, family).await
 }
 
 #[cfg(all(feature = "test_env", not(feature = "db")))]
@@ -322,7 +331,7 @@ async fn test_lwk_wollet() {
     let _ = env_logger::try_init();
     let network = lwk_wollet::ElementsNetwork::default_regtest();
 
-    let test_env = launch_memory().await;
+    let test_env = launch_memory(Family::Elements).await;
     let (signer, mut wollet) = lwk_wollet::Wollet::test_wallet().unwrap();
     let descriptor = wollet.descriptor().to_string();
     let bitcoind_desc = wollet
