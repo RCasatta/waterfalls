@@ -49,8 +49,7 @@ pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<
                 if output.skip_indexing() {
                     continue;
                 }
-                let script_hash = db.hash(&output.script_pubkey());
-                log::debug!("{} hash is {script_hash}", &output.script_pubkey().to_hex());
+                let script_hash = db.hash(output.script_pubkey().as_bytes());
                 let el = history_map.entry(script_hash).or_insert(vec![]);
                 el.push(TxSeen::new(txid, block_height, V::Vout(j as u32)));
 

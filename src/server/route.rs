@@ -43,8 +43,7 @@ pub async fn route(
     req: Request<Incoming>,
     network: Network,
 ) -> Result<Response<Full<Bytes>>, Error> {
-    let is_testnet_or_regtest =
-        network == Network::LiquidTestnet || network == Network::ElementsRegtest;
+    let is_testnet_or_regtest = !matches!(network, Network::Liquid | Network::Bitcoin);
     log::debug!("---> {req:?}");
     let res = match (req.method(), req.uri().path(), req.uri().query()) {
         (&Method::GET, "/v1/server_recipient", None) => {
@@ -270,9 +269,7 @@ fn parse_query(
         (Some(desc_str), None) => {
             let desc_str = encryption::decrypt(&desc_str, key).unwrap_or(desc_str);
 
-            let descriptor = desc_str
-                .parse::<elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>>()
-                .map_err(|e| Error::String(e.to_string()))?;
+            let descriptor = be::Descriptor::from_str(&desc_str, network)?;
 
             if is_testnet_or_regtest == desc_str.contains("xpub") {
                 return Err(Error::WrongNetwork);
@@ -356,7 +353,7 @@ async fn handle_single_address(
     let db = &state.store;
     let script_pubkey = address.script_pubkey();
 
-    let script_hash = [db.hash(&script_pubkey)];
+    let script_hash = [db.hash(script_pubkey.as_bytes())];
     let mut result: Vec<_> = db
         .get_history(&script_hash)
         .unwrap()
@@ -449,7 +446,6 @@ async fn handle_waterfalls_req(
                                 let (script_pubkey, duration) =
                                     calculate_script_pubkey_with_timing(desc, index).unwrap();
                                 derivations_duration += duration;
-                                log::debug!("{}/{} {}", desc, index, script_pubkey);
                                 let script_hash = db.hash(&script_pubkey);
                                 derivation_cache.add(der_ind_hash, script_hash);
                                 script_hash
@@ -477,7 +473,7 @@ async fn handle_waterfalls_req(
         WaterfallRequest::Addresses(AddressesRequest { addresses, page: _ }) => {
             let mut scripts = Vec::with_capacity(addresses.len());
             for addr in addresses.iter() {
-                scripts.push(db.hash(&addr.script_pubkey()));
+                scripts.push(db.hash(addr.script_pubkey().as_bytes()));
             }
             let mut result = Vec::with_capacity(addresses.len());
             let _ = find_scripts(state, db, &mut result, scripts).await;
@@ -622,13 +618,11 @@ async fn find_scripts(
 }
 
 fn calculate_script_pubkey_with_timing(
-    desc: &elements_miniscript::descriptor::Descriptor<DescriptorPublicKey>,
+    desc: &be::Descriptor,
     index: u32,
-) -> Result<(elements::Script, std::time::Duration), elements_miniscript::descriptor::ConversionError>
-{
+) -> Result<(Vec<u8>, std::time::Duration), Error> {
     let start = Instant::now();
-    let l = desc.at_derivation_index(index)?;
-    let script_pubkey = l.script_pubkey();
+    let script_pubkey = desc.script_pubkey_at_derivation_index(index)?;
     let duration = start.elapsed();
     Ok((script_pubkey, duration))
 }
@@ -673,8 +667,8 @@ mod tests {
 
     const MAINNET_DESC: &str = "elwpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#20ufqv7z";
     const TESTNET_DESC: &str = "elwpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)#v7pu3vak";
-    const BITCOIN_MAINNET_DESC: &str = "elwpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#20ufqv7z";
-    const BITCOIN_TESTNET_DESC: &str = "elwpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)#v7pu3vak";
+    const BITCOIN_MAINNET_DESC: &str = "wpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#20ufqv7z";
+    const BITCOIN_TESTNET_DESC: &str = "wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)#v7pu3vak";
 
     #[test]
     fn test_parse_query() {
@@ -686,12 +680,12 @@ mod tests {
         // Test invalid descriptor
         let result =
             parse_query("descriptor=invalid", &key, false, 100, Network::Liquid).unwrap_err();
-        let not_an_element_desc = "Invalid descriptor: Not an Elements Descriptor".to_string();
-        assert_eq!(result, Error::String(not_an_element_desc.clone()));
+        let bad_descriptor = "BadDescriptor(\"Not an Elements Descriptor\")".to_string();
+        assert_eq!(result, Error::String(bad_descriptor.clone()));
 
         // Test empty descriptor
         let result = parse_query("descriptor=", &key, false, 100, Network::Liquid).unwrap_err();
-        assert_eq!(result, Error::String(not_an_element_desc));
+        assert_eq!(result, Error::String(bad_descriptor));
 
         // Test valid clear descriptor
         let query = encode_query(MAINNET_DESC, None);
@@ -787,6 +781,39 @@ mod tests {
         let query = format!("addresses={long_str}");
         let result = parse_query(&query, &key, false, 2, Network::Liquid).unwrap_err();
         assert_eq!(result, Error::TooManyAddresses);
+
+        // Test Bitcoin mainnet descriptor (should fail as it's not an Elements descriptor)
+        let query = encode_query(BITCOIN_MAINNET_DESC, None);
+        let result = parse_query(&query, &key, false, 100, Network::Liquid).unwrap_err();
+        let bad_descriptor = "BadDescriptor(\"Not an Elements Descriptor\")".to_string();
+        assert_eq!(result, Error::String(bad_descriptor.clone()));
+
+        // Test Bitcoin testnet descriptor (should fail as it's not an Elements descriptor)
+        let query = encode_query(BITCOIN_TESTNET_DESC, None);
+        let result = parse_query(&query, &key, true, 100, Network::LiquidTestnet).unwrap_err();
+        assert_eq!(result, Error::String(bad_descriptor.clone()));
+
+        // Test Bitcoin mainnet descriptor on testnet network (should fail as it's not an Elements descriptor)
+        let query = encode_query(BITCOIN_MAINNET_DESC, None);
+        let result = parse_query(&query, &key, true, 100, Network::LiquidTestnet).unwrap_err();
+        assert_eq!(result, Error::String(bad_descriptor.clone()));
+
+        // Test Bitcoin testnet descriptor on mainnet network (should fail as it's not an Elements descriptor)
+        let query = encode_query(BITCOIN_TESTNET_DESC, None);
+        let result = parse_query(&query, &key, false, 100, Network::Liquid).unwrap_err();
+        assert_eq!(result, Error::String(bad_descriptor.clone()));
+
+        // Test encrypted Bitcoin mainnet descriptor (should fail as it's not an Elements descriptor)
+        let encrypted = encryption::encrypt(BITCOIN_MAINNET_DESC, key.to_public()).unwrap();
+        let query = encode_query(&encrypted, None);
+        let result = parse_query(&query, &key, false, 100, Network::Liquid).unwrap_err();
+        assert_eq!(result, Error::String(bad_descriptor.clone()));
+
+        // Test encrypted Bitcoin testnet descriptor (should fail as it's not an Elements descriptor)
+        let encrypted = encryption::encrypt(BITCOIN_TESTNET_DESC, key.to_public()).unwrap();
+        let query = encode_query(&encrypted, None);
+        let result = parse_query(&query, &key, true, 100, Network::LiquidTestnet).unwrap_err();
+        assert_eq!(result, Error::String(bad_descriptor));
     }
 
     fn encode_query(descriptor: &str, page: Option<u16>) -> String {

@@ -1,3 +1,5 @@
+use elements::Script;
+
 use crate::server::{Error, Network};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -36,6 +38,50 @@ impl Descriptor {
         match self {
             Descriptor::Bitcoin(_) => None,
             Descriptor::Elements(desc) => Some(desc),
+        }
+    }
+
+    pub(crate) fn into_single_descriptors(&self) -> Result<Vec<Self>, Error> {
+        Ok(match self {
+            Descriptor::Bitcoin(desc) => {
+                let desc = desc
+                    .clone()
+                    .into_single_descriptors()
+                    .map_err(|e| Error::String(e.to_string()))?;
+                desc.into_iter().map(|d| Descriptor::Bitcoin(d)).collect()
+            }
+            Descriptor::Elements(desc) => {
+                let desc = desc
+                    .clone()
+                    .into_single_descriptors()
+                    .map_err(|e| Error::String(e.to_string()))?;
+                desc.into_iter().map(|d| Descriptor::Elements(d)).collect()
+            }
+        })
+    }
+
+    pub(crate) fn script_pubkey_at_derivation_index(&self, index: u32) -> Result<Vec<u8>, Error> {
+        Ok(match self {
+            Descriptor::Bitcoin(desc) => desc
+                .at_derivation_index(index)
+                .map_err(|e| Error::String(e.to_string()))?
+                .script_pubkey()
+                .as_bytes()
+                .to_vec(),
+
+            Descriptor::Elements(desc) => desc
+                .at_derivation_index(index)
+                .map_err(|e| Error::String(e.to_string()))?
+                .script_pubkey()
+                .as_bytes()
+                .to_vec(),
+        })
+    }
+
+    pub(crate) fn has_wildcard(&self) -> bool {
+        match self {
+            Descriptor::Bitcoin(desc) => desc.has_wildcard(),
+            Descriptor::Elements(desc) => desc.has_wildcard(),
         }
     }
 }

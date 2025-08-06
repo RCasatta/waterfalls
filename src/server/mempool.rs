@@ -60,7 +60,7 @@ impl Mempool {
             .map(|((vout, txout), txid)| {
                 (
                     OutPoint::new(*txid, vout as u32),
-                    db.hash(&txout.script_pubkey()),
+                    db.hash(txout.script_pubkey().as_bytes()),
                 )
             });
         self.outpoints_created.extend(outputs_created);
@@ -105,7 +105,7 @@ impl Mempool {
             }
 
             for (vout, output) in tx.outputs().iter().enumerate() {
-                let e = db.hash(&output.script_pubkey());
+                let e = db.hash(output.script_pubkey().as_bytes());
                 txid_hashes.entry(txid).or_default().insert(e);
                 // Positive position for outputs: vout + 1
                 txid_script_positions

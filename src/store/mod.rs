@@ -19,7 +19,7 @@ pub trait Store {
     ///
     /// It's in the trait cause it can be salted with some random values contained in the
     /// concrete implementation to avoid attacker brute force collisions
-    fn hash(&self, script: &Script) -> ScriptHash;
+    fn hash(&self, script: &[u8]) -> ScriptHash;
 
     /// Iterate over blocks metadata to preload those in memory
     fn iter_hash_ts(&self) -> Box<dyn Iterator<Item = BlockMeta> + '_>;
@@ -41,7 +41,7 @@ pub trait Store {
 }
 
 impl Store for AnyStore {
-    fn hash(&self, script: &Script) -> ScriptHash {
+    fn hash(&self, script: &[u8]) -> ScriptHash {
         match self {
             #[cfg(feature = "db")]
             AnyStore::Db(d) => d.hash(script),

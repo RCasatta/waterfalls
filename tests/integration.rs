@@ -95,10 +95,14 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     let secp = secp256k1::Secp256k1::new();
     let client = test_env.client();
 
-    let bitcoin_desc = "elwpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)";
+    let prefix = match test_env.family {
+        Family::Bitcoin => "",
+        Family::Elements => "el",
+    };
+    let bitcoin_desc = format!("{prefix}wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)");
     let single_bitcoin_desc = bitcoin_desc.replace("<0;1>", "0");
     let blinding = "slip77(9c8e4f05c7711a98c838be228bcb84924d4570ca53f35fa1c793e58841d47023)";
-    let desc_str = format!("ct({blinding},{single_bitcoin_desc})#qwqap8xk"); // we use a non-multipath to generate addresses
+    let desc_str = format!("ct({blinding},{single_bitcoin_desc})"); // we use a non-multipath to generate addresses
 
     let result = client.waterfalls_v2(&bitcoin_desc).await.unwrap().0;
     assert_eq!(result.page, 0);

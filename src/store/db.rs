@@ -173,9 +173,9 @@ impl DBStore {
 }
 
 impl Store for DBStore {
-    fn hash(&self, script: &Script) -> ScriptHash {
+    fn hash(&self, script: &[u8]) -> ScriptHash {
         let mut hasher = self.hasher();
-        hasher.write(script.as_bytes());
+        hasher.write(script);
         hasher.finish()
     }
 

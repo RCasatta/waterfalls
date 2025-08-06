@@ -35,8 +35,7 @@ pub enum WaterfallRequest {
 /// Request to the waterfalls endpoint using a descriptor
 #[derive(Debug)]
 pub struct DescriptorRequest {
-    descriptor:
-        elements_miniscript::descriptor::Descriptor<elements_miniscript::DescriptorPublicKey>,
+    descriptor: be::Descriptor,
 
     /// Requested page, 0 if not specified
     /// The first returned index is equal to `page * 10000`

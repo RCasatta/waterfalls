@@ -38,7 +38,7 @@ pub struct TestEnv<'a> {
     server_key: Identity,
     wif_key: PrivateKey,
     secp: Secp256k1<All>,
-    family: Family,
+    pub family: Family,
 }
 
 #[cfg(feature = "db")]

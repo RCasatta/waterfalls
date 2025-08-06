@@ -15,10 +15,10 @@ pub struct MemoryStore {
 }
 
 impl Store for MemoryStore {
-    fn hash(&self, script: &elements::Script) -> ScriptHash {
+    fn hash(&self, script: &[u8]) -> ScriptHash {
         let mut hasher = FxHasher::default();
         // TODO should be salted
-        hasher.write(script.as_bytes());
+        hasher.write(script);
         hasher.finish()
     }
 
