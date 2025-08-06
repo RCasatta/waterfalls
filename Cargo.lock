@@ -3781,6 +3781,7 @@ dependencies = [
  "lwk_common",
  "lwk_wollet",
  "minicbor",
+ "miniscript",
  "prefix_uvarint",
  "prometheus",
  "reqwest",
