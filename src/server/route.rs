@@ -7,7 +7,7 @@ use crate::{
     WaterfallResponseV3, V,
 };
 use age::x25519::Identity;
-use elements::{encode::Decodable, BlockHash, Transaction, Txid};
+use elements::{BlockHash, Txid};
 use http_body_util::{BodyExt, Full};
 use hyper::{
     body::{Bytes, Incoming},
@@ -142,8 +142,7 @@ pub async fn route(
             let result = std::str::from_utf8(&whole_body)
                 .map_err(|e| Error::String(e.to_string()))?
                 .to_string();
-            let tx_bytes = hex::decode(result).map_err(|e| Error::String(e.to_string()))?;
-            let tx = Transaction::consensus_decode(&tx_bytes[..])
+            let tx = be::Transaction::from_str(&result, network.into())
                 .map_err(|e| Error::String(e.to_string()))?;
             let result = client.lock().await.broadcast(&tx).await;
             match result {

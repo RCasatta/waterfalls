@@ -1,5 +1,8 @@
-use crate::be;
+use elements::hex::FromHex;
 
+use crate::{be, Family};
+
+#[derive(Debug)]
 pub enum Transaction {
     Bitcoin(bitcoin::Transaction),
     Elements(elements::Transaction),
@@ -74,6 +77,35 @@ impl Transaction {
             Transaction::Bitcoin(tx) => bitcoin::consensus::serialize(tx),
             Transaction::Elements(tx) => elements::encode::serialize(tx),
         }
+    }
+
+    pub(crate) fn serialize_hex(&self) -> String {
+        match self {
+            Transaction::Bitcoin(tx) => bitcoin::consensus::encode::serialize_hex(tx),
+            Transaction::Elements(tx) => elements::encode::serialize_hex(tx),
+        }
+    }
+
+    pub(crate) fn from_str(tx_hex: &str, family: be::Family) -> Result<Self, anyhow::Error> {
+        let bytes = Vec::<u8>::from_hex(tx_hex).unwrap();
+        Ok(match family {
+            Family::Bitcoin => {
+                let bitcoin_tx =
+                    <bitcoin::Transaction as bitcoin::consensus::Decodable>::consensus_decode(
+                        &mut &bytes[..],
+                    )
+                    .unwrap();
+                be::Transaction::Bitcoin(bitcoin_tx)
+            }
+            Family::Elements => {
+                let elements_tx =
+                    <elements::Transaction as elements::encode::Decodable>::consensus_decode(
+                        &bytes[..],
+                    )
+                    .unwrap();
+                be::Transaction::Elements(elements_tx)
+            }
+        })
     }
 }
 

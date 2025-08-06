@@ -5,10 +5,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use bitcoin::hex::FromHex;
-use elements::{
-    encode::{serialize_hex, Decodable},
-    BlockHash, Transaction, Txid,
-};
+use elements::{encode::Decodable, BlockHash, Txid};
 use hyper::body::Buf;
 use serde::Deserialize;
 use serde_json::json;
@@ -282,8 +279,8 @@ impl Client {
     /// When using the node it must go through RPC interface because the node doesn't support broadcasting via REST
     /// We can't go full RPC for other methods because RPC doesn't return binary data
     ///
-    pub async fn broadcast(&self, tx: &Transaction) -> Result<Txid, anyhow::Error> {
-        let tx_hex = serialize_hex(tx);
+    pub async fn broadcast(&self, tx: &be::Transaction) -> Result<Txid, anyhow::Error> {
+        let tx_hex = tx.serialize_hex();
 
         let response = if self.use_esplora {
             let url = format!("{}/tx", &self.esplora_url);

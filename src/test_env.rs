@@ -244,7 +244,7 @@ impl<'a> TestEnv<'a> {
         serde_json::from_value(val).unwrap()
     }
 
-    pub fn create_self_transanction(&self) -> elements::Transaction {
+    pub fn create_self_transanction(&self) -> be::Transaction {
         let inputs = self.list_unspent();
         let inputs_sum: f64 = inputs.iter().map(|i| i.amount).sum();
         let change = self.get_new_address(None).to_string();
@@ -253,22 +253,18 @@ impl<'a> TestEnv<'a> {
 
         let param1 = serde_json::to_value(inputs).unwrap();
 
-        let params = match self.family {
-            Family::Bitcoin => vec![param1],
-            Family::Elements => {
-                let param2 = serde_json::json!([{change: to_send},{"fee": fee}]);
-                vec![param1, param2]
-            }
+        let param2 = match self.family {
+            Family::Bitcoin => serde_json::json!([{change: to_send}]),
+            Family::Elements => serde_json::json!([{change: to_send},{"fee": fee}]),
         };
 
         let val = self
             .node
             .client
-            .call::<Value>("createrawtransaction", &params)
+            .call::<Value>("createrawtransaction", &[param1, param2])
             .unwrap();
         let tx_hex = val.as_str().unwrap();
-        let bytes = Vec::<u8>::from_hex(tx_hex).unwrap();
-        elements::Transaction::consensus_decode(&bytes[..]).unwrap()
+        be::Transaction::from_str(tx_hex, self.family).unwrap()
     }
 
     pub fn blind_raw_transanction(&self, tx: &elements::Transaction) -> elements::Transaction {
@@ -290,11 +286,8 @@ impl<'a> TestEnv<'a> {
         self.node.create_wallet("other_wallet").unwrap()
     }
 
-    pub fn sign_raw_transanction_with_wallet(
-        &self,
-        tx: &elements::Transaction,
-    ) -> elements::Transaction {
-        let hex = serialize_hex(tx);
+    pub fn sign_raw_transanction_with_wallet(&self, tx: &be::Transaction) -> be::Transaction {
+        let hex = tx.serialize_hex();
         let val = self
             .node
             .client
@@ -304,8 +297,7 @@ impl<'a> TestEnv<'a> {
             )
             .unwrap();
         let tx_hex = val.get("hex").unwrap().as_str().unwrap();
-        let bytes = Vec::<u8>::from_hex(tx_hex).unwrap();
-        elements::Transaction::consensus_decode(&bytes[..]).unwrap()
+        be::Transaction::from_str(tx_hex, self.family).unwrap()
     }
 }
 
@@ -518,9 +510,9 @@ impl WaterfallClient {
         Transaction::consensus_decode(bytes.as_ref()).or_else(|e| bail!("cannot parse tx {}", e))
     }
 
-    pub async fn broadcast(&self, tx: &elements::Transaction) -> anyhow::Result<Txid> {
+    pub async fn broadcast(&self, tx: &be::Transaction) -> anyhow::Result<Txid> {
         let url = format!("{}/tx", self.base_url);
-        let tx_hex = serialize_hex(tx);
+        let tx_hex = tx.serialize_hex();
         let response = self.client.post(&url).body(tx_hex).send().await?;
         let status_code = response.status().as_u16();
         let text = response.text().await?;
