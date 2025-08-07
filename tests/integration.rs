@@ -243,15 +243,18 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     assert_eq!(result, result_v2);
 
     // Test addresses
-    let addresses = vec![addr.to_unconfidential().unwrap()];
-    let (result, _) = client.waterfalls_addresses(&addresses).await.unwrap();
+    let addr = match test_env.family {
+        Family::Bitcoin => addr,
+        Family::Elements => addr.to_unconfidential().unwrap(),
+    };
+    let (result, _) = client
+        .waterfalls_addresses(&vec![addr.clone()])
+        .await
+        .unwrap();
     assert_eq!(result.count_non_empty(), 1);
 
     // Test address_txs
-    let address_txs = client
-        .address_txs(&addr.to_unconfidential().unwrap())
-        .await
-        .unwrap();
+    let address_txs = client.address_txs(&addr).await.unwrap();
     assert!(address_txs.contains(&initial_txid.to_string()));
 
     // Create two transactions in the same block the second one is spending an output of the first one
