@@ -6,7 +6,7 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use bitcoin::hex::FromHex;
 use elements::{encode::Decodable, BlockHash, Txid};
-use hyper::{body::Buf, StatusCode};
+use hyper::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
 use tokio::time::sleep;
@@ -250,15 +250,15 @@ impl Client {
             .with_context(|| format!("failure reading {url} body in bytes"))?;
 
         Ok(if self.use_esplora {
-            let content: HashSet<Txid> = serde_json::from_reader(body_bytes.reader())
+            let content: HashSet<Txid> = serde_json::from_slice(&body_bytes)
                 .with_context(|| format!("failure converting {url} body in HashSet<Txid>"))?;
             content
         } else {
             if support_verbose {
-                serde_json::from_reader(body_bytes.reader())
+                serde_json::from_slice(&body_bytes)
                     .with_context(|| format!("failure converting {url} body in HashSet<Txid> "))?
             } else {
-                let content: HashMap<Txid, Empty> = serde_json::from_reader(body_bytes.reader())
+                let content: HashMap<Txid, Empty> = serde_json::from_slice(&body_bytes)
                     .with_context(|| {
                         format!("failure converting {url} body in HashMap<Txid, Empty> ")
                     })?;

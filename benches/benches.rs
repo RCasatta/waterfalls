@@ -1,6 +1,10 @@
+use std::collections::HashSet;
+
 use bitcoin::key::Secp256k1;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use hyper::body::Buf;
 
+use elements::Txid;
 use elements_miniscript::Descriptor;
 use elements_miniscript::DescriptorPublicKey;
 use waterfalls::WaterfallResponse;
@@ -73,7 +77,61 @@ pub fn encoding_decoding(c: &mut Criterion) {
                 let json: WaterfallResponseV3 = serde_json::from_str(s).unwrap();
                 black_box(json);
             });
-        });
+        })
+        .bench_function("decode mempool json", |b: &mut criterion::Bencher<'_>| {
+            let s = include_str!("../tests/data/mempool-verbose-false.json");
+            b.iter(|| {
+                let json: HashSet<Txid> = serde_json::from_str(s).unwrap();
+                black_box(json);
+            });
+        })
+        .bench_function(
+            "decode mempool json from_reader",
+            |b: &mut criterion::Bencher<'_>| {
+                let bytes = include_bytes!("../tests/data/mempool-verbose-false.json");
+                b.iter(|| {
+                    let reader = std::io::Cursor::new(bytes);
+                    let json: HashSet<Txid> = serde_json::from_reader(reader).unwrap();
+                    black_box(json);
+                });
+            },
+        )
+        .bench_function(
+            "decode mempool json from_slice",
+            |b: &mut criterion::Bencher<'_>| {
+                let bytes = include_bytes!("../tests/data/mempool-verbose-false.json");
+                b.iter(|| {
+                    let json: HashSet<Txid> = serde_json::from_slice(bytes).unwrap();
+                    black_box(json);
+                });
+            },
+        )
+        .bench_function(
+            "decode mempool json bytes_reader",
+            |b: &mut criterion::Bencher<'_>| {
+                let bytes = hyper::body::Bytes::from_static(include_bytes!(
+                    "../tests/data/mempool-verbose-false.json"
+                ));
+                b.iter(|| {
+                    let json: HashSet<Txid> =
+                        serde_json::from_reader(bytes.clone().reader()).unwrap();
+                    black_box(json);
+                });
+            },
+        )
+        .bench_function(
+            "decode mempool json string_conversion",
+            |b: &mut criterion::Bencher<'_>| {
+                let bytes = hyper::body::Bytes::from_static(include_bytes!(
+                    "../tests/data/mempool-verbose-false.json"
+                ));
+                b.iter(|| {
+                    let s = std::str::from_utf8(&bytes).unwrap();
+                    let json: HashSet<Txid> = serde_json::from_str(s).unwrap();
+                    black_box(json);
+                });
+            },
+        );
 }
 
 pub fn conversion(c: &mut Criterion) {
