@@ -207,7 +207,10 @@ impl Client {
     // curl http://127.0.0.1:7041/rest/
     // curl -s http://localhost:7041/rest/mempool/contents.json | jq
     // verbose false is not supported on liquid
-    pub async fn mempool(&self) -> Result<HashSet<Txid>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn mempool(
+        &self,
+        support_verbose: bool,
+    ) -> Result<HashSet<Txid>, Box<dyn std::error::Error + Send + Sync>> {
         let base = &self.base_url;
         let url = if self.use_esplora {
             format!("{base}/mempool/txids")
@@ -215,9 +218,21 @@ impl Client {
             format!("{base}/rest/mempool/contents.json")
         };
 
-        let resp = self.client.get(&url).send().await.with_context(|| {
-            format!("failure opening {url}, is it correct and rest flag enabled in the node?")
-        })?;
+        let query = if support_verbose && !self.use_esplora {
+            HashMap::from([("verbose".to_string(), "false".to_string())])
+        } else {
+            HashMap::new()
+        };
+
+        let resp = self
+            .client
+            .get(&url)
+            .query(&query)
+            .send()
+            .await
+            .with_context(|| {
+                format!("failure opening {url}, is it correct and rest flag enabled in the node?")
+            })?;
         let body_bytes = resp
             .bytes()
             .await
@@ -228,12 +243,17 @@ impl Client {
                 .with_context(|| format!("failure converting {url} body in HashSet<Txid>"))?;
             content
         } else {
-            let content: HashMap<Txid, Empty> = serde_json::from_reader(body_bytes.reader())
-                .with_context(|| {
-                    format!("failure converting {url} body in HashMap<Txid, Empty> ")
-                })?;
+            if support_verbose {
+                serde_json::from_reader(body_bytes.reader())
+                    .with_context(|| format!("failure converting {url} body in HashSet<Txid> "))?
+            } else {
+                let content: HashMap<Txid, Empty> = serde_json::from_reader(body_bytes.reader())
+                    .with_context(|| {
+                        format!("failure converting {url} body in HashMap<Txid, Empty> ")
+                    })?;
 
-            content.into_keys().collect()
+                content.into_keys().collect()
+            }
         })
     }
 
@@ -348,6 +368,7 @@ impl Client {
                     if i % 100 == 0 {
                         // when waiting for a new block, 60 fails are expected
                         log::warn!("waiting for blockhash({height}) for more than {i} secs");
+                        // TODO this doesn't make sense for bitcoin
                     }
                 }
                 Err(e) => {
@@ -383,7 +404,7 @@ mod test {
 
     use crate::{
         server::{Arguments, Network},
-        test_env,
+        test_env, Family,
     };
 
     use super::Client;
@@ -515,7 +536,24 @@ mod test {
                 log::debug!("Skipping genesis transaction fetch for Bitcoin network");
             }
         }
-        client.mempool().await.unwrap();
+        client.mempool(false).await.unwrap();
+
+        println!("mempool true returns: {:?}", client.mempool(false).await);
+
+        println!("mempool true returns: {:?}", client.mempool(true).await);
+
+        if !client.use_esplora {
+            match network.into() {
+                Family::Bitcoin => {
+                    let support_verbose = client.mempool(true).await.is_ok();
+                    assert!(support_verbose);
+                }
+                Family::Elements => {
+                    let support_verbose = client.mempool(true).await.is_ok();
+                    assert!(!support_verbose);
+                }
+            }
+        }
 
         if let Some(another_txid) = another_txid {
             let another_txid = Txid::from_str(another_txid).unwrap();

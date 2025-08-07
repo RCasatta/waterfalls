@@ -15,8 +15,10 @@ pub(crate) async fn mempool_sync_infallible(state: Arc<State>, client: Client, f
 async fn mempool_sync(state: Arc<State>, client: Client, family: Family) -> Result<(), Error> {
     let db = &state.store;
     let mut mempool_txids = HashSet::new();
+    let support_vebose = client.mempool(true).await.is_ok();
+    log::info!("mempool support verbose: {support_vebose}");
     loop {
-        match client.mempool().await {
+        match client.mempool(support_vebose).await {
             Ok(current) => {
                 let tip = state.tip().await;
                 let new: Vec<_> = current.difference(&mempool_txids).collect();
