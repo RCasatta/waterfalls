@@ -98,10 +98,8 @@ impl Transaction {
             }
             Family::Elements => {
                 let elements_tx =
-                    <elements::Transaction as elements::encode::Decodable>::consensus_decode(
-                        &bytes[..],
-                    )
-                    .unwrap();
+                    <elements::Transaction as elements::encode::Decodable>::consensus_decode(bytes)
+                        .unwrap();
                 be::Transaction::Elements(elements_tx)
             }
         })

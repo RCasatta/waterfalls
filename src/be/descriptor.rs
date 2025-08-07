@@ -39,21 +39,21 @@ impl Descriptor {
         }
     }
 
-    pub(crate) fn into_single_descriptors(&self) -> Result<Vec<Self>, Error> {
+    pub(crate) fn into_single_descriptors(self) -> Result<Vec<Self>, Error> {
         Ok(match self {
             Descriptor::Bitcoin(desc) => {
                 let desc = desc
                     .clone()
                     .into_single_descriptors()
                     .map_err(|e| Error::String(e.to_string()))?;
-                desc.into_iter().map(|d| Descriptor::Bitcoin(d)).collect()
+                desc.into_iter().map(Descriptor::Bitcoin).collect()
             }
             Descriptor::Elements(desc) => {
                 let desc = desc
                     .clone()
                     .into_single_descriptors()
                     .map_err(|e| Error::String(e.to_string()))?;
-                desc.into_iter().map(|d| Descriptor::Elements(d)).collect()
+                desc.into_iter().map(Descriptor::Elements).collect()
             }
         })
     }
