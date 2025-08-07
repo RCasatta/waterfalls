@@ -31,13 +31,25 @@ async fn integration_memory_bitcoin() {
 
 #[cfg(all(feature = "test_env", feature = "db"))]
 #[tokio::test]
-async fn integration_db() {
+async fn integration_db_elements() {
     let _ = env_logger::try_init();
 
     let tempdir = tempfile::TempDir::new().unwrap();
     let path = tempdir.path().to_path_buf();
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
     let test_env = waterfalls::test_env::launch(exe, Some(path), Family::Elements).await;
+    do_test(test_env).await;
+}
+
+#[cfg(all(feature = "test_env", feature = "db"))]
+#[tokio::test]
+async fn integration_db_bitcoin() {
+    let _ = env_logger::try_init();
+
+    let tempdir = tempfile::TempDir::new().unwrap();
+    let path = tempdir.path().to_path_buf();
+    let exe = std::env::var("BITCOIND_EXEC").unwrap();
+    let test_env = waterfalls::test_env::launch(exe, Some(path), Family::Bitcoin).await;
     do_test(test_env).await;
 }
 
