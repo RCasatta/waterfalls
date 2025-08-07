@@ -26,8 +26,8 @@ async fn mempool_sync(state: Arc<State>, client: Client, family: Family) -> Resu
                 }
                 if !removed.is_empty() {
                     log::info!(
-                        "removed txs from mempool {:?}, tip: {tip:?}, still in mempool: {}",
-                        removed,
+                        "removed {} txs from mempool, tip: {tip:?}, still in mempool: {}",
+                        removed.len(),
                         current.len()
                     );
                 }
