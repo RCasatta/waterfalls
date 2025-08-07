@@ -282,13 +282,8 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     assert_eq!(result.count_scripts(), 2_000); // this is MAX_BATCH * GAP_LIMIT * 2
     assert!(result.tip.is_some());
 
-    if test_env.family == Family::Bitcoin {
-        // TODO: fix this
-        return;
-    }
-
     // Test descriptor without wildcard
-    let desc_str = format!("elwpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/0/0)");
+    let desc_str = format!("{prefix}wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/0/0)");
     let result = client.waterfalls_v2(&desc_str).await.unwrap().0;
     let first_script_result = &result.txs_seen.iter().next().unwrap().1[0];
     assert_eq!(result.page, 0);
