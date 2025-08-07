@@ -36,7 +36,7 @@ pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<
             let speed = (block_height - next_height) as f64 / start.elapsed().as_secs() as f64;
             log::info!("{block_height} {speed:.2} blocks/s {txs_count} txs");
         }
-        let block_hash = client.block_hash_or_wait(block_height).await;
+        let block_hash = client.block_hash_or_wait(block_height, family).await;
 
         let block = client.block_or_wait(block_hash, family).await;
 

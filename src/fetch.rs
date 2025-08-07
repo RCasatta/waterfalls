@@ -364,7 +364,11 @@ impl Client {
         }
     }
 
-    pub(crate) async fn block_hash_or_wait(&self, height: u32) -> BlockHash {
+    pub(crate) async fn block_hash_or_wait(&self, height: u32, family: Family) -> BlockHash {
+        let logs_every = match family {
+            Family::Bitcoin => 60 * 20, // 20 minutes
+            Family::Elements => 60 * 2, // 2 minutes
+        };
         let mut i = 1;
         loop {
             match self.block_hash(height).await {
@@ -372,10 +376,9 @@ impl Client {
                     return b;
                 }
                 Ok(None) => {
-                    if i % 100 == 0 {
+                    if i % logs_every == 0 {
                         // when waiting for a new block, 60 fails are expected
                         log::warn!("waiting for blockhash({height}) for more than {i} secs");
-                        // TODO this doesn't make sense for bitcoin
                     }
                 }
                 Err(e) => {
