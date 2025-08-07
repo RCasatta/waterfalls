@@ -386,18 +386,6 @@ impl Client {
             sleep(std::time::Duration::from_secs(1)).await
         }
     }
-
-    pub(crate) async fn tx_or_wait(&self, txid: Txid, family: Family) -> be::Transaction {
-        loop {
-            match self.tx(txid, family).await {
-                Ok(t) => return t,
-                Err(e) => {
-                    log::warn!("Failing for tx({txid}) err {e:?}");
-                    sleep(std::time::Duration::from_secs(1)).await
-                }
-            }
-        }
-    }
 }
 
 #[derive(Deserialize)]

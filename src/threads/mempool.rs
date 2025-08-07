@@ -36,8 +36,17 @@ async fn mempool_sync(state: Arc<State>, client: Client, family: Family) -> Resu
 
                 let mut txs = vec![];
                 for new_txid in new {
-                    let tx = client.tx_or_wait(*new_txid, family).await;
-                    txs.push(tx)
+                    match client.tx(*new_txid, family).await {
+                        Ok(tx) => txs.push(tx),
+                        Err(e) => {
+                            if let Some(crate::fetch::Error::TxNotFound(_, _)) = e.downcast_ref() {
+                                // tx not found, it was replaced from mempool with RBF for example
+                                log::info!("{e}");
+                            } else {
+                                log::error!("{e}");
+                            }
+                        }
+                    }
                 }
                 {
                     let mut m = state.mempool.lock().await;
