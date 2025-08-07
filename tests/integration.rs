@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 use tokio::time::sleep;
 use waterfalls::Family;
+#[cfg(feature = "test_env")]
+use waterfalls::{be, server::Network};
 
 #[cfg(feature = "test_env")]
 #[tokio::test]
@@ -55,21 +57,20 @@ async fn launch_memory() -> waterfalls::test_env::TestEnv<'static> {
 }
 
 #[cfg(feature = "test_env")]
-fn get_new_address(wallet: &bitcoind::bitcoincore_rpc::Client) -> elements::Address {
+fn get_new_address(wallet: &bitcoind::bitcoincore_rpc::Client, network: Network) -> be::Address {
     use bitcoind::bitcoincore_rpc::RpcApi;
     use serde_json::Value;
-    use std::str::FromStr;
 
     let address_value: Value = wallet
         .call("getnewaddress", &[Value::Null, Value::Null])
         .unwrap();
-    elements::Address::from_str(address_value.as_str().unwrap()).unwrap()
+    be::Address::from_str(address_value.as_str().unwrap(), network).unwrap()
 }
 
 #[cfg(feature = "test_env")]
 fn send_to_address(
     wallet: &bitcoind::bitcoincore_rpc::Client,
-    address: &elements::Address,
+    address: &be::Address,
     amount: f64,
 ) -> elements::Txid {
     use bitcoind::bitcoincore_rpc::RpcApi;
@@ -255,25 +256,17 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     let address_txs = client.address_txs(&addr).await.unwrap();
     assert!(address_txs.contains(&initial_txid.to_string()));
 
-    if test_env.family == Family::Bitcoin {
-        // TODO: fix this
-        return;
-    }
-
     // Create two transactions in the same block the second one is spending an output of the first one
     let other_wallet = test_env.create_other_wallet();
-    let other_address = get_new_address(&other_wallet);
-    test_env.send_to(&be::Address::Elements(other_address), 1_000_000);
+    let other_address = get_new_address(&other_wallet, test_env.network());
+    test_env.send_to(&other_address, 1_000_000);
     test_env.node_generate(1).await;
-    let address_spent_same_block = get_new_address(&other_wallet);
+    let address_spent_same_block = get_new_address(&other_wallet, test_env.network());
     let txid1 = send_to_address(&other_wallet, &address_spent_same_block, 0.0098);
     let new_address = test_env.get_new_address(None);
-    let txid2 = send_to_address(&other_wallet, new_address.elements().unwrap(), 0.0096);
+    let txid2 = send_to_address(&other_wallet, &new_address, 0.0096);
     test_env.node_generate(1).await;
-    let address_txs = client
-        .address_txs(&be::Address::Elements(address_spent_same_block))
-        .await
-        .unwrap();
+    let address_txs = client.address_txs(&address_spent_same_block).await.unwrap();
     assert!(address_txs.contains(&txid1.to_string()));
     assert!(address_txs.contains(&txid2.to_string()));
 
@@ -288,6 +281,11 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     assert_eq!(result.count_non_empty(), 1);
     assert_eq!(result.count_scripts(), 2_000); // this is MAX_BATCH * GAP_LIMIT * 2
     assert!(result.tip.is_some());
+
+    if test_env.family == Family::Bitcoin {
+        // TODO: fix this
+        return;
+    }
 
     // Test descriptor without wildcard
     let desc_str = format!("elwpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/0/0)");

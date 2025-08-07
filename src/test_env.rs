@@ -178,7 +178,7 @@ impl<'a> TestEnv<'a> {
         let _ = self.handle.await.unwrap();
     }
 
-    fn network(&self) -> Network {
+    pub fn network(&self) -> Network {
         match self.family {
             Family::Bitcoin => Network::BitcoinRegtest,
             Family::Elements => Network::ElementsRegtest,
