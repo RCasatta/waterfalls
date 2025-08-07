@@ -200,6 +200,9 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     let tx_sign = test_env.sign_raw_transanction_with_wallet(&tx_blind);
     let txid = client.broadcast(&tx_sign).await.unwrap();
 
+    // TODO: this helps with flakyness, fix properly and remove
+    sleep(Duration::from_secs(1)).await;
+
     match test_env.family {
         Family::Bitcoin => {
             // assert_eq!(txid, tx_blind.txid()); // TODO: fix this
@@ -232,11 +235,6 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     .unwrap();
     assert!(sign_result);
 
-    if test_env.family == Family::Bitcoin {
-        // TODO: fix this
-        return;
-    }
-
     // Test v3
     let (result_v3, _headers) = client.waterfalls(&bitcoin_desc).await.unwrap();
     let result_v2: WaterfallResponse = result_v3.try_into().unwrap();
@@ -256,6 +254,11 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     // Test address_txs
     let address_txs = client.address_txs(&addr).await.unwrap();
     assert!(address_txs.contains(&initial_txid.to_string()));
+
+    if test_env.family == Family::Bitcoin {
+        // TODO: fix this
+        return;
+    }
 
     // Create two transactions in the same block the second one is spending an output of the first one
     let other_wallet = test_env.create_other_wallet();
