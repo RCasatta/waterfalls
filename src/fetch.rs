@@ -3,10 +3,10 @@ use std::{
     str::FromStr,
 };
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, Context, Result};
 use bitcoin::hex::FromHex;
 use elements::{encode::Decodable, BlockHash, Txid};
-use hyper::body::Buf;
+use hyper::{body::Buf, StatusCode};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::time::sleep;
@@ -15,6 +15,31 @@ use crate::{
     be::{self, Family},
     server::{Arguments, Network},
 };
+
+#[derive(Debug)]
+pub enum Error {
+    TxNotFound(String, Txid),
+    BlockNotFound(String, BlockHash),
+    BlockHeaderNotFound(String, BlockHash),
+    UnexpectedStatus(String, StatusCode),
+}
+
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::TxNotFound(url, txid) => write!(f, "tx not found: {txid} for url {url}"),
+            Error::BlockNotFound(url, hash) => write!(f, "block not found: {hash} for url {url}"),
+            Error::BlockHeaderNotFound(url, hash) => {
+                write!(f, "block header not found: {hash} for url {url}")
+            }
+            Error::UnexpectedStatus(url, status) => {
+                write!(f, "unexpected status: {status} for url {url}")
+            }
+        }
+    }
+}
 
 pub struct Client {
     client: reqwest::Client,
@@ -74,10 +99,7 @@ impl Client {
 
     // `curl http://127.0.0.1:7041/rest/blockhashbyheight/0.hex`
     // GET /block-height/:height
-    pub async fn block_hash(
-        &self,
-        height: u32,
-    ) -> Result<Option<BlockHash>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn block_hash(&self, height: u32) -> Result<Option<BlockHash>> {
         let base = &self.base_url;
         let url = if self.use_esplora {
             format!("{base}/block-height/{height}")
@@ -110,11 +132,7 @@ impl Client {
 
     /// GET /rest/block/<BLOCK-HASH>.<bin|hex|json>
     /// GET /block/:hash/raw
-    pub async fn block(
-        &self,
-        hash: BlockHash,
-        family: Family,
-    ) -> Result<be::Block, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn block(&self, hash: BlockHash, family: Family) -> Result<be::Block> {
         let base = &self.base_url;
         let url = if self.use_esplora {
             format!("{base}/block/{hash}/raw")
@@ -129,9 +147,9 @@ impl Client {
             .with_context(|| format!("failing for {url}"))?;
         let status = resp.status();
         if status == 404 {
-            return Err(format!("{url} return not found.").into());
+            return Err(Error::BlockNotFound(url, hash).into());
         } else if status != 200 {
-            return Err(format!("{url} return unexpected status {status}").into());
+            return Err(Error::UnexpectedStatus(url, status).into());
         }
 
         let bytes = resp.bytes().await?;
@@ -152,11 +170,7 @@ impl Client {
 
     /// GET /rest/headers/<BLOCK-HASH>.<bin|hex|json>
     /// GET /block/:hash/header
-    pub async fn block_header(
-        &self,
-        hash: BlockHash,
-        family: Family,
-    ) -> Result<be::BlockHeader, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn block_header(&self, hash: BlockHash, family: Family) -> Result<be::BlockHeader> {
         let base = &self.base_url;
         let url = if self.use_esplora {
             format!("{base}/block/{hash}/header")
@@ -170,9 +184,9 @@ impl Client {
         let resp = self.client.get(&url).send().await?;
         let status = resp.status();
         if status == 404 {
-            return Err(format!("{url} return not found.").into());
+            return Err(Error::BlockHeaderNotFound(url, hash).into());
         } else if status != 200 {
-            return Err(format!("{url} return unexpected status {status}").into());
+            return Err(Error::UnexpectedStatus(url, status).into());
         }
 
         match family {
@@ -207,10 +221,7 @@ impl Client {
     // curl http://127.0.0.1:7041/rest/
     // curl -s http://localhost:7041/rest/mempool/contents.json | jq
     // verbose false is not supported on liquid
-    pub async fn mempool(
-        &self,
-        support_verbose: bool,
-    ) -> Result<HashSet<Txid>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn mempool(&self, support_verbose: bool) -> Result<HashSet<Txid>> {
         let base = &self.base_url;
         let url = if self.use_esplora {
             format!("{base}/mempool/txids")
@@ -258,24 +269,20 @@ impl Client {
     }
 
     /// GET /rest/tx/<TX-HASH>.<bin|hex|json>
-    pub async fn tx(
-        &self,
-        txid: Txid,
-        family: Family,
-    ) -> Result<be::Transaction, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn tx(&self, txid: Txid, family: Family) -> Result<be::Transaction> {
         let base = &self.base_url;
         let url = if self.use_esplora {
             format!("{base}/tx/{txid}/raw")
         } else {
-            format!("{base}/rest/tx/{txid}.bin",)
+            format!("{base}/rest/tx/{txid}.bin")
         };
         let resp = self.client.get(&url).send().await?;
 
         let status = resp.status();
         if status == 404 {
-            return Err(format!("Transaction {txid} not found").into());
+            return Err(Error::TxNotFound(url, txid).into());
         } else if status != 200 {
-            return Err(format!("Request failed with status {status}").into());
+            return Err(Error::UnexpectedStatus(url, status).into());
         }
 
         let bytes = resp.bytes().await?;
@@ -299,7 +306,7 @@ impl Client {
     /// When using the node it must go through RPC interface because the node doesn't support broadcasting via REST
     /// We can't go full RPC for other methods because RPC doesn't return binary data
     ///
-    pub async fn broadcast(&self, tx: &be::Transaction) -> Result<Txid, anyhow::Error> {
+    pub async fn broadcast(&self, tx: &be::Transaction) -> Result<Txid> {
         let tx_hex = tx.serialize_hex();
 
         let response = if self.use_esplora {
