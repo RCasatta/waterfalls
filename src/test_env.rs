@@ -21,7 +21,7 @@ use bitcoind::{
 use elements::{
     bitcoin::{Amount, Denomination},
     encode::{serialize_hex, Decodable},
-    BlockHash, BlockHeader, Transaction, Txid,
+    BlockHash, BlockHeader, Txid,
 };
 use hyper::HeaderMap;
 use serde::{Deserialize, Serialize};
@@ -106,7 +106,7 @@ async fn inner_launch_with_node(node: &BitcoinD, path: Option<PathBuf>, family: 
     let (tx, rx) = oneshot::channel();
     let handle = tokio::spawn(inner_main(args, shutdown_signal(rx)));
 
-    let client = WaterfallClient::new(base_url.to_string());
+    let client = WaterfallClient::new(base_url.to_string(), family);
     let secp = Secp256k1::new();
 
     let test_env = TestEnv {
@@ -315,12 +315,17 @@ pub struct Input {
 pub struct WaterfallClient {
     client: reqwest::Client,
     base_url: String,
+    family: Family,
 }
 
 impl WaterfallClient {
-    pub fn new(base_url: String) -> Self {
+    pub fn new(base_url: String, family: Family) -> Self {
         let client = reqwest::Client::new();
-        Self { client, base_url }
+        Self {
+            client,
+            base_url,
+            family,
+        }
     }
 
     /// Call the waterfalls endpoint
@@ -498,7 +503,7 @@ impl WaterfallClient {
             .map(|a| a.assume_checked())
     }
 
-    pub async fn tx(&self, txid: Txid) -> anyhow::Result<Transaction> {
+    pub async fn tx(&self, txid: Txid) -> anyhow::Result<be::Transaction> {
         let url = format!("{}/tx/{}/raw", self.base_url, txid);
         let response = self.client.get(&url).send().await?;
         let status_code = response.status().as_u16();
@@ -506,8 +511,7 @@ impl WaterfallClient {
             bail!("tx response for {url} is not 200 but: {status_code}");
         }
         let bytes = response.bytes().await?;
-
-        Transaction::consensus_decode(bytes.as_ref()).or_else(|e| bail!("cannot parse tx {}", e))
+        be::Transaction::from_bytes(&bytes, self.family)
     }
 
     pub async fn broadcast(&self, tx: &be::Transaction) -> anyhow::Result<Txid> {

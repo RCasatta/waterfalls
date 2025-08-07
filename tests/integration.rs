@@ -200,12 +200,14 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     let tx_sign = test_env.sign_raw_transanction_with_wallet(&tx_blind);
     let txid = client.broadcast(&tx_sign).await.unwrap();
 
-    if test_env.family == Family::Bitcoin {
-        // TODO: bitcoin test works up here for now, remove this
-        return;
+    match test_env.family {
+        Family::Bitcoin => {
+            // assert_eq!(txid, tx_blind.txid()); // TODO: fix this
+        }
+        Family::Elements => {
+            assert_eq!(txid, tx_blind.txid());
+        }
     }
-
-    assert_eq!(txid, tx_blind.txid());
 
     // Test getting tx
     let tx = client.tx(txid).await.unwrap();
@@ -229,6 +231,11 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     )
     .unwrap();
     assert!(sign_result);
+
+    if test_env.family == Family::Bitcoin {
+        // TODO: fix this
+        return;
+    }
 
     // Test v3
     let (result_v3, _headers) = client.waterfalls(&bitcoin_desc).await.unwrap();

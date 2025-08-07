@@ -86,8 +86,7 @@ impl Transaction {
         }
     }
 
-    pub(crate) fn from_str(tx_hex: &str, family: be::Family) -> Result<Self, anyhow::Error> {
-        let bytes = Vec::<u8>::from_hex(tx_hex).unwrap();
+    pub(crate) fn from_bytes(bytes: &[u8], family: be::Family) -> Result<Self, anyhow::Error> {
         Ok(match family {
             Family::Bitcoin => {
                 let bitcoin_tx =
@@ -106,6 +105,11 @@ impl Transaction {
                 be::Transaction::Elements(elements_tx)
             }
         })
+    }
+
+    pub(crate) fn from_str(tx_hex: &str, family: be::Family) -> Result<Self, anyhow::Error> {
+        let bytes = Vec::<u8>::from_hex(tx_hex).unwrap();
+        Self::from_bytes(&bytes, family)
     }
 }
 
