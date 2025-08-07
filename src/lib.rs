@@ -308,7 +308,7 @@ impl TxSeen {
 }
 
 impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
-    type Error = ();
+    type Error = String;
 
     fn try_from(value: WaterfallResponse) -> Result<Self, Self::Error> {
         let mut txids: Vec<Txid> = value
@@ -327,9 +327,10 @@ impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
             .flat_map(|(_, v)| v.iter())
             .flat_map(|a| a.iter())
             .map(|a| {
-                Ok::<BlockMeta, ()>(BlockMeta {
-                    b: a.block_hash.ok_or(())?,
-                    t: a.block_timestamp.ok_or(())?,
+                Ok::<BlockMeta, String>(BlockMeta {
+                    b: a.block_hash.ok_or("missing block hash".to_string())?,
+                    t: a.block_timestamp
+                        .ok_or("missing block timestamp".to_string())?,
                     h: a.height,
                 })
             })
@@ -359,7 +360,7 @@ impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
         let r = WaterfallResponseV3 {
             txs_seen,
             page: value.page,
-            tip: value.tip.ok_or(())?,
+            tip: value.tip.ok_or("missing tip".to_string())?,
             txids,
             blocks_meta,
         };
