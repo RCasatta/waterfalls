@@ -223,9 +223,9 @@ impl<'a> TestEnv<'a> {
     }
 
     /// generate `block_num` blocks and wait the waterfalls server had indexed them
-    pub async fn node_generate(&self, block_num: u32) {
+    pub async fn node_generate(&self, block_num: u32) -> Vec<BlockHash> {
         let address = self.get_new_address(None);
-        let hash = self
+        let result = self
             .node
             .client
             .call::<Value>(
@@ -233,10 +233,19 @@ impl<'a> TestEnv<'a> {
                 &[block_num.into(), address.to_string().into()],
             )
             .unwrap();
-        let hash = hash.as_array().unwrap().last().unwrap().as_str().unwrap();
-        let hash = BlockHash::from_str(hash).unwrap();
 
-        self.client.wait_tip_hash(hash).await.unwrap();
+        let hashes: Vec<BlockHash> = result
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| BlockHash::from_str(v.as_str().unwrap()).unwrap())
+            .collect();
+
+        let last = hashes.last().unwrap();
+
+        self.client.wait_tip_hash(*last).await.unwrap();
+
+        hashes
     }
 
     pub fn list_unspent(&self) -> Vec<Input> {
@@ -300,25 +309,6 @@ impl<'a> TestEnv<'a> {
         be::Transaction::from_str(tx_hex, self.family).unwrap()
     }
 
-    /// Generate blocks to a specific address and return the block hashes
-    pub fn generate_to_address(&self, block_count: u32, address: &be::Address) -> Vec<BlockHash> {
-        let result: Value = self
-            .node
-            .client
-            .call(
-                "generatetoaddress",
-                &[block_count.into(), address.to_string().into()],
-            )
-            .unwrap();
-
-        result
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| BlockHash::from_str(v.as_str().unwrap()).unwrap())
-            .collect()
-    }
-
     /// Invalidate a block to trigger a reorg
     pub fn invalidate_block(&self, block_hash: BlockHash) {
         self.node
@@ -326,13 +316,39 @@ impl<'a> TestEnv<'a> {
             .call::<Value>("invalidateblock", &[block_hash.to_string().into()])
             .unwrap();
     }
+
+    /// Create a raw transaction that spends specific UTXOs to a specific address
+    pub fn create_transaction_spending(
+        &self,
+        inputs: &[Input],
+        recipient: &be::Address,
+        amount_btc: f64,
+    ) -> be::Transaction {
+        let param1 = serde_json::to_value(inputs).unwrap();
+
+        let param2 = match self.family {
+            Family::Bitcoin => serde_json::json!([{recipient.to_string(): amount_btc}]),
+            Family::Elements => {
+                let fee = 0.00001000;
+                serde_json::json!([{recipient.to_string(): amount_btc}, {"fee": fee}])
+            }
+        };
+
+        let val = self
+            .node
+            .client
+            .call::<Value>("createrawtransaction", &[param1, param2])
+            .unwrap();
+        let tx_hex = val.as_str().unwrap();
+        be::Transaction::from_str(tx_hex, self.family).unwrap()
+    }
 }
 
 async fn shutdown_signal(rx: Receiver<()>) {
     rx.await.unwrap()
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Input {
     pub txid: String,
     pub vout: u32,

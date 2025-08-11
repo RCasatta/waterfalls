@@ -386,45 +386,89 @@ async fn test_no_txindex() {
     let _tx = test_env.client().tx(txid).await.unwrap();
 }
 
-#[cfg(feature = "test_env")]
+#[cfg(all(feature = "test_env", feature = "db"))]
 #[tokio::test]
 async fn test_bitcoin_reorg() {
     let _ = env_logger::try_init();
 
-    let test_env = launch_memory(Family::Bitcoin).await;
+    let tempdir = tempfile::TempDir::new().unwrap();
+    let path = tempdir.path().to_path_buf();
+    let exe = std::env::var("BITCOIND_EXEC").unwrap();
+    let test_env = waterfalls::test_env::launch(exe, Some(path), Family::Bitcoin).await;
 
     // Generate some initial blocks to build upon
     test_env.node_generate(5).await;
 
-    // Generate block A - this will be the block we reorg away from
-    let address_a = test_env.get_new_address(None);
-    let block_a_hashes = test_env.generate_to_address(1, &address_a);
+    // Create some UTXOs that can be spent in the competing blocks
+    let address_to_spend = test_env.get_new_address(None);
+    test_env.send_to(&address_to_spend, 10_000);
+    test_env.node_generate(1).await; // This creates UTXOs we can spend
+
+    // Get a specific UTXO that we'll spend in both chains (creating a double-spend)
+    let unspent = test_env.list_unspent();
+    let utxo_to_double_spend = &unspent[0]; // Take the first available UTXO
+    println!(
+        "UTXO to double-spend: {} vout {} amount {}",
+        utxo_to_double_spend.txid, utxo_to_double_spend.vout, utxo_to_double_spend.amount
+    );
+
+    // Create transaction A - spends the UTXO to recipient A
+    let recipient_a = test_env.get_new_address(None);
+    let tx_a = test_env.create_transaction_spending(
+        &[(*utxo_to_double_spend).clone()],
+        &recipient_a,
+        utxo_to_double_spend.amount - 0.00001, // Leave small fee
+    );
+    let signed_tx_a = test_env.sign_raw_transanction_with_wallet(&tx_a);
+
+    // Broadcast transaction A and mine it in block A
+    let txid_a = test_env.client().broadcast(&signed_tx_a).await.unwrap();
+    let block_a_hashes = test_env.node_generate(1).await;
     let block_a_hash = block_a_hashes[0];
 
     // Wait for the waterfalls server to index block A
     test_env.client().wait_tip_hash(block_a_hash).await.unwrap();
 
-    println!("Created block A: {}", block_a_hash);
+    println!(
+        "Created block A: {} with transaction: {}",
+        block_a_hash, txid_a
+    );
 
     let block_a_header = test_env.client().header(block_a_hash).await.unwrap();
+
     // Now create the reorg by invalidating block A
     test_env.invalidate_block(block_a_hash);
 
-    // Generate block B and additional blocks to make it the longest chain
-    let address_b = test_env.get_new_address(None);
-    let blocks_b_hashes = test_env.generate_to_address(2, &address_b);
+    // Create transaction B - spends the SAME UTXO to recipient B (double-spend)
+    let recipient_b = test_env.get_new_address(None);
+    let tx_b = test_env.create_transaction_spending(
+        &[(*utxo_to_double_spend).clone()],
+        &recipient_b,
+        utxo_to_double_spend.amount - 0.00002, // Leave slightly different fee
+    );
+    let signed_tx_b = test_env.sign_raw_transanction_with_wallet(&tx_b);
+
+    // Broadcast transaction B and mine it in block B
+    let txid_b = test_env.client().broadcast(&signed_tx_b).await.unwrap();
+    let blocks_b_hashes = test_env.node_generate(2).await;
     let block_b_hash = blocks_b_hashes[0];
     let final_tip_hash = blocks_b_hashes[1];
 
+    println!(
+        "Created block B: {} with transaction: {}",
+        block_b_hash, txid_b
+    );
+    println!("New tip after reorg: {}", final_tip_hash);
+
     // Wait for the waterfalls server to index the new tip
+    // This should trigger the "every utxo must exist when spent" expect line
+    // because the server will try to process transaction B that spends
+    // the same UTXO that was already spent in transaction A
     test_env
         .client()
         .wait_tip_hash(final_tip_hash)
         .await
         .unwrap();
-
-    println!("Created block B: {}", block_b_hash);
-    println!("New tip after reorg: {}", final_tip_hash);
 
     // Verify the reorg happened by checking that block A is no longer in the main chain
     let current_tip = test_env.client().tip_hash().await.unwrap();
