@@ -426,7 +426,7 @@ mod test {
     }
 
     #[tokio::test]
-    #[ignore = "connects to local node instance"]
+    #[cfg_attr(not(feature = "local_exec"), ignore = "skipped in CI")]
     async fn test_client_local_regtest_elements() {
         let elementsd = test_env::launch_elements(
             std::env::var("ELEMENTSD_EXEC").expect("ELEMENTSD_EXEC must be set"),
@@ -468,7 +468,7 @@ mod test {
     }
 
     #[tokio::test]
-    #[ignore = "connects to local node instance"]
+    #[cfg_attr(not(feature = "local_exec"), ignore = "skipped in CI")]
     async fn test_client_local_regtest_bitcoin() {
         let _ = env_logger::try_init();
         let bitcoind = test_env::launch_bitcoin(

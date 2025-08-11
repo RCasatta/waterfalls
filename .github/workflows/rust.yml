@@ -19,7 +19,7 @@ jobs:
     - name: Build
       run: cargo build
     - name: Run tests
-      run: cargo test --lib
+      run: cargo test --lib --no-default-features --features test_env,db
 
   nix:
     runs-on: ubuntu-latest
