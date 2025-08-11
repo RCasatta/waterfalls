@@ -181,7 +181,11 @@ impl Client {
                 Family::Elements => format!("{base}/rest/headers/1/{hash}.bin",), // pre bitcoin 24.0
             }
         };
-        let resp = self.client.get(&url).send().await?;
+        let mut builder = self.client.get(&url);
+        if family == Family::Bitcoin && !self.use_esplora {
+            builder = builder.query(&[("count", "1")]);
+        }
+        let resp = builder.send().await?;
         let status = resp.status();
         if status == 404 {
             return Err(Error::BlockHeaderNotFound(url, hash).into());
