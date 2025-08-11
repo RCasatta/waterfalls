@@ -388,6 +388,63 @@ async fn test_no_txindex() {
 
 #[cfg(feature = "test_env")]
 #[tokio::test]
+async fn test_bitcoin_reorg() {
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory(Family::Bitcoin).await;
+
+    // Generate some initial blocks to build upon
+    test_env.node_generate(5).await;
+
+    // Generate block A - this will be the block we reorg away from
+    let address_a = test_env.get_new_address(None);
+    let block_a_hashes = test_env.generate_to_address(1, &address_a);
+    let block_a_hash = block_a_hashes[0];
+
+    // Wait for the waterfalls server to index block A
+    test_env.client().wait_tip_hash(block_a_hash).await.unwrap();
+
+    println!("Created block A: {}", block_a_hash);
+
+    let block_a_header = test_env.client().header(block_a_hash).await.unwrap();
+    // Now create the reorg by invalidating block A
+    test_env.invalidate_block(block_a_hash);
+
+    // Generate block B and additional blocks to make it the longest chain
+    let address_b = test_env.get_new_address(None);
+    let blocks_b_hashes = test_env.generate_to_address(2, &address_b);
+    let block_b_hash = blocks_b_hashes[0];
+    let final_tip_hash = blocks_b_hashes[1];
+
+    // Wait for the waterfalls server to index the new tip
+    test_env
+        .client()
+        .wait_tip_hash(final_tip_hash)
+        .await
+        .unwrap();
+
+    println!("Created block B: {}", block_b_hash);
+    println!("New tip after reorg: {}", final_tip_hash);
+
+    // Verify the reorg happened by checking that block A is no longer in the main chain
+    let current_tip = test_env.client().tip_hash().await.unwrap();
+    assert_eq!(current_tip, final_tip_hash);
+    assert_ne!(current_tip, block_a_hash);
+
+    // Try to get block A header should now error
+    let _ = test_env.client().header(block_a_hash).await.unwrap_err();
+    let block_b_header = test_env.client().header(block_b_hash).await.unwrap();
+
+    // Both blocks should have the same previous block hash (they're at the same height)
+    assert_eq!(block_a_header.prev_blockhash, block_b_header.prev_blockhash);
+
+    println!("Reorg test completed successfully");
+
+    test_env.shutdown().await;
+}
+
+#[cfg(feature = "test_env")]
+#[tokio::test]
 async fn test_lwk_wollet() {
     use lwk_common::Signer;
     use waterfalls::be;

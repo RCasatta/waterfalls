@@ -299,6 +299,33 @@ impl<'a> TestEnv<'a> {
         let tx_hex = val.get("hex").unwrap().as_str().unwrap();
         be::Transaction::from_str(tx_hex, self.family).unwrap()
     }
+
+    /// Generate blocks to a specific address and return the block hashes
+    pub fn generate_to_address(&self, block_count: u32, address: &be::Address) -> Vec<BlockHash> {
+        let result: Value = self
+            .node
+            .client
+            .call(
+                "generatetoaddress",
+                &[block_count.into(), address.to_string().into()],
+            )
+            .unwrap();
+
+        result
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| BlockHash::from_str(v.as_str().unwrap()).unwrap())
+            .collect()
+    }
+
+    /// Invalidate a block to trigger a reorg
+    pub fn invalidate_block(&self, block_hash: BlockHash) {
+        self.node
+            .client
+            .call::<Value>("invalidateblock", &[block_hash.to_string().into()])
+            .unwrap();
+    }
 }
 
 async fn shutdown_signal(rx: Receiver<()>) {
@@ -471,6 +498,10 @@ impl WaterfallClient {
     pub async fn header(&self, block_hash: BlockHash) -> anyhow::Result<BlockHeader> {
         let url = format!("{}/block/{}/header", self.base_url, block_hash);
         let response = self.client.get(&url).send().await?;
+        let status_code = response.status().as_u16();
+        if status_code != 200 {
+            bail!("header response is not 200 but: {}", status_code);
+        }
         let text = response.text().await?;
         let bytes = hex::decode(text)?;
         let header = BlockHeader::consensus_decode(&bytes[..])?;
