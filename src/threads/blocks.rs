@@ -3,15 +3,16 @@ use crate::{
     fetch::Client,
     server::{Error, State},
     store::{BlockMeta, Store},
-    TxSeen, V,
+    Height, Timestamp, TxSeen, V,
 };
-use elements::{OutPoint, Txid};
+use elements::{BlockHash, OutPoint, Txid};
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
+use tokio::time::sleep;
 
 pub(crate) async fn blocks_infallible(shared_state: Arc<State>, client: Client, family: Family) {
     if let Err(e) = index(shared_state, client, family).await {
@@ -21,24 +22,65 @@ pub(crate) async fn blocks_infallible(shared_state: Arc<State>, client: Client, 
 
 pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<(), Error> {
     let db = &state.store;
-    let next_height = state.blocks_hash_ts.lock().await.len() as u32;
+
+    let mut last_indexed = state
+        .blocks_hash_ts
+        .lock()
+        .await
+        .iter()
+        .enumerate()
+        .last()
+        .map(|(height, (hash, ts))| BlockMeta::new(height as u32, *hash, *ts));
+
+    log::info!("last indexed block is: {last_indexed:?}");
+    let initial_height = last_indexed.as_ref().map(|b| b.height).unwrap_or(0);
 
     let skip_outpoint = generate_skip_outpoint();
 
     let mut txs_count = 0u64;
 
     let start = Instant::now();
-    for block_height in next_height.. {
+    let last_logging = Instant::now();
+    loop {
+        let block_to_index = loop {
+            match last_indexed.as_ref() {
+                Some(last) => {
+                    if let Ok(Some(next)) = client.get_next(&last, family).await {
+                        break next;
+                    }
+                }
+                None => {
+                    if let Ok(Some(next)) = client.block_hash(0).await {
+                        break BlockMeta::new(0, next, 0); // TODO timestamp
+                    }
+                }
+            }
+            sleep(Duration::from_secs(1)).await;
+        };
+
+        log::debug!("current block to index is: {block_to_index:?}");
+
+        if last_logging.elapsed().as_secs() > 60 {
+            let speed =
+                (block_to_index.height - initial_height) as f64 / start.elapsed().as_secs() as f64;
+            log::info!(
+                "{} {speed:.2} blocks/s {txs_count} txs",
+                block_to_index.height
+            );
+        }
+
         let mut history_map = HashMap::new();
         let mut utxo_created = HashMap::new();
         let mut utxo_spent = vec![];
-        if block_height % 10_000 == 0 {
-            let speed = (block_height - next_height) as f64 / start.elapsed().as_secs() as f64;
-            log::info!("{block_height} {speed:.2} blocks/s {txs_count} txs");
-        }
-        let block_hash = client.block_hash_or_wait(block_height, family).await;
 
-        let block = client.block_or_wait(block_hash, family).await;
+        let block = match client.block(block_to_index.hash, family).await {
+            Ok(block) => block,
+            Err(e) => {
+                log::error!("error getting block: {e}");
+                sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
 
         let time = block.time();
 
@@ -51,7 +93,7 @@ pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<
                 }
                 let script_hash = db.hash(output.script_pubkey().as_bytes());
                 let el = history_map.entry(script_hash).or_insert(vec![]);
-                el.push(TxSeen::new(txid, block_height, V::Vout(j as u32)));
+                el.push(TxSeen::new(txid, block_to_index.height, V::Vout(j as u32)));
 
                 let out_point = OutPoint::new(txid, j as u32);
                 log::debug!("inserting {out_point}");
@@ -68,7 +110,7 @@ pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<
                         Some(script_hash) => {
                             // also the spending tx must be indexed
                             let el = history_map.entry(script_hash).or_insert(vec![]);
-                            el.push(TxSeen::new(txid, block_height, V::Vin(vin as u32)));
+                            el.push(TxSeen::new(txid, block_to_index.height, V::Vin(vin as u32)));
                         }
                         None => {
                             log::debug!("removing {}", &previous_output);
@@ -80,13 +122,11 @@ pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<
                 }
             }
         }
-
-        let meta = BlockMeta::new(block_height, block.block_hash(), time);
-        state.set_hash_ts(&meta).await;
-        db.update(&meta, utxo_spent, history_map, utxo_created)
+        state.set_hash_ts(&block_to_index).await;
+        db.update(&block_to_index, utxo_spent, history_map, utxo_created)
             .map_err(|e| Error::String(format!("error updating db: {e}")))?;
+        last_indexed = Some(block_to_index);
     }
-    Ok(())
 }
 
 fn generate_skip_outpoint() -> HashSet<OutPoint> {

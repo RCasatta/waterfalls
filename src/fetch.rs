@@ -14,6 +14,7 @@ use tokio::time::sleep;
 use crate::{
     be::{self, Family},
     server::{Arguments, Network},
+    store::BlockMeta,
 };
 
 #[derive(Debug)]
@@ -389,52 +390,28 @@ impl Client {
         Ok(txid)
     }
 
-    pub(crate) async fn block_or_wait(&self, block_hash: BlockHash, family: Family) -> be::Block {
-        loop {
-            match self.block(block_hash, family).await {
-                Ok(b) => return b,
-                Err(e) => {
-                    log::warn!("Failing for block({block_hash}) err {e:?} family:{family:?}");
-                    sleep(std::time::Duration::from_secs(1)).await
-                }
+    pub(crate) async fn get_next(
+        &self,
+        last: &crate::store::BlockMeta,
+        family: Family,
+    ) -> Result<Option<BlockMeta>> {
+        if let Some(header) = self.block_header_json(last.hash, family).await? {
+            if let Some(next) = header.nextblockhash {
+                let header = self.block_header(next, family).await?;
+                return Ok(Some(BlockMeta::new(last.height + 1, next, header.time())));
             }
         }
-    }
-
-    pub(crate) async fn block_hash_or_wait(&self, height: u32, family: Family) -> BlockHash {
-        let logs_every = match family {
-            Family::Bitcoin => 60 * 20, // 20 minutes
-            Family::Elements => 60 * 2, // 2 minutes
-        };
-        let mut i = 1;
-        loop {
-            match self.block_hash(height).await {
-                Ok(Some(b)) => {
-                    return b;
-                }
-                Ok(None) => {
-                    if i % logs_every == 0 {
-                        // when waiting for a new block, 60 fails are expected
-                        log::warn!("waiting for blockhash({height}) for more than {i} secs");
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Failing for blockhash({height}) with err {e:?}");
-                }
-            }
-            i += 1;
-            sleep(std::time::Duration::from_secs(1)).await
-        }
+        Ok(None)
     }
 }
 
 #[derive(Deserialize)]
 pub struct Empty {}
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct HeaderJson {
-    hash: BlockHash,
-    next: Option<BlockHash>,
+    pub hash: BlockHash,
+    pub nextblockhash: Option<BlockHash>,
 }
 
 #[cfg(test)]
@@ -611,6 +588,6 @@ mod test {
             .unwrap()
             .unwrap();
         assert_eq!(header_json.hash, genesis_hash);
-        assert_eq!(header_json.next, None);
+        assert_eq!(header_json.nextblockhash, None); // TODO in anoter test with blocks assert where it's Some
     }
 }

@@ -90,9 +90,9 @@ impl Store for AnyStore {
 
 #[derive(Clone, Debug)]
 pub struct BlockMeta {
-    height: Height,
-    hash: BlockHash,
-    timestamp: Timestamp,
+    pub height: Height,
+    pub hash: BlockHash,
+    pub timestamp: Timestamp,
 }
 
 impl BlockMeta {

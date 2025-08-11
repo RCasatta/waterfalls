@@ -22,4 +22,11 @@ impl BlockHeader {
             BlockHeader::Elements(header) => elements::encode::serialize_hex(header.as_ref()),
         }
     }
+
+    pub(crate) fn time(&self) -> u32 {
+        match self {
+            BlockHeader::Bitcoin(header) => header.time,
+            BlockHeader::Elements(header) => header.time,
+        }
+    }
 }

@@ -69,11 +69,9 @@ impl State {
         blocks_hash_ts.get(height as usize).map(|e| e.0)
     }
     pub async fn set_hash_ts(&self, meta: &BlockMeta) {
-        {
-            let mut blocks_hash_ts = self.blocks_hash_ts.lock().await;
-            blocks_hash_ts.push((meta.hash(), meta.timestamp()));
-            assert_eq!(blocks_hash_ts.len() as u32 - 1, meta.height())
-        }
+        let mut blocks_hash_ts = self.blocks_hash_ts.lock().await;
+        blocks_hash_ts.push((meta.hash(), meta.timestamp()));
+        assert_eq!(blocks_hash_ts.len() as u32 - 1, meta.height())
     }
     pub fn address(&self) -> bitcoin::Address {
         p2pkh(&self.secp, &self.wif_key)
