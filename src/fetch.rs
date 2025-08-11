@@ -168,6 +168,39 @@ impl Client {
         }
     }
 
+    pub async fn block_header_json(
+        &self,
+        hash: BlockHash,
+        family: Family,
+    ) -> Result<Option<HeaderJson>> {
+        let base = &self.base_url;
+        let url = if self.use_esplora {
+            format!("{base}/block/{hash}/status")
+        } else {
+            match family {
+                // see https://github.com/bitcoin/bitcoin/blob/master/doc/REST-interface.md#blockheaders
+                Family::Bitcoin => format!("{base}/rest/headers/{hash}.json",),
+                Family::Elements => format!("{base}/rest/headers/1/{hash}.json",), // pre bitcoin 24.0
+            }
+        };
+        let mut builder = self.client.get(&url);
+        if family == Family::Bitcoin && !self.use_esplora {
+            builder = builder.query(&[("count", "1")]);
+        }
+        let resp = builder.send().await?;
+        let status = resp.status();
+        if status == 404 {
+            return Ok(None);
+        } else if status != 200 {
+            return Err(Error::UnexpectedStatus(url, status).into());
+        }
+
+        let text = resp.text().await?;
+        let mut header: Vec<HeaderJson> = serde_json::from_str(&text)?;
+        let header = header.pop().expect("expected one header");
+        Ok(Some(header))
+    }
+
     /// GET /rest/headers/<BLOCK-HASH>.<bin|hex|json>
     /// GET /block/:hash/header
     pub async fn block_header(&self, hash: BlockHash, family: Family) -> Result<be::BlockHeader> {
@@ -398,6 +431,12 @@ impl Client {
 #[derive(Deserialize)]
 pub struct Empty {}
 
+#[derive(Deserialize)]
+pub struct HeaderJson {
+    hash: BlockHash,
+    next: Option<BlockHash>,
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
@@ -540,10 +579,6 @@ mod test {
         }
         client.mempool(false).await.unwrap();
 
-        println!("mempool true returns: {:?}", client.mempool(false).await);
-
-        println!("mempool true returns: {:?}", client.mempool(true).await);
-
         if !client.use_esplora {
             match network.into() {
                 Family::Bitcoin => {
@@ -569,5 +604,13 @@ mod test {
             .unwrap();
         assert_eq!(block.header(), header);
         assert_eq!(header.block_hash(), genesis_hash, "network:{network}");
+
+        let header_json = client
+            .block_header_json(genesis_hash, network.into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(header_json.hash, genesis_hash);
+        assert_eq!(header_json.next, None);
     }
 }
