@@ -391,15 +391,28 @@ impl Client {
         &self,
         last: &crate::store::BlockMeta,
         family: Family,
-    ) -> Result<Option<BlockMeta>> {
+    ) -> Result<ChainStatus> {
         if let Some(header) = self.block_header_json(last.hash, family).await? {
             if let Some(next) = header.nextblockhash {
                 let header = self.block_header(next, family).await?;
-                return Ok(Some(BlockMeta::new(last.height + 1, next, header.time())));
+                return Ok(ChainStatus::NewBlock(BlockMeta::new(
+                    last.height + 1,
+                    next,
+                    header.time(),
+                )));
+            } else {
+                Ok(ChainStatus::Tip)
             }
+        } else {
+            Ok(ChainStatus::Reorg)
         }
-        Ok(None)
     }
+}
+
+pub enum ChainStatus {
+    Tip,
+    NewBlock(BlockMeta),
+    Reorg,
 }
 
 #[derive(Deserialize)]

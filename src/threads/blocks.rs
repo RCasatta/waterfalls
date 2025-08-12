@@ -1,6 +1,6 @@
 use crate::{
     be::Family,
-    fetch::Client,
+    fetch::{ChainStatus, Client},
     server::{Error, State},
     store::{BlockMeta, Store},
     TxSeen, V,
@@ -45,8 +45,23 @@ pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<
         let block_to_index = loop {
             match last_indexed.as_ref() {
                 Some(last) => {
-                    if let Ok(Some(next)) = client.get_next(&last, family).await {
-                        break next;
+                    match client.get_next(&last, family).await {
+                        Ok(ChainStatus::NewBlock(next)) => {
+                            break next;
+                        }
+                        Ok(ChainStatus::Reorg) => {
+                            log::error!("reorg happened!");
+                            panic!("reorg happened!");
+                        }
+                        Ok(ChainStatus::Tip) => {
+                            sleep(Duration::from_secs(1)).await;
+                            continue;
+                        }
+                        Err(e) => {
+                            log::warn!("error getting next block {e:?}, sleeping for 1 second and retrying");
+                            sleep(Duration::from_secs(1)).await;
+                            continue;
+                        }
                     }
                 }
                 None => {
