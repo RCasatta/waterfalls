@@ -225,44 +225,53 @@ impl Client {
                 Family::Elements => format!("{base}/rest/headers/1/{hash}.bin",), // pre bitcoin 24.0
             }
         };
-        let mut builder = self.client.get(&url);
-        if family == Family::Bitcoin && !self.use_esplora {
-            builder = builder.query(&[("count", "1")]);
-        }
-        let resp = builder.send().await?;
-        let status = resp.status();
-        if status == 404 {
-            return Err(Error::BlockHeaderNotFound(url, hash).into());
-        } else if status != 200 {
-            return Err(Error::UnexpectedStatus(url, status).into());
-        }
 
-        match family {
-            Family::Bitcoin => {
-                let bytes = if self.use_esplora {
-                    let text = resp.text().await?;
-                    Vec::<u8>::from_hex(&text)
-                        .map_err(|_| anyhow!("failing converting {text} to bytes"))?
-                } else {
-                    resp.bytes().await?.to_vec()
-                };
-                let header =
-                    <bitcoin::block::Header as bitcoin::consensus::Decodable>::consensus_decode(
-                        &mut &bytes[..],
-                    )?;
-                Ok(be::BlockHeader::Bitcoin(Box::new(header)))
+        loop {
+            let mut builder = self.client.get(&url);
+            if family == Family::Bitcoin && !self.use_esplora {
+                builder = builder.query(&[("count", "1")]);
             }
-            Family::Elements => {
-                let bytes = if self.use_esplora {
-                    let text = resp.text().await?;
-                    Vec::<u8>::from_hex(&text)
-                        .map_err(|_| anyhow!("failing converting {text} to bytes"))?
-                } else {
-                    resp.bytes().await?.to_vec()
-                };
-                let header = elements::BlockHeader::consensus_decode(&bytes[..])?;
-                Ok(be::BlockHeader::Elements(Box::new(header)))
+            let resp = builder.send().await?;
+            let status = resp.status();
+            if status == 404 {
+                return Err(Error::BlockHeaderNotFound(url, hash).into());
+            } else if status == 503 {
+                log::warn!(
+                    "block header {hash} returned 503 service unavailable, retrying in one second"
+                );
+                sleep(Duration::from_secs(1)).await;
+                continue;
+            } else if status != 200 {
+                return Err(Error::UnexpectedStatus(url, status).into());
             }
+
+            return match family {
+                Family::Bitcoin => {
+                    let bytes = if self.use_esplora {
+                        let text = resp.text().await?;
+                        Vec::<u8>::from_hex(&text)
+                            .map_err(|_| anyhow!("failing converting {text} to bytes"))?
+                    } else {
+                        resp.bytes().await?.to_vec()
+                    };
+                    let header =
+                        <bitcoin::block::Header as bitcoin::consensus::Decodable>::consensus_decode(
+                            &mut &bytes[..],
+                        )?;
+                    Ok(be::BlockHeader::Bitcoin(Box::new(header)))
+                }
+                Family::Elements => {
+                    let bytes = if self.use_esplora {
+                        let text = resp.text().await?;
+                        Vec::<u8>::from_hex(&text)
+                            .map_err(|_| anyhow!("failing converting {text} to bytes"))?
+                    } else {
+                        resp.bytes().await?.to_vec()
+                    };
+                    let header = elements::BlockHeader::consensus_decode(&bytes[..])?;
+                    Ok(be::BlockHeader::Elements(Box::new(header)))
+                }
+            };
         }
     }
 
