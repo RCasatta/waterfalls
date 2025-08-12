@@ -3,9 +3,9 @@ use crate::{
     fetch::Client,
     server::{Error, State},
     store::{BlockMeta, Store},
-    Height, Timestamp, TxSeen, V,
+    TxSeen, V,
 };
-use elements::{BlockHash, OutPoint, Txid};
+use elements::{OutPoint, Txid};
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
@@ -81,8 +81,6 @@ pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<
                 continue;
             }
         };
-
-        let time = block.time();
 
         for tx in block.transactions().into_iter() {
             txs_count += 1;

@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
+    time::Duration,
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -314,28 +315,24 @@ impl Client {
         } else {
             format!("{base}/rest/tx/{txid}.bin")
         };
-        let resp = self.client.get(&url).send().await?;
 
-        let status = resp.status();
-        if status == 404 {
-            return Err(Error::TxNotFound(url, txid).into());
-        } else if status != 200 {
-            return Err(Error::UnexpectedStatus(url, status).into());
-        }
+        loop {
+            let resp = self.client.get(&url).send().await?;
 
-        let bytes = resp.bytes().await?;
-
-        match family {
-            Family::Bitcoin => {
-                let tx = <bitcoin::Transaction as bitcoin::consensus::Decodable>::consensus_decode(
-                    &mut bytes.as_ref(),
-                )?;
-                Ok(be::Transaction::Bitcoin(tx))
+            let status = resp.status();
+            if status == 404 {
+                return Err(Error::TxNotFound(url, txid).into());
+            } else if status == 503 {
+                log::error!("tx {txid} returned 503 service unavailable, retrying in one second");
+                sleep(Duration::from_secs(1)).await;
+                continue;
+            } else if status != 200 {
+                return Err(Error::UnexpectedStatus(url, status).into());
             }
-            Family::Elements => {
-                let tx = elements::Transaction::consensus_decode(bytes.as_ref())?;
-                Ok(be::Transaction::Elements(tx))
-            }
+
+            let bytes = resp.bytes().await?;
+
+            return be::Transaction::from_bytes(bytes.as_ref(), family);
         }
     }
 
@@ -536,9 +533,9 @@ mod test {
         assert_eq!(genesis_hash, fetched, "network:{network}");
         let genesis_block = client.block(genesis_hash, network.into()).await.unwrap();
         log::debug!("genesis_block: {genesis_block:?}");
-        assert_eq!(genesis_block.block_hash(), genesis_hash);
+        assert_eq!(genesis_block._block_hash(), genesis_hash);
         let block = client.block(genesis_hash, network.into()).await.unwrap();
-        assert_eq!(block.block_hash(), genesis_hash);
+        assert_eq!(block._block_hash(), genesis_hash);
         assert_eq!(block.transactions()[0].txid(), genesis_txid);
 
         // Genesis transaction cannot be fetched via REST API in Bitcoin networks

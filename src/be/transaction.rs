@@ -92,14 +92,14 @@ impl Transaction {
                 let bitcoin_tx =
                     <bitcoin::Transaction as bitcoin::consensus::Decodable>::consensus_decode(
                         &mut &bytes[..],
-                    )
-                    .unwrap();
+                    )?;
                 be::Transaction::Bitcoin(bitcoin_tx)
             }
             Family::Elements => {
                 let elements_tx =
-                    <elements::Transaction as elements::encode::Decodable>::consensus_decode(bytes)
-                        .unwrap();
+                    <elements::Transaction as elements::encode::Decodable>::consensus_decode(
+                        bytes,
+                    )?;
                 be::Transaction::Elements(elements_tx)
             }
         })

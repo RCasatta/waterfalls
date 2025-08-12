@@ -20,14 +20,14 @@ impl Block {
         }
     }
 
-    pub(crate) fn block_hash(&self) -> elements::BlockHash {
+    pub(crate) fn _block_hash(&self) -> elements::BlockHash {
         match self {
             Block::Bitcoin(block) => elements_block_hash(block.block_hash()),
             Block::Elements(block) => block.block_hash(),
         }
     }
 
-    pub(crate) fn time(&self) -> u32 {
+    pub(crate) fn _time(&self) -> u32 {
         match self {
             Block::Bitcoin(block) => block.header.time,
             Block::Elements(block) => block.header.time,
