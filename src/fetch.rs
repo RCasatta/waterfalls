@@ -185,22 +185,31 @@ impl Client {
                 Family::Elements => format!("{base}/rest/headers/1/{hash}.json",), // pre bitcoin 24.0
             }
         };
-        let mut builder = self.client.get(&url);
-        if family == Family::Bitcoin && !self.use_esplora {
-            builder = builder.query(&[("count", "1")]);
-        }
-        let resp = builder.send().await?;
-        let status = resp.status();
-        if status == 404 {
-            return Ok(None);
-        } else if status != 200 {
-            return Err(Error::UnexpectedStatus(url, status).into());
-        }
 
-        let text = resp.text().await?;
-        let mut header: Vec<HeaderJson> = serde_json::from_str(&text)?;
-        let header = header.pop().expect("expected one header");
-        Ok(Some(header))
+        loop {
+            let mut builder = self.client.get(&url);
+            if family == Family::Bitcoin && !self.use_esplora {
+                builder = builder.query(&[("count", "1")]);
+            }
+            let resp = builder.send().await?;
+            let status = resp.status();
+            if status == 404 {
+                return Ok(None);
+            } else if status == 503 {
+                log::warn!(
+                    "block header {hash} returned 503 service unavailable, retrying in one second"
+                );
+                sleep(Duration::from_secs(1)).await;
+                continue;
+            } else if status != 200 {
+                return Err(Error::UnexpectedStatus(url, status).into());
+            }
+
+            let text = resp.text().await?;
+            let mut header: Vec<HeaderJson> = serde_json::from_str(&text)?;
+            let header = header.pop().expect("expected one header");
+            return Ok(Some(header));
+        }
     }
 
     /// GET /rest/headers/<BLOCK-HASH>.<bin|hex|json>

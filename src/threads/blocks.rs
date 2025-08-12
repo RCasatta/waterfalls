@@ -76,7 +76,9 @@ pub async fn index(
                             continue;
                         }
                         Err(e) => {
-                            log::warn!("error getting next block {e:?}, sleeping for 1 second and retrying");
+                            log::warn!(
+                                "error getting next block {e}, sleeping for 1 second and retrying"
+                            );
                             sleep(Duration::from_secs(1)).await;
                             continue;
                         }
