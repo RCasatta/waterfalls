@@ -6,13 +6,31 @@ use crate::{
 use std::{collections::HashSet, sync::Arc};
 use tokio::time::sleep;
 
-pub(crate) async fn mempool_sync_infallible(state: Arc<State>, client: Client, family: Family) {
-    if let Err(e) = mempool_sync(state, client, family).await {
+pub(crate) async fn mempool_sync_infallible(
+    state: Arc<State>,
+    client: Client,
+    family: Family,
+    initial_sync_rx: tokio::sync::oneshot::Receiver<()>,
+) {
+    if let Err(e) = mempool_sync(state, client, family, initial_sync_rx).await {
         log::error!("{:?}", e);
     }
 }
 
-async fn mempool_sync(state: Arc<State>, client: Client, family: Family) -> Result<(), Error> {
+async fn mempool_sync(
+    state: Arc<State>,
+    client: Client,
+    family: Family,
+    initial_sync_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<(), Error> {
+    // Wait for initial block download to complete
+    log::info!("Mempool thread waiting for initial block download to complete...");
+    if let Err(_) = initial_sync_rx.await {
+        log::warn!("Initial sync channel closed unexpectedly, proceeding with mempool sync");
+    } else {
+        log::info!("Initial block download completed, starting mempool sync");
+    }
+
     let db = &state.store;
     let mut mempool_txids = HashSet::new();
     let support_vebose = client.mempool(true).await.is_ok();

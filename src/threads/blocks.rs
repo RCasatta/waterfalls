@@ -14,13 +14,23 @@ use std::{
 };
 use tokio::time::sleep;
 
-pub(crate) async fn blocks_infallible(shared_state: Arc<State>, client: Client, family: Family) {
-    if let Err(e) = index(shared_state, client, family).await {
+pub(crate) async fn blocks_infallible(
+    shared_state: Arc<State>,
+    client: Client,
+    family: Family,
+    initial_sync_tx: tokio::sync::oneshot::Sender<()>,
+) {
+    if let Err(e) = index(shared_state, client, family, initial_sync_tx).await {
         log::error!("{:?}", e);
     }
 }
 
-pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<(), Error> {
+pub async fn index(
+    state: Arc<State>,
+    client: Client,
+    family: Family,
+    initial_sync_tx: tokio::sync::oneshot::Sender<()>,
+) -> Result<(), Error> {
     let db = &state.store;
 
     let mut last_indexed = state
@@ -38,6 +48,7 @@ pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<
     let skip_outpoint = generate_skip_outpoint();
 
     let mut txs_count = 0u64;
+    let mut initial_sync_tx = Some(initial_sync_tx);
 
     let start = Instant::now();
     let last_logging = Instant::now();
@@ -54,6 +65,13 @@ pub async fn index(state: Arc<State>, client: Client, family: Family) -> Result<
                             panic!("reorg happened!");
                         }
                         Ok(ChainStatus::Tip) => {
+                            // Signal initial sync completion the first time we hit the tip
+                            if let Some(tx) = initial_sync_tx.take() {
+                                let _ = tx.send(());
+                                log::info!(
+                                    "Initial block download completed, signaling mempool thread"
+                                );
+                            }
                             sleep(Duration::from_secs(1)).await;
                             continue;
                         }

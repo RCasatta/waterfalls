@@ -267,18 +267,23 @@ pub async fn inner_main(
         headers(state).await.unwrap();
     }
 
+    // Create oneshot channel to signal when initial block download is complete
+    let (initial_sync_tx, initial_sync_rx) = tokio::sync::oneshot::channel::<()>();
+
     let _h1 = {
         let state = state.clone();
         let client: Client = Client::new(&args);
-        tokio::spawn(async move { blocks_infallible(state, client, args.network.into()).await })
+        tokio::spawn(async move {
+            blocks_infallible(state, client, args.network.into(), initial_sync_tx).await
+        })
     };
 
     let _h2 = {
         let state = state.clone();
         let client = Client::new(&args);
-        tokio::spawn(
-            async move { mempool_sync_infallible(state, client, args.network.into()).await },
-        )
+        tokio::spawn(async move {
+            mempool_sync_infallible(state, client, args.network.into(), initial_sync_rx).await
+        })
     };
 
     let addr = args.listen.unwrap_or(SocketAddr::from((
