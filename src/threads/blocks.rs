@@ -51,7 +51,7 @@ pub async fn index(
     let mut initial_sync_tx = Some(initial_sync_tx);
 
     let start = Instant::now();
-    let last_logging = Instant::now();
+    let mut last_logging = Instant::now();
     loop {
         let block_to_index = loop {
             match last_indexed.as_ref() {
@@ -93,13 +93,14 @@ pub async fn index(
 
         log::debug!("current block to index is: {block_to_index:?}");
 
-        if last_logging.elapsed().as_secs() > 60 {
+        if initial_sync_tx.is_some() && last_logging.elapsed().as_secs() > 60 {
             let speed =
                 (block_to_index.height - initial_height) as f64 / start.elapsed().as_secs() as f64;
             log::info!(
                 "{} {speed:.2} blocks/s {txs_count} txs",
                 block_to_index.height
             );
+            last_logging = Instant::now();
         }
 
         let mut history_map = HashMap::new();
