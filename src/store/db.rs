@@ -126,10 +126,12 @@ impl DBStore {
             .iter()
             .enumerate()
             .map(|(i, e)| {
-                if e.is_none() {
-                    log::error!("can't find {}", outpoints[i]);
-                }
-                e.expect("every utxo must exist when spent")
+                e.unwrap_or_else(|| {
+                    error_panic!(
+                        "every utxo must exist when spent, can't find {}",
+                        outpoints[i]
+                    );
+                })
             })
             .collect();
 

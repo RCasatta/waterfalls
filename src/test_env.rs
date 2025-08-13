@@ -507,8 +507,7 @@ impl WaterfallClient {
 
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
-        log::error!("no tip hash after 10s");
-        panic!("no tip hash after 10s")
+        error_panic!("no tip hash after 10s");
     }
     pub async fn header(&self, block_hash: BlockHash) -> anyhow::Result<BlockHeader> {
         let url = format!("{}/block/{}/header", self.base_url, block_hash);
