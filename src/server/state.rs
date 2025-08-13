@@ -82,8 +82,11 @@ impl State {
 fn update_hash_ts(blocks_hash_ts: &mut Vec<(BlockHash, u32)>, meta: &BlockMeta) {
     match blocks_hash_ts.len().cmp(&(meta.height() as usize)) {
         Ordering::Less => {
-            log::error!("height {} vec len {}", meta.height(), blocks_hash_ts.len());
-            panic!("adding a block with height greater than the length of blocks_hash_ts");
+            error_panic!(
+                "unexpected: height:{} blocks_hash_ts:{}",
+                meta.height(),
+                blocks_hash_ts.len()
+            );
         }
         Ordering::Equal => {
             // Most common case of adding a new block

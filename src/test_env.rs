@@ -487,8 +487,7 @@ impl WaterfallClient {
 
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
-        log::error!("no non-empty result after 10s");
-        panic!("no non-empty result after 10s")
+        error_panic!("no non-empty result after 10s");
     }
 
     pub async fn tip_hash(&self) -> anyhow::Result<BlockHash> {

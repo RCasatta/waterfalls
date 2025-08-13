@@ -127,8 +127,7 @@ impl Client {
         } else if response.status() == 404 || response.status() == 503 {
             Ok(None)
         } else {
-            log::error!("{url} return unexpected status {status} for block_hash");
-            panic!("{url} return unexpected status {status} for block_hash");
+            error_panic!("{url} return unexpected status {status} for block_hash");
         }
     }
 

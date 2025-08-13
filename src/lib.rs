@@ -11,6 +11,26 @@ use prometheus::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Macro that logs an error and panics with the same message.
+/// This is useful because error logs are more easily seen in systemd logs.
+///
+/// Usage:
+/// ```
+/// error_panic!("Something went wrong");
+/// error_panic!("Value {} is invalid", value);
+/// ```
+macro_rules! error_panic {
+    ($($arg:tt)*) => {
+        {
+            let msg = format!($($arg)*);
+            log::error!("{}", msg);
+            panic!("{}", msg);
+        }
+    };
+}
+
+pub(crate) use error_panic;
+
 pub mod be;
 mod cbor;
 mod fetch;

@@ -3,7 +3,7 @@ use std::{collections::HashMap, hash::Hasher, sync::Mutex};
 use elements::OutPoint;
 use fxhash::FxHasher;
 
-use crate::ScriptHash;
+use crate::{error_panic, ScriptHash};
 
 use super::{BlockMeta, Store, TxSeen};
 use crate::V;
@@ -88,8 +88,7 @@ impl MemoryStore {
                     .unwrap()
                     .remove(outpoint)
                     .unwrap_or_else(|| {
-                        log::error!("{outpoint} must be unspent");
-                        panic!("{outpoint} must be unspent");
+                        error_panic!("{outpoint} must be unspent");
                     }),
             );
         }
