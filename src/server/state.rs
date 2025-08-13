@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use crate::{
     server::{derivation_cache::DerivationCache, Mempool},
     store::{AnyStore, BlockMeta},
@@ -70,10 +72,95 @@ impl State {
     }
     pub async fn set_hash_ts(&self, meta: &BlockMeta) {
         let mut blocks_hash_ts = self.blocks_hash_ts.lock().await;
-        blocks_hash_ts.push((meta.hash(), meta.timestamp()));
-        assert_eq!(blocks_hash_ts.len() as u32 - 1, meta.height())
+        update_hash_ts(&mut *blocks_hash_ts, meta);
     }
     pub fn address(&self) -> bitcoin::Address {
         p2pkh(&self.secp, &self.wif_key)
+    }
+}
+
+fn update_hash_ts(blocks_hash_ts: &mut Vec<(BlockHash, u32)>, meta: &BlockMeta) {
+    match blocks_hash_ts.len().cmp(&(meta.height() as usize)) {
+        Ordering::Less => {
+            log::error!("height {} vec len {}", meta.height(), blocks_hash_ts.len());
+            panic!("adding a block with height greater than the length of blocks_hash_ts");
+        }
+        Ordering::Equal => {
+            // Most common case of adding a new block
+            blocks_hash_ts.push((meta.hash(), meta.timestamp()))
+        }
+        Ordering::Greater => {
+            // We are reorging
+            blocks_hash_ts.get_mut(meta.height() as usize).map(|e| {
+                e.0 = meta.hash();
+                e.1 = meta.timestamp();
+            });
+            blocks_hash_ts.truncate(meta.height() as usize + 1); // if the reorg is longer than one block, we need to truncate the vector
+        }
+    }
+
+    assert_eq!(blocks_hash_ts.len() as u32 - 1, meta.height());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_update_vec() {
+        let mut blocks_hash_ts = vec![(
+            BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
+                .unwrap(),
+            0,
+        )];
+
+        // Test adding a new block (height 1)
+        let meta = BlockMeta::new(
+            1,
+            BlockHash::from_str("1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap(),
+            100,
+        );
+        update_hash_ts(&mut blocks_hash_ts, &meta);
+        assert_eq!(blocks_hash_ts.len(), 2);
+        assert_eq!(blocks_hash_ts[1].0, meta.hash());
+        assert_eq!(blocks_hash_ts[1].1, meta.timestamp());
+
+        // Test reorg a block (height 1)
+        let meta2 = BlockMeta::new(
+            1,
+            BlockHash::from_str("2222222222222222222222222222222222222222222222222222222222222222")
+                .unwrap(),
+            101,
+        );
+        update_hash_ts(&mut blocks_hash_ts, &meta2);
+        assert_eq!(blocks_hash_ts.len(), 2);
+        assert_eq!(blocks_hash_ts[1].0, meta2.hash());
+        assert_eq!(blocks_hash_ts[1].1, meta2.timestamp());
+
+        // Test adding a new block (height 2)
+        let meta3 = BlockMeta::new(
+            2,
+            BlockHash::from_str("3333333333333333333333333333333333333333333333333333333333333333")
+                .unwrap(),
+            102,
+        );
+        update_hash_ts(&mut blocks_hash_ts, &meta3);
+        assert_eq!(blocks_hash_ts.len(), 3);
+        assert_eq!(blocks_hash_ts[2].0, meta3.hash());
+        assert_eq!(blocks_hash_ts[2].1, meta3.timestamp());
+
+        // Test double reorg a block (height 1)
+        let meta2 = BlockMeta::new(
+            1,
+            BlockHash::from_str("2222222222222222222222222222222222222222222222222222222222222222")
+                .unwrap(),
+            101,
+        );
+        update_hash_ts(&mut blocks_hash_ts, &meta2);
+        assert_eq!(blocks_hash_ts.len(), 2);
+        assert_eq!(blocks_hash_ts[1].0, meta2.hash());
+        assert_eq!(blocks_hash_ts[1].1, meta2.timestamp());
     }
 }

@@ -62,7 +62,17 @@ pub async fn index(
                         }
                         Ok(ChainStatus::Reorg) => {
                             log::error!("reorg happened!");
-                            panic!("reorg happened!");
+                            let previous_height = last.height - 1;
+                            let blocks_hash_ts = state
+                                .blocks_hash_ts
+                                .lock()
+                                .await
+                                .get(previous_height as usize)
+                                .cloned()
+                                .expect("can't get previous block_hash");
+                            let block_meta =
+                                BlockMeta::new(previous_height, blocks_hash_ts.0, blocks_hash_ts.1);
+                            break block_meta;
                         }
                         Ok(ChainStatus::Tip) => {
                             // Signal initial sync completion the first time we hit the tip

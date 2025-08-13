@@ -207,7 +207,13 @@ impl Client {
 
             let text = resp.text().await?;
             let mut header: Vec<HeaderJson> = serde_json::from_str(&text)?;
-            let header = header.pop().expect("expected one header");
+            let header = match header.pop() {
+                Some(header) => header,
+                None => {
+                    log::warn!("block header {hash} returned no header, reorg happened");
+                    return Ok(None);
+                }
+            };
             return Ok(Some(header));
         }
     }
