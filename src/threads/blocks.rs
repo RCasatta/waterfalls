@@ -61,7 +61,7 @@ pub async fn index(
                             break next;
                         }
                         Ok(ChainStatus::Reorg) => {
-                            log::error!("reorg happened!");
+                            log::warn!("reorg happened! {last:?} removed from the chain");
                             let previous_height = last.height - 1;
                             let blocks_hash_ts = state
                                 .blocks_hash_ts
@@ -70,9 +70,11 @@ pub async fn index(
                                 .get(previous_height as usize)
                                 .cloned()
                                 .expect("can't get previous block_hash");
-                            let block_meta =
+                            let previous_block_meta =
                                 BlockMeta::new(previous_height, blocks_hash_ts.0, blocks_hash_ts.1);
-                            break block_meta;
+                            last_indexed = Some(previous_block_meta);
+                            state.store.reorg();
+                            continue;
                         }
                         Ok(ChainStatus::Tip) => {
                             // Signal initial sync completion the first time we hit the tip
@@ -103,7 +105,9 @@ pub async fn index(
             sleep(Duration::from_secs(1)).await;
         };
 
-        log::debug!("current block to index is: {block_to_index:?}");
+        if initial_sync_tx.is_none() {
+            log::info!("current block to index is: {block_to_index:?}");
+        }
 
         if initial_sync_tx.is_some() && last_logging.elapsed().as_secs() > 60 {
             let speed =

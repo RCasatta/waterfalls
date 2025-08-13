@@ -12,6 +12,8 @@ use crate::V;
 pub struct MemoryStore {
     utxos: Mutex<HashMap<OutPoint, ScriptHash>>,
     history: Mutex<HashMap<ScriptHash, Vec<TxSeen>>>,
+
+    last_block: Mutex<HashMap<OutPoint, ScriptHash>>,
 }
 
 impl Store for MemoryStore {
@@ -67,6 +69,15 @@ impl Store for MemoryStore {
         // // TODO should be a db tx
         let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.1).collect();
         let script_hashes = self.remove_utxos(&only_outpoints);
+
+        let last_block = HashMap::from_iter(
+            only_outpoints
+                .iter()
+                .cloned()
+                .zip(script_hashes.iter().cloned()),
+        );
+        *self.last_block.lock().unwrap() = last_block; // TODO handle unwrap;
+
         for (script_hash, (vin, _, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
             el.push(TxSeen::new(txid, block_meta.height(), V::Vin(vin)));
@@ -75,6 +86,10 @@ impl Store for MemoryStore {
         self.update_history(history_map);
         self.insert_utxos(&utxo_created);
         Ok(())
+    }
+
+    fn reorg(&self) {
+        self.insert_utxos(&self.last_block.lock().unwrap());
     }
 }
 
@@ -108,6 +123,7 @@ impl MemoryStore {
         Self {
             utxos: Mutex::new(HashMap::new()),
             history: Mutex::new(HashMap::new()),
+            last_block: Mutex::new(HashMap::new()),
         }
     }
 }

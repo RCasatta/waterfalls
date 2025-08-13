@@ -38,6 +38,9 @@ pub trait Store {
         history_map: HashMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: HashMap<OutPoint, ScriptHash>,
     ) -> Result<()>;
+
+    /// Reorg, reinsert the last block unspent utxos
+    fn reorg(&self);
 }
 
 impl Store for AnyStore {
@@ -84,6 +87,14 @@ impl Store for AnyStore {
             #[cfg(feature = "db")]
             AnyStore::Db(d) => d.update(block_meta, utxo_spent, history_map, utxo_created),
             AnyStore::Mem(m) => m.update(block_meta, utxo_spent, history_map, utxo_created),
+        }
+    }
+
+    fn reorg(&self) {
+        match self {
+            #[cfg(feature = "db")]
+            AnyStore::Db(d) => d.reorg(),
+            AnyStore::Mem(m) => m.reorg(),
         }
     }
 }

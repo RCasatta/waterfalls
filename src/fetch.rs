@@ -432,6 +432,7 @@ impl Client {
     }
 }
 
+#[derive(Debug)]
 pub enum ChainStatus {
     Tip,
     NewBlock(BlockMeta),

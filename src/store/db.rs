@@ -11,7 +11,12 @@ use rocksdb::{BoundColumnFamily, MergeOperands, Options, DB};
 use crate::V;
 
 use prefix_uvarint::PrefixVarInt;
-use std::{collections::HashMap, hash::Hasher, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    hash::Hasher,
+    path::Path,
+    sync::{Arc, Mutex},
+};
 
 use crate::{
     store::{BlockMeta, Store, TxSeen},
@@ -23,6 +28,14 @@ use crate::{
 pub struct DBStore {
     db: DB,
     salt: u64,
+
+    // We keep track of the last block input spent.
+    // This are usually deleted from the db when a block is found
+    // When there is a reorg we reinsert them in the db.
+    // This support only reorgs up to 1 block.
+    // If the process halts right before a reorg, this will be lost and a reindex must happen.
+    // TODO: at the moment we didn't bother to fix reorged TxSeen, client can find reorged tx in history
+    last_block: Mutex<HashMap<OutPoint, ScriptHash>>,
 }
 
 // Can txid be indexed by u32? At the time of writing (2025-02-06) there are about 1B txs on mainnet, so it's possible to have u32 -> txid (u32 is 4B).
@@ -75,7 +88,11 @@ impl DBStore {
         let db = rocksdb::DB::open_cf_descriptors(&db_opts, path, Self::create_cf_descriptors())
             .with_context(|| format!("failed to open DB: {}", path.display()))?;
         let salt = get_or_init_salt(&db)?;
-        let store = DBStore { db, salt };
+        let store = DBStore {
+            db,
+            salt,
+            last_block: Mutex::new(HashMap::new()),
+        };
         Ok(store)
     }
 
@@ -121,7 +138,7 @@ impl DBStore {
     }
 
     fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<ScriptHash>> {
-        let result: Vec<_> = self
+        let result: Vec<ScriptHash> = self
             .get_utxos(outpoints)?
             .iter()
             .enumerate()
@@ -134,6 +151,8 @@ impl DBStore {
                 })
             })
             .collect();
+        let last_block = HashMap::from_iter(outpoints.iter().cloned().zip(result.iter().cloned()));
+        *self.last_block.lock().unwrap() = last_block; // TODO handle unwrap;
 
         let mut batch = rocksdb::WriteBatch::default();
         let cf = self.utxo_cf();
@@ -267,6 +286,10 @@ impl Store for DBStore {
         self.insert_utxos(&utxo_created)?;
 
         Ok(())
+    }
+
+    fn reorg(&self) {
+        self.insert_utxos(&self.last_block.lock().unwrap()).unwrap(); // TODO handle unwrap;
     }
 }
 
