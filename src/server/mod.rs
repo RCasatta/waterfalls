@@ -273,7 +273,7 @@ pub async fn inner_main(
     // Create broadcast channel for shutdown signal
     let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
 
-    let _h1 = {
+    let h1 = {
         let state = state.clone();
         let client: Client = Client::new(&args);
         let shutdown_rx = shutdown_tx.subscribe();
@@ -293,7 +293,7 @@ pub async fn inner_main(
         })
     };
 
-    let _h2 = {
+    let h2 = {
         let state = state.clone();
         let client = Client::new(&args);
         let shutdown_rx = shutdown_tx.subscribe();
@@ -354,5 +354,9 @@ pub async fn inner_main(
             }
         }
     }
+
+    h1.await.unwrap();
+    h2.await.unwrap();
+
     Ok(())
 }
