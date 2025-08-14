@@ -136,7 +136,11 @@ pub async fn index(
         };
 
         if initial_sync_tx.is_none() {
-            log::info!("current block to index is: {block_to_index:?}");
+            log::info!(
+                "indexing: {} {}",
+                block_to_index.height,
+                block_to_index.hash
+            );
         }
 
         if initial_sync_tx.is_some() && last_logging.elapsed().as_secs() > 60 {
