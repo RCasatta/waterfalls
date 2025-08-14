@@ -34,7 +34,6 @@ pub struct DBStore {
     // When there is a reorg we reinsert them in the db.
     // This support only reorgs up to 1 block.
     // If the process halts right before a reorg, this will be lost and a reindex must happen.
-    // TODO: at the moment we didn't bother to fix reorged TxSeen, client can find reorged tx in history
     last_block: Mutex<HashMap<OutPoint, ScriptHash>>,
 
     // We keep track of the history changes from the last block.
@@ -42,6 +41,11 @@ pub struct DBStore {
     // When there is a reorg we remove these entries from the history.
     // This supports only reorgs up to 1 block.
     last_block_history: Mutex<HashMap<ScriptHash, Vec<TxSeen>>>,
+
+    // We keep track of the UTXOs created in the last block.
+    // When there is a reorg we remove these UTXOs from the database.
+    // This supports only reorgs up to 1 block.
+    last_block_utxos_created: Mutex<HashMap<OutPoint, ScriptHash>>,
 }
 
 // Can txid be indexed by u32? At the time of writing (2025-02-06) there are about 1B txs on mainnet, so it's possible to have u32 -> txid (u32 is 4B).
@@ -99,6 +103,7 @@ impl DBStore {
             salt,
             last_block: Mutex::new(HashMap::new()),
             last_block_history: Mutex::new(HashMap::new()),
+            last_block_utxos_created: Mutex::new(HashMap::new()),
         };
         Ok(store)
     }
@@ -342,12 +347,23 @@ impl Store for DBStore {
         // Store the history changes for potential reorg correction
         *self.last_block_history.lock().unwrap() = history_map;
 
+        // Store the UTXOs created for potential reorg correction
+        *self.last_block_utxos_created.lock().unwrap() = utxo_created;
+
         Ok(())
     }
 
     fn reorg(&self) {
         // Restore UTXOs that were spent in the reorged block
         self.insert_utxos(&self.last_block.lock().unwrap()).unwrap(); // TODO handle unwrap;
+
+        // Remove UTXOs that were created in the reorged block
+        let last_block_utxos_created = self.last_block_utxos_created.lock().unwrap();
+        if !last_block_utxos_created.is_empty() {
+            let outpoints_to_remove: Vec<OutPoint> =
+                last_block_utxos_created.keys().cloned().collect();
+            self.remove_utxos(&outpoints_to_remove).unwrap(); // TODO handle unwrap;
+        }
 
         // Remove history entries that were added in the reorged block
         let last_block_history = self.last_block_history.lock().unwrap();
