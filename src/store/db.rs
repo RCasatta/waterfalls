@@ -34,7 +34,7 @@ pub struct DBStore {
     // When there is a reorg we reinsert them in the db.
     // This support only reorgs up to 1 block.
     // If the process halts right before a reorg, this will be lost and a reindex must happen.
-    last_block_spent: Mutex<HashMap<OutPoint, ScriptHash>>,
+    last_block_spent: Mutex<Vec<(OutPoint, ScriptHash)>>,
 
     // We keep track of the history changes from the last block.
     // This contains the script hashes and their corresponding TxSeen entries that were added in the last block.
@@ -101,7 +101,7 @@ impl DBStore {
         let store = DBStore {
             db,
             salt,
-            last_block_spent: Mutex::new(HashMap::new()),
+            last_block_spent: Mutex::new(Vec::new()),
             last_block_history: Mutex::new(HashMap::new()),
             last_block_utxos_created: Mutex::new(HashMap::new()),
         };
@@ -134,14 +134,17 @@ impl DBStore {
             .unwrap();
     }
 
-    fn insert_utxos(&self, adds: &HashMap<OutPoint, ScriptHash>) -> Result<()> {
+    fn insert_utxos<'a, I>(&self, adds: I) -> Result<()>
+    where
+        I: IntoIterator<Item = (&'a OutPoint, &'a ScriptHash)>,
+    {
         let mut batch = rocksdb::WriteBatch::default();
         let cf = self.utxo_cf();
         let mut key_buf = vec![0u8; 36];
-        for add in adds {
+        for (outpoint, script_hash) in adds {
             key_buf.clear();
-            add.0.consensus_encode(&mut key_buf)?;
-            let val = add.1.to_be_bytes();
+            outpoint.consensus_encode(&mut key_buf)?;
+            let val = script_hash.to_be_bytes();
             batch.put_cf(&cf, &key_buf, val);
         }
 
@@ -163,7 +166,7 @@ impl DBStore {
                 })
             })
             .collect();
-        let last_block = HashMap::from_iter(outpoints.iter().cloned().zip(result.iter().cloned()));
+        let last_block = Vec::from_iter(outpoints.iter().cloned().zip(result.iter().cloned()));
         *self.last_block_spent.lock().unwrap() = last_block; // TODO handle unwrap;
 
         let mut batch = rocksdb::WriteBatch::default();
@@ -355,8 +358,14 @@ impl Store for DBStore {
 
     fn reorg(&self) {
         // Restore UTXOs that were spent in the reorged block
-        self.insert_utxos(&self.last_block_spent.lock().unwrap())
-            .unwrap(); // TODO handle unwrap;
+        self.insert_utxos(
+            self.last_block_spent
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(outpoint, script_hash)| (outpoint, script_hash)),
+        )
+        .unwrap(); // TODO handle unwrap;
 
         // Remove UTXOs that were created in the reorged block
         let last_block_utxos_created = self.last_block_utxos_created.lock().unwrap();
