@@ -36,6 +36,12 @@ pub struct DBStore {
     // If the process halts right before a reorg, this will be lost and a reindex must happen.
     // TODO: at the moment we didn't bother to fix reorged TxSeen, client can find reorged tx in history
     last_block: Mutex<HashMap<OutPoint, ScriptHash>>,
+
+    // We keep track of the history changes from the last block.
+    // This contains the script hashes and their corresponding TxSeen entries that were added in the last block.
+    // When there is a reorg we remove these entries from the history.
+    // This supports only reorgs up to 1 block.
+    last_block_history: Mutex<HashMap<ScriptHash, Vec<TxSeen>>>,
 }
 
 // Can txid be indexed by u32? At the time of writing (2025-02-06) there are about 1B txs on mainnet, so it's possible to have u32 -> txid (u32 is 4B).
@@ -92,6 +98,7 @@ impl DBStore {
             db,
             salt,
             last_block: Mutex::new(HashMap::new()),
+            last_block_history: Mutex::new(HashMap::new()),
         };
         Ok(store)
     }
@@ -191,6 +198,53 @@ impl DBStore {
         self.db.write(batch)?;
         Ok(())
     }
+
+    fn remove_history_entries(&self, to_remove: &HashMap<ScriptHash, Vec<TxSeen>>) -> Result<()> {
+        if to_remove.is_empty() {
+            return Ok(());
+        }
+
+        log::debug!("remove_history_entries {to_remove:?}");
+
+        // Get the script hashes we need to process
+        let script_hashes: Vec<ScriptHash> = to_remove.keys().cloned().collect();
+
+        // Read current history for these script hashes
+        let current_history = self.get_history(&script_hashes)?;
+
+        let mut batch = rocksdb::WriteBatch::default();
+        let cf = self.history_cf();
+
+        for (i, script_hash) in script_hashes.iter().enumerate() {
+            let entries_to_remove = &to_remove[script_hash];
+            let mut current_entries = current_history[i].clone();
+
+            // Remove the specific entries
+            for entry_to_remove in entries_to_remove {
+                current_entries.retain(|entry| {
+                    !(entry.txid == entry_to_remove.txid
+                        && entry.height == entry_to_remove.height
+                        && entry.v == entry_to_remove.v)
+                });
+            }
+
+            // Write back the cleaned history
+            if current_entries.is_empty() {
+                // If no entries left, delete the key entirely
+                batch.delete_cf(&cf, script_hash.to_be_bytes());
+            } else {
+                // Otherwise, replace with the cleaned entries
+                batch.put_cf(
+                    &cf,
+                    script_hash.to_be_bytes(),
+                    vec_tx_seen_to_be_bytes(&current_entries),
+                );
+            }
+        }
+
+        self.db.write(batch)?;
+        Ok(())
+    }
 }
 
 impl Store for DBStore {
@@ -285,11 +339,21 @@ impl Store for DBStore {
         self.update_history(&history_map)?;
         self.insert_utxos(&utxo_created)?;
 
+        // Store the history changes for potential reorg correction
+        *self.last_block_history.lock().unwrap() = history_map;
+
         Ok(())
     }
 
     fn reorg(&self) {
+        // Restore UTXOs that were spent in the reorged block
         self.insert_utxos(&self.last_block.lock().unwrap()).unwrap(); // TODO handle unwrap;
+
+        // Remove history entries that were added in the reorged block
+        let last_block_history = self.last_block_history.lock().unwrap();
+        if !last_block_history.is_empty() {
+            self.remove_history_entries(&last_block_history).unwrap(); // TODO handle unwrap;
+        }
     }
 }
 
