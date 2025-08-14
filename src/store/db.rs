@@ -22,6 +22,25 @@ use crate::{
     store::{BlockMeta, Store, TxSeen},
     Height, ScriptHash,
 };
+
+/// Data for handling reorgs up to 1 block.
+/// If the process halts right before a reorg, this will be lost and a reindex must happen.
+#[derive(Debug, Default)]
+struct ReorgData {
+    /// Input spent in the last block. These are usually deleted from the db when a block is found.
+    /// When there is a reorg we reinsert them in the db.
+    spent: Vec<(OutPoint, ScriptHash)>,
+
+    /// History changes from the last block. Contains the script hashes and their corresponding
+    /// TxSeen entries that were added in the last block. When there is a reorg we remove
+    /// these entries from the history.
+    history: HashMap<ScriptHash, Vec<TxSeen>>,
+
+    /// UTXOs created in the last block. When there is a reorg we remove these UTXOs
+    /// from the database.
+    utxos_created: HashMap<OutPoint, ScriptHash>,
+}
+
 /// RocksDB wrapper for index storage
 
 #[derive(Debug)]
@@ -29,23 +48,8 @@ pub struct DBStore {
     db: DB,
     salt: u64,
 
-    // We keep track of the last block input spent.
-    // This are usually deleted from the db when a block is found
-    // When there is a reorg we reinsert them in the db.
-    // This support only reorgs up to 1 block.
-    // If the process halts right before a reorg, this will be lost and a reindex must happen.
-    last_block_spent: Mutex<Vec<(OutPoint, ScriptHash)>>,
-
-    // We keep track of the history changes from the last block.
-    // This contains the script hashes and their corresponding TxSeen entries that were added in the last block.
-    // When there is a reorg we remove these entries from the history.
-    // This supports only reorgs up to 1 block.
-    last_block_history: Mutex<HashMap<ScriptHash, Vec<TxSeen>>>,
-
-    // We keep track of the UTXOs created in the last block.
-    // When there is a reorg we remove these UTXOs from the database.
-    // This supports only reorgs up to 1 block.
-    last_block_utxos_created: Mutex<HashMap<OutPoint, ScriptHash>>,
+    /// Reorg data for handling blockchain reorganizations
+    reorg_data: Mutex<ReorgData>,
 }
 
 // Can txid be indexed by u32? At the time of writing (2025-02-06) there are about 1B txs on mainnet, so it's possible to have u32 -> txid (u32 is 4B).
@@ -101,9 +105,7 @@ impl DBStore {
         let store = DBStore {
             db,
             salt,
-            last_block_spent: Mutex::new(Vec::new()),
-            last_block_history: Mutex::new(HashMap::new()),
-            last_block_utxos_created: Mutex::new(HashMap::new()),
+            reorg_data: Mutex::new(ReorgData::default()),
         };
         Ok(store)
     }
@@ -347,40 +349,39 @@ impl Store for DBStore {
         self.update_history(&history_map)?;
         self.insert_utxos(&utxo_created)?;
 
-        *self.last_block_spent.lock().unwrap() = outpoint_script_hashes;
-
-        // Store the history changes for potential reorg correction
-        *self.last_block_history.lock().unwrap() = history_map;
-
-        // Store the UTXOs created for potential reorg correction
-        *self.last_block_utxos_created.lock().unwrap() = utxo_created;
+        // Store reorg data for potential blockchain reorganization correction
+        {
+            let mut reorg_data = self.reorg_data.lock().unwrap();
+            reorg_data.spent = outpoint_script_hashes;
+            reorg_data.history = history_map;
+            reorg_data.utxos_created = utxo_created;
+        }
 
         Ok(())
     }
 
     fn reorg(&self) {
+        let reorg_data = self.reorg_data.lock().unwrap();
+
         // Restore UTXOs that were spent in the reorged block
         self.insert_utxos(
-            self.last_block_spent
-                .lock()
-                .unwrap()
+            reorg_data
+                .spent
                 .iter()
                 .map(|(outpoint, script_hash)| (outpoint, script_hash)),
         )
         .unwrap(); // TODO handle unwrap;
 
         // Remove UTXOs that were created in the reorged block
-        let last_block_utxos_created = self.last_block_utxos_created.lock().unwrap();
-        if !last_block_utxos_created.is_empty() {
+        if !reorg_data.utxos_created.is_empty() {
             let outpoints_to_remove: Vec<OutPoint> =
-                last_block_utxos_created.keys().cloned().collect();
+                reorg_data.utxos_created.keys().cloned().collect();
             self.remove_utxos(&outpoints_to_remove).unwrap(); // TODO handle unwrap;
         }
 
         // Remove history entries that were added in the reorged block
-        let last_block_history = self.last_block_history.lock().unwrap();
-        if !last_block_history.is_empty() {
-            self.remove_history_entries(&last_block_history).unwrap(); // TODO handle unwrap;
+        if !reorg_data.history.is_empty() {
+            self.remove_history_entries(&reorg_data.history).unwrap(); // TODO handle unwrap;
         }
     }
 }
