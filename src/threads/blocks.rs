@@ -178,7 +178,7 @@ pub async fn index(
         }
         state.set_hash_ts(&block_to_index).await;
         db.update(&block_to_index, utxo_spent, history_map, utxo_created)
-            .map_err(|e| Error::String(format!("error updating db: {e}")))?;
+            .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
         last_indexed = Some(block_to_index);
     }
 }

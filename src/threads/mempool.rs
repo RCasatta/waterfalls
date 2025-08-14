@@ -25,10 +25,9 @@ async fn mempool_sync(
 ) -> Result<(), Error> {
     // Wait for initial block download to complete
     log::info!("Mempool thread waiting for initial block download to complete...");
-    if let Err(_) = initial_sync_rx.await {
-        log::warn!("Initial sync channel closed unexpectedly, proceeding with mempool sync");
-    } else {
-        log::info!("Initial block download completed, starting mempool sync");
+    match initial_sync_rx.await {
+        Ok(_) => log::info!("Initial block download completed, starting mempool sync"),
+        Err(e) => error_panic!("Initial sync channel closed unexpectedly: {e}"),
     }
 
     let db = &state.store;
