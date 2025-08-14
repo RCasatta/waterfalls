@@ -21,7 +21,7 @@ use bitcoind::{
 use elements::{
     bitcoin::{Amount, Denomination},
     encode::{serialize_hex, Decodable},
-    BlockHash, BlockHeader, Txid,
+    BlockHash, Txid,
 };
 use hyper::HeaderMap;
 use serde::{Deserialize, Serialize};
@@ -509,7 +509,7 @@ impl WaterfallClient {
         }
         error_panic!("no tip hash after 10s");
     }
-    pub async fn header(&self, block_hash: BlockHash) -> anyhow::Result<BlockHeader> {
+    pub async fn header(&self, block_hash: BlockHash) -> anyhow::Result<be::BlockHeader> {
         let url = format!("{}/block/{}/header", self.base_url, block_hash);
         let response = self.client.get(&url).send().await?;
         let status_code = response.status().as_u16();
@@ -517,9 +517,7 @@ impl WaterfallClient {
             bail!("header response is not 200 but: {}", status_code);
         }
         let text = response.text().await?;
-        let bytes = hex::decode(text)?;
-        let header = BlockHeader::consensus_decode(&bytes[..])?;
-        Ok(header)
+        be::BlockHeader::from_str(&text, self.family)
     }
 
     pub async fn server_recipient(&self) -> anyhow::Result<Recipient> {

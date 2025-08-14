@@ -480,7 +480,10 @@ async fn test_bitcoin_reorg() {
     let block_b_header = test_env.client().header(block_b_hash).await.unwrap();
 
     // Both blocks should have the same previous block hash (they're at the same height)
-    assert_eq!(block_a_header.prev_blockhash, block_b_header.prev_blockhash);
+    assert_eq!(
+        block_a_header.prev_blockhash(),
+        block_b_header.prev_blockhash()
+    );
 
     println!("Reorg test completed successfully");
 

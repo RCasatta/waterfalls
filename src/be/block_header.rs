@@ -32,6 +32,13 @@ impl BlockHeader {
         }
     }
 
+    pub fn prev_blockhash(&self) -> elements::BlockHash {
+        match self {
+            BlockHeader::Bitcoin(header) => elements_block_hash(header.prev_blockhash),
+            BlockHeader::Elements(header) => header.prev_blockhash,
+        }
+    }
+
     pub(crate) fn from_bytes(bytes: &[u8], family: be::Family) -> Result<Self, anyhow::Error> {
         Ok(match family {
             Family::Bitcoin => {
