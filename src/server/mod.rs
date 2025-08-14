@@ -233,6 +233,7 @@ pub async fn inner_main(
     args: Arguments,
     shutdown_signal: impl Future<Output = ()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    log::info!("starting waterfalls");
     args.is_valid()?;
 
     let store = get_store(&args)?;
