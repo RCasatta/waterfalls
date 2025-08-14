@@ -388,6 +388,15 @@ async fn test_no_txindex() {
 
 #[cfg(all(feature = "test_env", feature = "db"))]
 #[tokio::test]
+/// Test Bitcoin reorg handling with proper history correction.
+///
+/// This test verifies that when a reorg occurs, the waterfalls server correctly:
+/// 1. Restores UTXOs that were spent in the reorged block  
+/// 2. Removes transaction history entries that were added in the reorged block
+///
+/// Without the history correction functionality (added in the latest commit),
+/// addresses would still show transactions from reorged blocks in their history,
+/// leading to incorrect transaction lists via address_txs().
 async fn test_bitcoin_reorg() {
     let _ = env_logger::try_init();
 
@@ -434,6 +443,19 @@ async fn test_bitcoin_reorg() {
         block_a_hash, txid_a
     );
 
+    // Check address history after transaction A is mined
+    // The recipient_a address should show transaction A in its history
+    let recipient_a_history_before_reorg =
+        test_env.client().address_txs(&recipient_a).await.unwrap();
+    println!(
+        "recipient_a history before reorg: {:?}",
+        recipient_a_history_before_reorg
+    );
+    assert!(
+        recipient_a_history_before_reorg.contains(&txid_a.to_string()),
+        "Transaction A should be in recipient A's history before reorg"
+    );
+
     let block_a_header = test_env.client().header(block_a_hash).await.unwrap();
 
     // Now create the reorg by invalidating block A
@@ -470,6 +492,32 @@ async fn test_bitcoin_reorg() {
         .await
         .unwrap();
 
+    // Check address histories after the reorg to verify proper history correction
+    // With the history correction functionality (from the latest commit),
+    // transaction A should be removed from recipient A's history since it was reorged out
+    let recipient_a_history_after_reorg =
+        test_env.client().address_txs(&recipient_a).await.unwrap();
+    println!(
+        "recipient_a history after reorg: {:?}",
+        recipient_a_history_after_reorg
+    );
+    assert!(
+        !recipient_a_history_after_reorg.contains(&txid_a.to_string()),
+        "Transaction A should NOT be in recipient A's history after reorg - it should be removed by history correction"
+    );
+
+    // Transaction B should now be in recipient B's history
+    let recipient_b_history_after_reorg =
+        test_env.client().address_txs(&recipient_b).await.unwrap();
+    println!(
+        "recipient_b history after reorg: {:?}",
+        recipient_b_history_after_reorg
+    );
+    assert!(
+        recipient_b_history_after_reorg.contains(&txid_b.to_string()),
+        "Transaction B should be in recipient B's history after reorg"
+    );
+
     // Verify the reorg happened by checking that block A is no longer in the main chain
     let current_tip = test_env.client().tip_hash().await.unwrap();
     assert_eq!(current_tip, final_tip_hash);
@@ -486,6 +534,9 @@ async fn test_bitcoin_reorg() {
     );
 
     println!("Reorg test completed successfully");
+    println!("✓ Verified that transaction A was correctly removed from recipient A's history");
+    println!("✓ Verified that transaction B is correctly present in recipient B's history");
+    println!("✓ History correction functionality is working properly during reorgs");
 
     test_env.shutdown().await;
 }
