@@ -358,5 +358,6 @@ pub async fn inner_main(
     h1.await.unwrap();
     h2.await.unwrap();
 
+    log::info!("shutting down gracefully");
     Ok(())
 }
