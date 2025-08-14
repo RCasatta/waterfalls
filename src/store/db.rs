@@ -152,7 +152,7 @@ impl DBStore {
         Ok(())
     }
 
-    fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<ScriptHash>> {
+    fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<(OutPoint, ScriptHash)>> {
         let result: Vec<ScriptHash> = self
             .get_utxos(outpoints)?
             .iter()
@@ -166,8 +166,7 @@ impl DBStore {
                 })
             })
             .collect();
-        let last_block = Vec::from_iter(outpoints.iter().cloned().zip(result.iter().cloned()));
-        *self.last_block_spent.lock().unwrap() = last_block; // TODO handle unwrap;
+        let result = Vec::from_iter(outpoints.iter().cloned().zip(result.iter().cloned()));
 
         let mut batch = rocksdb::WriteBatch::default();
         let cf = self.utxo_cf();
@@ -337,7 +336,8 @@ impl Store for DBStore {
         let mut history_map = history_map;
         // TODO should be a db tx
         let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.1).collect();
-        let script_hashes = self.remove_utxos(&only_outpoints)?;
+        let outpoint_script_hashes = self.remove_utxos(&only_outpoints)?;
+        let script_hashes = outpoint_script_hashes.iter().map(|e| e.1);
         for (script_hash, (vin, _, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
             el.push(TxSeen::new(txid, block_meta.height(), V::Vin(vin)));
@@ -346,6 +346,8 @@ impl Store for DBStore {
         self.set_hash_ts(block_meta);
         self.update_history(&history_map)?;
         self.insert_utxos(&utxo_created)?;
+
+        *self.last_block_spent.lock().unwrap() = outpoint_script_hashes;
 
         // Store the history changes for potential reorg correction
         *self.last_block_history.lock().unwrap() = history_map;
@@ -496,10 +498,10 @@ mod test {
         db.insert_utxos(&v).unwrap();
         let res = db.remove_utxos(&[o]).unwrap();
         assert_eq!(1, res.len());
-        assert_eq!(expected, res[0]);
+        assert_eq!(expected, res[0].1);
 
         let res = db.remove_utxos(&[o1]).unwrap();
-        assert_eq!(expected + 1, res[0]);
+        assert_eq!(expected + 1, res[0].1);
         assert_eq!(1, res.len());
 
         let txid = Txid::all_zeros();
