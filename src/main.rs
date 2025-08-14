@@ -13,10 +13,33 @@ async fn main() {
 }
 
 async fn shutdown_signal() {
-    // Wait for the CTRL+C signal
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to install CTRL+C signal handler");
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("failed to install SIGTERM signal handler");
+        let mut sigint =
+            signal(SignalKind::interrupt()).expect("failed to install SIGINT signal handler");
+
+        tokio::select! {
+            _ = sigterm.recv() => {
+                log::info!("Received SIGTERM signal");
+            }
+            _ = sigint.recv() => {
+                log::info!("Received SIGINT signal");
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        // On Windows, we only have Ctrl-C signal
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install CTRL+C signal handler");
+        log::info!("Received Ctrl-C signal");
+    }
 }
 
 fn init_logging() {

@@ -270,19 +270,46 @@ pub async fn inner_main(
     // Create oneshot channel to signal when initial block download is complete
     let (initial_sync_tx, initial_sync_rx) = tokio::sync::oneshot::channel::<()>();
 
+    // Create broadcast channel for shutdown signal
+    let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
+
     let _h1 = {
         let state = state.clone();
         let client: Client = Client::new(&args);
+        let shutdown_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
-            blocks_infallible(state, client, args.network.into(), initial_sync_tx).await
+            let shutdown_future = async {
+                let mut rx = shutdown_rx;
+                let _ = rx.recv().await;
+            };
+            blocks_infallible(
+                state,
+                client,
+                args.network.into(),
+                initial_sync_tx,
+                shutdown_future,
+            )
+            .await
         })
     };
 
     let _h2 = {
         let state = state.clone();
         let client = Client::new(&args);
+        let shutdown_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
-            mempool_sync_infallible(state, client, args.network.into(), initial_sync_rx).await
+            let shutdown_future = async {
+                let mut rx = shutdown_rx;
+                let _ = rx.recv().await;
+            };
+            mempool_sync_infallible(
+                state,
+                client,
+                args.network.into(),
+                initial_sync_rx,
+                shutdown_future,
+            )
+            .await
         })
     };
 
@@ -320,6 +347,8 @@ pub async fn inner_main(
 
             _ = &mut signal => {
                 log::info!("graceful shutdown signal received");
+                // Signal all background tasks to shutdown
+                let _ = shutdown_tx.send(());
                 // stop the accept loop
                 break;
             }
