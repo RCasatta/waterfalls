@@ -35,6 +35,61 @@ pub(crate) async fn blocks_infallible(
     }
 }
 
+async fn get_next_block_to_index(
+    last_indexed: &mut Option<BlockMeta>,
+    client: &Client,
+    family: Family,
+    state: &Arc<State>,
+    initial_sync_tx: &mut Option<tokio::sync::oneshot::Sender<()>>,
+) -> Option<BlockMeta> {
+    match last_indexed.as_ref() {
+        Some(last) => {
+            match client.get_next(&last, family).await {
+                Ok(ChainStatus::NewBlock(next)) => {
+                    return Some(next);
+                }
+                Ok(ChainStatus::Reorg) => {
+                    log::warn!("reorg happened! {last:?} removed from the chain");
+                    let previous_height = last.height - 1;
+                    let blocks_hash_ts = state
+                        .blocks_hash_ts
+                        .lock()
+                        .await
+                        .get(previous_height as usize)
+                        .cloned()
+                        .expect("can't get previous block_hash");
+                    let previous_block_meta =
+                        BlockMeta::new(previous_height, blocks_hash_ts.0, blocks_hash_ts.1);
+                    *last_indexed = Some(previous_block_meta);
+                    state.store.reorg();
+                    return None;
+                }
+                Ok(ChainStatus::Tip) => {
+                    // Signal initial sync completion the first time we hit the tip
+                    if let Some(tx) = initial_sync_tx.take() {
+                        let _ = tx.send(());
+                        log::info!("Initial block download completed, signaling mempool thread");
+                    }
+                    sleep(Duration::from_secs(1)).await;
+                    return None;
+                }
+                Err(e) => {
+                    log::warn!("error getting next block {e}, sleeping for 1 second and retrying");
+                    sleep(Duration::from_secs(1)).await;
+                    return None;
+                }
+            }
+        }
+        None => {
+            if let Ok(Some(next)) = client.block_hash(0).await {
+                return Some(BlockMeta::new(0, next, 0)); // TODO timestamp
+            }
+        }
+    }
+    sleep(Duration::from_secs(1)).await;
+    None
+}
+
 pub async fn index(
     state: Arc<State>,
     client: Client,
@@ -72,58 +127,7 @@ pub async fn index(
                     log::info!("blocks thread received shutdown signal");
                     return Ok(());
                 }
-                result = async {
-                    match last_indexed.as_ref() {
-                        Some(last) => {
-                            match client.get_next(&last, family).await {
-                                Ok(ChainStatus::NewBlock(next)) => {
-                                    return Some(next);
-                                }
-                                Ok(ChainStatus::Reorg) => {
-                                    log::warn!("reorg happened! {last:?} removed from the chain");
-                                    let previous_height = last.height - 1;
-                                    let blocks_hash_ts = state
-                                        .blocks_hash_ts
-                                        .lock()
-                                        .await
-                                        .get(previous_height as usize)
-                                        .cloned()
-                                        .expect("can't get previous block_hash");
-                                    let previous_block_meta =
-                                        BlockMeta::new(previous_height, blocks_hash_ts.0, blocks_hash_ts.1);
-                                    last_indexed = Some(previous_block_meta);
-                                    state.store.reorg();
-                                    return None;
-                                }
-                                Ok(ChainStatus::Tip) => {
-                                    // Signal initial sync completion the first time we hit the tip
-                                    if let Some(tx) = initial_sync_tx.take() {
-                                        let _ = tx.send(());
-                                        log::info!(
-                                            "Initial block download completed, signaling mempool thread"
-                                        );
-                                    }
-                                    sleep(Duration::from_secs(1)).await;
-                                    return None;
-                                }
-                                Err(e) => {
-                                    log::warn!(
-                                        "error getting next block {e}, sleeping for 1 second and retrying"
-                                    );
-                                    sleep(Duration::from_secs(1)).await;
-                                    return None;
-                                }
-                            }
-                        }
-                        None => {
-                            if let Ok(Some(next)) = client.block_hash(0).await {
-                                return Some(BlockMeta::new(0, next, 0)); // TODO timestamp
-                            }
-                        }
-                    }
-                    sleep(Duration::from_secs(1)).await;
-                    None
-                } => {
+                result = get_next_block_to_index(&mut last_indexed, &client, family, &state, &mut initial_sync_tx) => {
                     if let Some(block) = result {
                         break block;
                     }
