@@ -22,6 +22,25 @@ use crate::{
     store::{BlockMeta, Store, TxSeen},
     Height, ScriptHash,
 };
+
+/// Data for handling reorgs up to 1 block.
+/// If the process halts right before a reorg, this will be lost and a reindex must happen.
+#[derive(Debug, Default)]
+struct ReorgData {
+    /// Input spent in the last block. These are usually deleted from the db when a block is found.
+    /// When there is a reorg we reinsert them in the db.
+    spent: Vec<(OutPoint, ScriptHash)>,
+
+    /// History changes from the last block. Contains the script hashes and their corresponding
+    /// TxSeen entries that were added in the last block. When there is a reorg we remove
+    /// these entries from the history.
+    history: HashMap<ScriptHash, Vec<TxSeen>>,
+
+    /// UTXOs created in the last block. When there is a reorg we remove these UTXOs
+    /// from the database.
+    utxos_created: HashMap<OutPoint, ScriptHash>,
+}
+
 /// RocksDB wrapper for index storage
 
 #[derive(Debug)]
@@ -29,13 +48,8 @@ pub struct DBStore {
     db: DB,
     salt: u64,
 
-    // We keep track of the last block input spent.
-    // This are usually deleted from the db when a block is found
-    // When there is a reorg we reinsert them in the db.
-    // This support only reorgs up to 1 block.
-    // If the process halts right before a reorg, this will be lost and a reindex must happen.
-    // TODO: at the moment we didn't bother to fix reorged TxSeen, client can find reorged tx in history
-    last_block: Mutex<HashMap<OutPoint, ScriptHash>>,
+    /// Reorg data for handling blockchain reorganizations
+    reorg_data: Mutex<ReorgData>,
 }
 
 // Can txid be indexed by u32? At the time of writing (2025-02-06) there are about 1B txs on mainnet, so it's possible to have u32 -> txid (u32 is 4B).
@@ -91,7 +105,7 @@ impl DBStore {
         let store = DBStore {
             db,
             salt,
-            last_block: Mutex::new(HashMap::new()),
+            reorg_data: Mutex::new(ReorgData::default()),
         };
         Ok(store)
     }
@@ -122,14 +136,17 @@ impl DBStore {
             .unwrap();
     }
 
-    fn insert_utxos(&self, adds: &HashMap<OutPoint, ScriptHash>) -> Result<()> {
+    fn insert_utxos<'a, I>(&self, adds: I) -> Result<()>
+    where
+        I: IntoIterator<Item = (&'a OutPoint, &'a ScriptHash)>,
+    {
         let mut batch = rocksdb::WriteBatch::default();
         let cf = self.utxo_cf();
         let mut key_buf = vec![0u8; 36];
-        for add in adds {
+        for (outpoint, script_hash) in adds {
             key_buf.clear();
-            add.0.consensus_encode(&mut key_buf)?;
-            let val = add.1.to_be_bytes();
+            outpoint.consensus_encode(&mut key_buf)?;
+            let val = script_hash.to_be_bytes();
             batch.put_cf(&cf, &key_buf, val);
         }
 
@@ -137,7 +154,7 @@ impl DBStore {
         Ok(())
     }
 
-    fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<ScriptHash>> {
+    fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<(OutPoint, ScriptHash)>> {
         let result: Vec<ScriptHash> = self
             .get_utxos(outpoints)?
             .iter()
@@ -151,8 +168,7 @@ impl DBStore {
                 })
             })
             .collect();
-        let last_block = HashMap::from_iter(outpoints.iter().cloned().zip(result.iter().cloned()));
-        *self.last_block.lock().unwrap() = last_block; // TODO handle unwrap;
+        let result = Vec::from_iter(outpoints.iter().cloned().zip(result.iter().cloned()));
 
         let mut batch = rocksdb::WriteBatch::default();
         let cf = self.utxo_cf();
@@ -188,6 +204,53 @@ impl DBStore {
                 vec_tx_seen_to_be_bytes(new_heights),
             )
         }
+        self.db.write(batch)?;
+        Ok(())
+    }
+
+    fn remove_history_entries(&self, to_remove: &HashMap<ScriptHash, Vec<TxSeen>>) -> Result<()> {
+        if to_remove.is_empty() {
+            return Ok(());
+        }
+
+        log::debug!("remove_history_entries {to_remove:?}");
+
+        // Get the script hashes we need to process
+        let script_hashes: Vec<ScriptHash> = to_remove.keys().cloned().collect();
+
+        // Read current history for these script hashes
+        let current_history = self.get_history(&script_hashes)?;
+
+        let mut batch = rocksdb::WriteBatch::default();
+        let cf = self.history_cf();
+
+        for (i, script_hash) in script_hashes.iter().enumerate() {
+            let entries_to_remove = &to_remove[script_hash];
+            let mut current_entries = current_history[i].clone();
+
+            // Remove the specific entries
+            for entry_to_remove in entries_to_remove {
+                current_entries.retain(|entry| {
+                    !(entry.txid == entry_to_remove.txid
+                        && entry.height == entry_to_remove.height
+                        && entry.v == entry_to_remove.v)
+                });
+            }
+
+            // Write back the cleaned history
+            if current_entries.is_empty() {
+                // If no entries left, delete the key entirely
+                batch.delete_cf(&cf, script_hash.to_be_bytes());
+            } else {
+                // Otherwise, replace with the cleaned entries
+                batch.put_cf(
+                    &cf,
+                    script_hash.to_be_bytes(),
+                    vec_tx_seen_to_be_bytes(&current_entries),
+                );
+            }
+        }
+
         self.db.write(batch)?;
         Ok(())
     }
@@ -275,7 +338,8 @@ impl Store for DBStore {
         let mut history_map = history_map;
         // TODO should be a db tx
         let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.1).collect();
-        let script_hashes = self.remove_utxos(&only_outpoints)?;
+        let outpoint_script_hashes = self.remove_utxos(&only_outpoints)?;
+        let script_hashes = outpoint_script_hashes.iter().map(|e| e.1);
         for (script_hash, (vin, _, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
             el.push(TxSeen::new(txid, block_meta.height(), V::Vin(vin)));
@@ -285,11 +349,40 @@ impl Store for DBStore {
         self.update_history(&history_map)?;
         self.insert_utxos(&utxo_created)?;
 
+        // Store reorg data for potential blockchain reorganization correction
+        {
+            let mut reorg_data = self.reorg_data.lock().unwrap();
+            reorg_data.spent = outpoint_script_hashes;
+            reorg_data.history = history_map;
+            reorg_data.utxos_created = utxo_created;
+        }
+
         Ok(())
     }
 
     fn reorg(&self) {
-        self.insert_utxos(&self.last_block.lock().unwrap()).unwrap(); // TODO handle unwrap;
+        let reorg_data = self.reorg_data.lock().unwrap();
+
+        // Restore UTXOs that were spent in the reorged block
+        self.insert_utxos(
+            reorg_data
+                .spent
+                .iter()
+                .map(|(outpoint, script_hash)| (outpoint, script_hash)),
+        )
+        .unwrap(); // TODO handle unwrap;
+
+        // Remove UTXOs that were created in the reorged block
+        if !reorg_data.utxos_created.is_empty() {
+            let outpoints_to_remove: Vec<OutPoint> =
+                reorg_data.utxos_created.keys().cloned().collect();
+            self.remove_utxos(&outpoints_to_remove).unwrap(); // TODO handle unwrap;
+        }
+
+        // Remove history entries that were added in the reorged block
+        if !reorg_data.history.is_empty() {
+            self.remove_history_entries(&reorg_data.history).unwrap(); // TODO handle unwrap;
+        }
     }
 }
 
@@ -406,10 +499,10 @@ mod test {
         db.insert_utxos(&v).unwrap();
         let res = db.remove_utxos(&[o]).unwrap();
         assert_eq!(1, res.len());
-        assert_eq!(expected, res[0]);
+        assert_eq!(expected, res[0].1);
 
         let res = db.remove_utxos(&[o1]).unwrap();
-        assert_eq!(expected + 1, res[0]);
+        assert_eq!(expected + 1, res[0].1);
         assert_eq!(1, res.len());
 
         let txid = Txid::all_zeros();

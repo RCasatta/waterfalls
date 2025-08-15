@@ -8,6 +8,7 @@ use crate::{
 use elements::{OutPoint, Txid};
 use std::{
     collections::{HashMap, HashSet},
+    future::Future,
     str::FromStr,
     sync::Arc,
     time::{Duration, Instant},
@@ -19,10 +20,74 @@ pub(crate) async fn blocks_infallible(
     client: Client,
     family: Family,
     initial_sync_tx: tokio::sync::oneshot::Sender<()>,
+    shutdown_signal: impl Future<Output = ()>,
 ) {
-    if let Err(e) = index(shared_state, client, family, initial_sync_tx).await {
+    if let Err(e) = index(
+        shared_state,
+        client,
+        family,
+        initial_sync_tx,
+        shutdown_signal,
+    )
+    .await
+    {
         log::error!("{:?}", e);
     }
+}
+
+async fn get_next_block_to_index(
+    last_indexed: &mut Option<BlockMeta>,
+    client: &Client,
+    family: Family,
+    state: &Arc<State>,
+    initial_sync_tx: &mut Option<tokio::sync::oneshot::Sender<()>>,
+) -> Option<BlockMeta> {
+    match last_indexed.as_ref() {
+        Some(last) => {
+            match client.get_next(&last, family).await {
+                Ok(ChainStatus::NewBlock(next)) => {
+                    return Some(next);
+                }
+                Ok(ChainStatus::Reorg) => {
+                    log::warn!("reorg happened! {last:?} removed from the chain");
+                    let previous_height = last.height - 1;
+                    let blocks_hash_ts = state
+                        .blocks_hash_ts
+                        .lock()
+                        .await
+                        .get(previous_height as usize)
+                        .cloned()
+                        .expect("can't get previous block_hash");
+                    let previous_block_meta =
+                        BlockMeta::new(previous_height, blocks_hash_ts.0, blocks_hash_ts.1);
+                    *last_indexed = Some(previous_block_meta);
+                    state.store.reorg();
+                    return None;
+                }
+                Ok(ChainStatus::Tip) => {
+                    // Signal initial sync completion the first time we hit the tip
+                    if let Some(tx) = initial_sync_tx.take() {
+                        let _ = tx.send(());
+                        log::info!("Initial block download completed, signaling mempool thread");
+                    }
+                    sleep(Duration::from_secs(1)).await;
+                    return None;
+                }
+                Err(e) => {
+                    log::warn!("error getting next block {e}, sleeping for 1 second and retrying");
+                    sleep(Duration::from_secs(1)).await;
+                    return None;
+                }
+            }
+        }
+        None => {
+            if let Ok(Some(next)) = client.block_hash(0).await {
+                return Some(BlockMeta::new(0, next, 0)); // TODO timestamp
+            }
+        }
+    }
+    sleep(Duration::from_secs(1)).await;
+    None
 }
 
 pub async fn index(
@@ -30,6 +95,7 @@ pub async fn index(
     client: Client,
     family: Family,
     initial_sync_tx: tokio::sync::oneshot::Sender<()>,
+    shutdown_signal: impl Future<Output = ()>,
 ) -> Result<(), Error> {
     let db = &state.store;
 
@@ -52,61 +118,29 @@ pub async fn index(
 
     let start = Instant::now();
     let mut last_logging = Instant::now();
+    let mut signal = std::pin::pin!(shutdown_signal);
+
     loop {
         let block_to_index = loop {
-            match last_indexed.as_ref() {
-                Some(last) => {
-                    match client.get_next(&last, family).await {
-                        Ok(ChainStatus::NewBlock(next)) => {
-                            break next;
-                        }
-                        Ok(ChainStatus::Reorg) => {
-                            log::warn!("reorg happened! {last:?} removed from the chain");
-                            let previous_height = last.height - 1;
-                            let blocks_hash_ts = state
-                                .blocks_hash_ts
-                                .lock()
-                                .await
-                                .get(previous_height as usize)
-                                .cloned()
-                                .expect("can't get previous block_hash");
-                            let previous_block_meta =
-                                BlockMeta::new(previous_height, blocks_hash_ts.0, blocks_hash_ts.1);
-                            last_indexed = Some(previous_block_meta);
-                            state.store.reorg();
-                            continue;
-                        }
-                        Ok(ChainStatus::Tip) => {
-                            // Signal initial sync completion the first time we hit the tip
-                            if let Some(tx) = initial_sync_tx.take() {
-                                let _ = tx.send(());
-                                log::info!(
-                                    "Initial block download completed, signaling mempool thread"
-                                );
-                            }
-                            sleep(Duration::from_secs(1)).await;
-                            continue;
-                        }
-                        Err(e) => {
-                            log::warn!(
-                                "error getting next block {e}, sleeping for 1 second and retrying"
-                            );
-                            sleep(Duration::from_secs(1)).await;
-                            continue;
-                        }
-                    }
+            tokio::select! {
+                _ = &mut signal => {
+                    log::info!("blocks thread received shutdown signal");
+                    return Ok(());
                 }
-                None => {
-                    if let Ok(Some(next)) = client.block_hash(0).await {
-                        break BlockMeta::new(0, next, 0); // TODO timestamp
+                result = get_next_block_to_index(&mut last_indexed, &client, family, &state, &mut initial_sync_tx) => {
+                    if let Some(block) = result {
+                        break block;
                     }
                 }
             }
-            sleep(Duration::from_secs(1)).await;
         };
 
         if initial_sync_tx.is_none() {
-            log::info!("current block to index is: {block_to_index:?}");
+            log::info!(
+                "indexing: {} {}",
+                block_to_index.height,
+                block_to_index.hash
+            );
         }
 
         if initial_sync_tx.is_some() && last_logging.elapsed().as_secs() > 60 {
@@ -178,7 +212,7 @@ pub async fn index(
         }
         state.set_hash_ts(&block_to_index).await;
         db.update(&block_to_index, utxo_spent, history_map, utxo_created)
-            .map_err(|e| Error::String(format!("error updating db: {e}")))?;
+            .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
         last_indexed = Some(block_to_index);
     }
 }

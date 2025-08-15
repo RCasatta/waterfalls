@@ -13,6 +13,7 @@ pub struct MemoryStore {
     utxos: Mutex<HashMap<OutPoint, ScriptHash>>,
     history: Mutex<HashMap<ScriptHash, Vec<TxSeen>>>,
 
+    // TODO memory store does not fully support reorgs
     last_block: Mutex<HashMap<OutPoint, ScriptHash>>,
 }
 
