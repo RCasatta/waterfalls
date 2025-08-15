@@ -190,9 +190,13 @@ impl Client {
             if family == Family::Bitcoin && !self.use_esplora {
                 builder = builder.query(&[("count", "1")]);
             }
-            let resp = builder.send().await?;
+            let resp = builder
+                .send()
+                .await
+                .with_context(|| format!("failing for {url}"))?;
             let status = resp.status();
             if status == 404 {
+                log::warn!("block header json {hash} returned 404, reorg happened");
                 return Ok(None);
             } else if status == 503 {
                 log::warn!(
@@ -236,9 +240,13 @@ impl Client {
             if family == Family::Bitcoin && !self.use_esplora {
                 builder = builder.query(&[("count", "1")]);
             }
-            let resp = builder.send().await?;
+            let resp = builder
+                .send()
+                .await
+                .with_context(|| format!("failing for {url}"))?;
             let status = resp.status();
             if status == 404 {
+                log::warn!("block header {hash} returned 404, reorg happened");
                 return Err(Error::BlockHeaderNotFound(url, hash).into());
             } else if status == 503 {
                 log::warn!(
