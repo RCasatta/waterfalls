@@ -4,9 +4,12 @@ use bitcoin::key::Secp256k1;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hyper::body::Buf;
 
-use elements::Txid;
+use elements::secp256k1_zkp::rand::{thread_rng, RngCore};
+use elements::{OutPoint, Txid};
 use elements_miniscript::Descriptor;
 use elements_miniscript::DescriptorPublicKey;
+use rocksdb::{Options, WriteBatch, DB};
+use tempfile;
 use waterfalls::WaterfallResponse;
 use waterfalls::WaterfallResponseV3;
 
@@ -15,7 +18,8 @@ criterion_group!(
     descriptor,
     encoding_decoding,
     conversion,
-    sign_verify
+    sign_verify,
+    writebatch_sorting
 );
 criterion_main!(benches);
 
@@ -151,6 +155,85 @@ pub fn conversion(c: &mut Criterion) {
                 let resp_v3: WaterfallResponseV3 = resp.clone().try_into().unwrap();
                 black_box(resp_v3);
             });
+        });
+}
+
+pub fn writebatch_sorting(c: &mut Criterion) {
+    use elements::encode::Encodable;
+    use elements::hashes::Hash;
+
+    // Generate test data
+    let mut rng = thread_rng();
+    let mut test_outpoints = Vec::new();
+
+    for _ in 0..1000 {
+        let mut txid_bytes = [0u8; 32];
+        rng.fill_bytes(&mut txid_bytes);
+        let txid = Txid::from_byte_array(txid_bytes);
+        let vout = rng.next_u32();
+        test_outpoints.push(OutPoint { txid, vout });
+    }
+
+    // Helper function to serialize OutPoint
+    let serialize_outpoint = |o: &OutPoint| -> Vec<u8> {
+        let mut v = Vec::with_capacity(36);
+        o.consensus_encode(&mut v).expect("vec don't error");
+        v
+    };
+
+    c.benchmark_group("writebatch")
+        .bench_function("sorted keys", |b: &mut criterion::Bencher<'_>| {
+            b.iter_batched(
+                || {
+                    // Setup: create temp db and sort the keys
+                    let temp_dir = tempfile::TempDir::new().unwrap();
+                    let mut opts = Options::default();
+                    opts.create_if_missing(true);
+                    let db = DB::open(&opts, temp_dir.path()).unwrap();
+
+                    let mut sorted_outpoints = test_outpoints.clone();
+                    sorted_outpoints.sort();
+
+                    (db, sorted_outpoints, temp_dir)
+                },
+                |(db, sorted_outpoints, _temp_dir)| {
+                    // Benchmark: WriteBatch with sorted keys
+                    let mut batch = WriteBatch::default();
+                    for outpoint in &sorted_outpoints {
+                        let key = serialize_outpoint(outpoint);
+                        let value = b"test_value";
+                        batch.put(&key, value);
+                    }
+                    let result = db.write(batch);
+                    black_box(result);
+                },
+                criterion::BatchSize::SmallInput,
+            )
+        })
+        .bench_function("random keys", |b: &mut criterion::Bencher<'_>| {
+            b.iter_batched(
+                || {
+                    // Setup: create temp db, keys are already random
+                    let temp_dir = tempfile::TempDir::new().unwrap();
+                    let mut opts = Options::default();
+                    opts.create_if_missing(true);
+                    let db = DB::open(&opts, temp_dir.path()).unwrap();
+
+                    (db, test_outpoints.clone(), temp_dir)
+                },
+                |(db, random_outpoints, _temp_dir)| {
+                    // Benchmark: WriteBatch with random keys
+                    let mut batch = WriteBatch::default();
+                    for outpoint in &random_outpoints {
+                        let key = serialize_outpoint(outpoint);
+                        let value = b"test_value";
+                        batch.put(&key, value);
+                    }
+                    let result = db.write(batch);
+                    black_box(result);
+                },
+                criterion::BatchSize::SmallInput,
+            )
         });
 }
 
