@@ -1,7 +1,7 @@
 use crate::{Height, ScriptHash, Timestamp, TxSeen};
 use anyhow::Result;
 use elements::{BlockHash, OutPoint, Txid};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 #[cfg(feature = "db")]
 pub mod db;
@@ -35,8 +35,8 @@ pub trait Store {
         &self,
         block_meta: &BlockMeta,
         utxo_spent: Vec<(u32, OutPoint, Txid)>,
-        history_map: HashMap<ScriptHash, Vec<TxSeen>>,
-        utxo_created: BTreeMap<OutPoint, ScriptHash>,
+        history_map: BTreeMap<ScriptHash, Vec<TxSeen>>, // We want this sorted because when inserted in the write batch it's faster (see benches and test guaranteeing encoding order match struct ordering)
+        utxo_created: BTreeMap<OutPoint, ScriptHash>, // We want this sorted because when inserted in the write batch it's faster (see benches and test guaranteeing encoding order match struct ordering)
     ) -> Result<()>;
 
     /// Reorg, reinsert the last block unspent utxos
@@ -80,8 +80,8 @@ impl Store for AnyStore {
         &self,
         block_meta: &BlockMeta,
         utxo_spent: Vec<(u32, OutPoint, Txid)>,
-        history_map: HashMap<ScriptHash, Vec<TxSeen>>,
-        utxo_created: BTreeMap<OutPoint, ScriptHash>, // We want this sorted because when inserted in the write batch it's faster (see benches and test guaranteeing encoding order match struct ordering)
+        history_map: BTreeMap<ScriptHash, Vec<TxSeen>>,
+        utxo_created: BTreeMap<OutPoint, ScriptHash>,
     ) -> Result<()> {
         match self {
             #[cfg(feature = "db")]

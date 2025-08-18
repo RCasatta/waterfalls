@@ -7,7 +7,7 @@ use crate::{
 };
 use elements::{OutPoint, Txid};
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     future::Future,
     str::FromStr,
     sync::Arc,
@@ -153,7 +153,7 @@ pub async fn index(
             last_logging = Instant::now();
         }
 
-        let mut history_map = HashMap::new();
+        let mut history_map = BTreeMap::new();
         let mut utxo_created = BTreeMap::new();
         let mut utxo_spent = vec![];
 

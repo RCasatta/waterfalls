@@ -1,8 +1,4 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    hash::Hasher,
-    sync::Mutex,
-};
+use std::{collections::BTreeMap, hash::Hasher, sync::Mutex};
 
 use elements::OutPoint;
 use fxhash::FxHasher;
@@ -15,7 +11,7 @@ use crate::V;
 #[derive(Debug)]
 pub struct MemoryStore {
     utxos: Mutex<BTreeMap<OutPoint, ScriptHash>>,
-    history: Mutex<HashMap<ScriptHash, Vec<TxSeen>>>,
+    history: Mutex<BTreeMap<ScriptHash, Vec<TxSeen>>>,
 
     // TODO memory store does not fully support reorgs
     last_block: Mutex<BTreeMap<OutPoint, ScriptHash>>,
@@ -67,7 +63,7 @@ impl Store for MemoryStore {
         &self,
         block_meta: &BlockMeta,
         utxo_spent: Vec<(u32, elements::OutPoint, elements::Txid)>,
-        history_map: std::collections::HashMap<ScriptHash, Vec<TxSeen>>,
+        history_map: std::collections::BTreeMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: std::collections::BTreeMap<elements::OutPoint, ScriptHash>,
     ) -> anyhow::Result<()> {
         let mut history_map = history_map;
@@ -114,7 +110,7 @@ impl MemoryStore {
         }
         result
     }
-    fn update_history(&self, add: HashMap<ScriptHash, Vec<TxSeen>>) {
+    fn update_history(&self, add: BTreeMap<ScriptHash, Vec<TxSeen>>) {
         let mut history = self.history.lock().unwrap();
         for (k, v) in add {
             history.entry(k).or_default().extend(v);
@@ -127,7 +123,7 @@ impl MemoryStore {
     pub(crate) fn new() -> Self {
         Self {
             utxos: Mutex::new(BTreeMap::new()),
-            history: Mutex::new(HashMap::new()),
+            history: Mutex::new(BTreeMap::new()),
             last_block: Mutex::new(BTreeMap::new()),
         }
     }

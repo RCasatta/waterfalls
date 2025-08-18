@@ -12,7 +12,7 @@ use crate::V;
 
 use prefix_uvarint::PrefixVarInt;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     hash::Hasher,
     path::Path,
     sync::{Arc, Mutex},
@@ -34,7 +34,7 @@ struct ReorgData {
     /// History changes from the last block. Contains the script hashes and their corresponding
     /// TxSeen entries that were added in the last block. When there is a reorg we remove
     /// these entries from the history.
-    history: HashMap<ScriptHash, Vec<TxSeen>>,
+    history: BTreeMap<ScriptHash, Vec<TxSeen>>,
 
     /// UTXOs created in the last block. When there is a reorg we remove these UTXOs
     /// from the database.
@@ -191,7 +191,7 @@ impl DBStore {
         Ok(result)
     }
 
-    fn update_history(&self, add: &HashMap<ScriptHash, Vec<TxSeen>>) -> Result<()> {
+    fn update_history(&self, add: &BTreeMap<ScriptHash, Vec<TxSeen>>) -> Result<()> {
         if add.is_empty() {
             return Ok(());
         }
@@ -215,7 +215,7 @@ impl DBStore {
         Ok(())
     }
 
-    fn remove_history_entries(&self, to_remove: &HashMap<ScriptHash, Vec<TxSeen>>) -> Result<()> {
+    fn remove_history_entries(&self, to_remove: &BTreeMap<ScriptHash, Vec<TxSeen>>) -> Result<()> {
         if to_remove.is_empty() {
             return Ok(());
         }
@@ -264,7 +264,7 @@ impl DBStore {
     }
 }
 
-fn estimate_history_size(add: &HashMap<u64, Vec<TxSeen>>) -> usize {
+fn estimate_history_size(add: &BTreeMap<u64, Vec<TxSeen>>) -> usize {
     let mut size = 0;
     for el in add.values() {
         size += 8; // add key size
@@ -349,7 +349,7 @@ impl Store for DBStore {
         &self,
         block_meta: &BlockMeta,
         utxo_spent: Vec<(u32, OutPoint, Txid)>,
-        history_map: HashMap<ScriptHash, Vec<TxSeen>>,
+        history_map: BTreeMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: BTreeMap<OutPoint, ScriptHash>,
     ) -> Result<()> {
         let mut history_map = history_map;
@@ -483,7 +483,7 @@ fn concat_merge(
 #[cfg(test)]
 mod test {
     use elements::{hashes::Hash, BlockHash, OutPoint, Txid};
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     use crate::store::{
         db::{
@@ -513,7 +513,7 @@ mod test {
             o1
         };
         let expected = 42u64;
-        let v: HashMap<_, _> = vec![(o, expected), (o1, expected + 1)]
+        let v: BTreeMap<_, _> = vec![(o, expected), (o1, expected + 1)]
             .into_iter()
             .collect();
         db.insert_utxos(&v).unwrap();
@@ -527,7 +527,7 @@ mod test {
 
         let txid = Txid::all_zeros();
 
-        let mut new_history = HashMap::new();
+        let mut new_history = BTreeMap::new();
         let txs_seen = vec![
             TxSeen::new(txid, 2, V::Undefined),
             TxSeen::new(txid, 5, V::Undefined),
