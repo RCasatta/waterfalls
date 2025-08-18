@@ -7,7 +7,7 @@ use crate::{
 };
 use elements::{OutPoint, Txid};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     future::Future,
     str::FromStr,
     sync::Arc,
@@ -154,7 +154,7 @@ pub async fn index(
         }
 
         let mut history_map = HashMap::new();
-        let mut utxo_created = HashMap::new();
+        let mut utxo_created = BTreeMap::new();
         let mut utxo_spent = vec![];
 
         let block = match client.block(block_to_index.hash, family).await {

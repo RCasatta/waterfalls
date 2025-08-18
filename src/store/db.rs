@@ -12,7 +12,7 @@ use crate::V;
 
 use prefix_uvarint::PrefixVarInt;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     hash::Hasher,
     path::Path,
     sync::{Arc, Mutex},
@@ -38,7 +38,7 @@ struct ReorgData {
 
     /// UTXOs created in the last block. When there is a reorg we remove these UTXOs
     /// from the database.
-    utxos_created: HashMap<OutPoint, ScriptHash>,
+    utxos_created: BTreeMap<OutPoint, ScriptHash>,
 }
 
 /// RocksDB wrapper for index storage
@@ -350,7 +350,7 @@ impl Store for DBStore {
         block_meta: &BlockMeta,
         utxo_spent: Vec<(u32, OutPoint, Txid)>,
         history_map: HashMap<ScriptHash, Vec<TxSeen>>,
-        utxo_created: HashMap<OutPoint, ScriptHash>,
+        utxo_created: BTreeMap<OutPoint, ScriptHash>,
     ) -> Result<()> {
         let mut history_map = history_map;
         // TODO should be a db tx

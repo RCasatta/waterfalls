@@ -1,4 +1,8 @@
-use std::{collections::HashMap, hash::Hasher, sync::Mutex};
+use std::{
+    collections::{BTreeMap, HashMap},
+    hash::Hasher,
+    sync::Mutex,
+};
 
 use elements::OutPoint;
 use fxhash::FxHasher;
@@ -10,11 +14,11 @@ use crate::V;
 
 #[derive(Debug)]
 pub struct MemoryStore {
-    utxos: Mutex<HashMap<OutPoint, ScriptHash>>,
+    utxos: Mutex<BTreeMap<OutPoint, ScriptHash>>,
     history: Mutex<HashMap<ScriptHash, Vec<TxSeen>>>,
 
     // TODO memory store does not fully support reorgs
-    last_block: Mutex<HashMap<OutPoint, ScriptHash>>,
+    last_block: Mutex<BTreeMap<OutPoint, ScriptHash>>,
 }
 
 impl Store for MemoryStore {
@@ -64,14 +68,14 @@ impl Store for MemoryStore {
         block_meta: &BlockMeta,
         utxo_spent: Vec<(u32, elements::OutPoint, elements::Txid)>,
         history_map: std::collections::HashMap<ScriptHash, Vec<TxSeen>>,
-        utxo_created: std::collections::HashMap<elements::OutPoint, ScriptHash>,
+        utxo_created: std::collections::BTreeMap<elements::OutPoint, ScriptHash>,
     ) -> anyhow::Result<()> {
         let mut history_map = history_map;
         // // TODO should be a db tx
         let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.1).collect();
         let script_hashes = self.remove_utxos(&only_outpoints);
 
-        let last_block = HashMap::from_iter(
+        let last_block = BTreeMap::from_iter(
             only_outpoints
                 .iter()
                 .cloned()
@@ -116,15 +120,15 @@ impl MemoryStore {
             history.entry(k).or_default().extend(v);
         }
     }
-    fn insert_utxos(&self, adds: &HashMap<OutPoint, ScriptHash>) {
+    fn insert_utxos(&self, adds: &BTreeMap<OutPoint, ScriptHash>) {
         self.utxos.lock().unwrap().extend(adds);
     }
 
     pub(crate) fn new() -> Self {
         Self {
-            utxos: Mutex::new(HashMap::new()),
+            utxos: Mutex::new(BTreeMap::new()),
             history: Mutex::new(HashMap::new()),
-            last_block: Mutex::new(HashMap::new()),
+            last_block: Mutex::new(BTreeMap::new()),
         }
     }
 }
