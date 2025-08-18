@@ -486,7 +486,10 @@ mod test {
     use std::collections::HashMap;
 
     use crate::store::{
-        db::{get_or_init_salt, vec_tx_seen_from_be_bytes, vec_tx_seen_to_be_bytes, TxSeen},
+        db::{
+            get_or_init_salt, serialize_outpoint, vec_tx_seen_from_be_bytes,
+            vec_tx_seen_to_be_bytes, TxSeen,
+        },
         Store,
     };
     use crate::V;
@@ -616,5 +619,69 @@ mod test {
         assert_eq!(serialized.len(), 34);
         let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
         assert_eq!(txs, deserialized, "v must be serialized");
+    }
+
+    #[test]
+    fn test_outpoint_ordering_matches_encoding() {
+        use elements::secp256k1_zkp::rand::{thread_rng, RngCore};
+
+        let mut rng = thread_rng();
+
+        // Create a bunch of random OutPoints
+        let mut outpoints = Vec::new();
+        for _ in 0..100 {
+            let mut txid_bytes = [0u8; 32];
+            rng.fill_bytes(&mut txid_bytes);
+            let txid = Txid::from_byte_array(txid_bytes);
+            let vout = rng.next_u32();
+            outpoints.push(OutPoint { txid, vout });
+        }
+
+        // Add some specific test cases to ensure edge cases work
+        let zero_txid = Txid::all_zeros();
+        let max_txid = Txid::from_byte_array([0xff; 32]);
+        outpoints.push(OutPoint {
+            txid: zero_txid,
+            vout: 0,
+        });
+        outpoints.push(OutPoint {
+            txid: zero_txid,
+            vout: 1,
+        });
+        outpoints.push(OutPoint {
+            txid: zero_txid,
+            vout: u32::MAX,
+        });
+        outpoints.push(OutPoint {
+            txid: max_txid,
+            vout: 0,
+        });
+        outpoints.push(OutPoint {
+            txid: max_txid,
+            vout: u32::MAX,
+        });
+
+        // Sort by PartialOrd
+        let mut outpoints_by_ord = outpoints.clone();
+        outpoints_by_ord.sort();
+
+        // Create pairs of (encoded_bytes, original_outpoint) and sort by encoded bytes
+        let mut outpoints_by_encoding: Vec<_> = outpoints
+            .iter()
+            .map(|op| (serialize_outpoint(op), *op))
+            .collect();
+        outpoints_by_encoding.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Extract the outpoints from the sorted-by-encoding pairs
+        let outpoints_sorted_by_encoding: Vec<_> = outpoints_by_encoding
+            .into_iter()
+            .map(|(_, op)| op)
+            .collect();
+
+        // Verify that both orderings are identical
+        assert_eq!(
+            outpoints_by_ord, outpoints_sorted_by_encoding,
+            "OutPoint PartialOrd ordering must match binary encoding ordering"
+        );
     }
 }
