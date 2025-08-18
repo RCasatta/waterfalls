@@ -684,4 +684,47 @@ mod test {
             "OutPoint PartialOrd ordering must match binary encoding ordering"
         );
     }
+
+    #[test]
+    fn test_scripthash_ordering_matches_encoding() {
+        use elements::secp256k1_zkp::rand::{thread_rng, Rng};
+
+        let mut rng = thread_rng();
+
+        // Create a bunch of random ScriptHashes (u64 values)
+        let mut script_hashes = Vec::new();
+        for _ in 0..100 {
+            let script_hash: u64 = rng.gen();
+            script_hashes.push(script_hash);
+        }
+
+        // Add some specific edge cases
+        script_hashes.push(0u64); // Min value
+        script_hashes.push(u64::MAX); // Max value
+        script_hashes.push(1u64); // Small value
+        script_hashes.push(u64::MAX - 1); // Large value
+
+        // Sort by natural u64 ordering
+        let mut script_hashes_by_ord = script_hashes.clone();
+        script_hashes_by_ord.sort();
+
+        // Create pairs of (encoded_bytes, original_script_hash) and sort by encoded bytes
+        let mut script_hashes_by_encoding: Vec<_> = script_hashes
+            .iter()
+            .map(|&sh| (sh.to_be_bytes(), sh))
+            .collect();
+        script_hashes_by_encoding.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Extract the script hashes from the sorted-by-encoding pairs
+        let script_hashes_sorted_by_encoding: Vec<_> = script_hashes_by_encoding
+            .into_iter()
+            .map(|(_, sh)| sh)
+            .collect();
+
+        // Verify that both orderings are identical
+        assert_eq!(
+            script_hashes_by_ord, script_hashes_sorted_by_encoding,
+            "ScriptHash (u64) natural ordering must match binary encoding ordering"
+        );
+    }
 }
