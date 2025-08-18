@@ -103,7 +103,7 @@ impl Arguments {
     pub fn is_valid(&self) -> Result<(), Error> {
         if !self.use_esplora && self.rpc_user_password.is_none() {
             Err(Error::String(
-                "When using the node you must specify user and password".to_string(),
+                "When using the node you must specify --rpc-user-password".to_string(),
             ))
         } else {
             Ok(())
