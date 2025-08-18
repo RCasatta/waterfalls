@@ -76,8 +76,8 @@ const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF];
 // height key for salting
 const SALT_KEY: &[u8] = b"S";
 
-const VEC_TX_SEEN_MAX_SIZE: usize = 41; // 32 bytes (txid) + 9 bytes (height) (most of the time height is much less)
-const VEC_TX_SEEN_MIN_SIZE: usize = 33; // 32 bytes (txid) + 1 byte (height)
+const VEC_TX_SEEN_MAX_SIZE: usize = 50; // 32 bytes (txid) + 9 bytes (height) + 9 bytes (v) (most of the time height/v is much less)
+const VEC_TX_SEEN_MIN_SIZE: usize = 34; // 32 bytes (txid) + 1 byte (height) + 1 byte (v)
 
 impl DBStore {
     fn create_cf_descriptors() -> Vec<rocksdb::ColumnFamilyDescriptor> {
@@ -139,11 +139,17 @@ impl DBStore {
     fn insert_utxos<'a, I>(&self, adds: I) -> Result<()>
     where
         I: IntoIterator<Item = (&'a OutPoint, &'a ScriptHash)>,
+        I::IntoIter: ExactSizeIterator,
     {
-        let mut batch = rocksdb::WriteBatch::default();
+        let iter = adds.into_iter();
+        let size_hint = iter.len();
+
+        // Pre-size the batch based on the exact iterator size
+        // Each entry takes ~44 bytes (36 for key + 8 for value)
+        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(size_hint * 44);
         let cf = self.utxo_cf();
         let mut key_buf = vec![0u8; 36];
-        for (outpoint, script_hash) in adds {
+        for (outpoint, script_hash) in iter {
             key_buf.clear();
             outpoint.consensus_encode(&mut key_buf)?;
             let val = script_hash.to_be_bytes();
@@ -170,7 +176,7 @@ impl DBStore {
             .collect();
         let result = Vec::from_iter(outpoints.iter().cloned().zip(result.iter().cloned()));
 
-        let mut batch = rocksdb::WriteBatch::default();
+        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(outpoints.len() * 36);
         let cf = self.utxo_cf();
         let mut keys = Vec::with_capacity(outpoints.len());
         for outpoint in outpoints {
@@ -190,7 +196,8 @@ impl DBStore {
             return Ok(());
         }
         log::debug!("update_history {add:?}");
-        let mut batch = rocksdb::WriteBatch::default();
+        let estimate_size = estimate_history_size(add);
+        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(estimate_size);
         let cf = self.history_cf();
 
         let mut keys = Vec::with_capacity(add.len());
@@ -221,7 +228,8 @@ impl DBStore {
         // Read current history for these script hashes
         let current_history = self.get_history(&script_hashes)?;
 
-        let mut batch = rocksdb::WriteBatch::default();
+        let estimate_size = estimate_history_size(to_remove);
+        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(estimate_size);
         let cf = self.history_cf();
 
         for (i, script_hash) in script_hashes.iter().enumerate() {
@@ -254,6 +262,15 @@ impl DBStore {
         self.db.write(batch)?;
         Ok(())
     }
+}
+
+fn estimate_history_size(add: &HashMap<u64, Vec<TxSeen>>) -> usize {
+    let mut size = 0;
+    for el in add.values() {
+        size += 8; // add key size
+        size += el.len() * VEC_TX_SEEN_MAX_SIZE // this overshoot, but it's ok
+    }
+    size
 }
 
 impl Store for DBStore {
