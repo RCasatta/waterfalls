@@ -4,7 +4,7 @@ use crate::{
     server::{Error, State},
 };
 use std::{collections::HashSet, future::Future, sync::Arc};
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 
 pub(crate) async fn mempool_sync_infallible(
     state: Arc<State>,
@@ -90,7 +90,17 @@ async fn mempool_sync(
         result = initial_sync_rx => {
             match result {
                 Ok(_) => log::info!("Initial block download completed, starting mempool sync"),
-                Err(e) => error_panic!("Initial sync channel closed unexpectedly: {e}"),
+                Err(e) => {
+                    // RecvError indicates the sender was dropped. Check if this is due to expected shutdown
+                    // or an unexpected crash of the blocks thread by testing if shutdown signal is ready
+                    if timeout(std::time::Duration::from_millis(1), &mut signal).await.is_ok() {
+                        log::info!("Initial sync channel closed during shutdown - exiting gracefully");
+                        return Ok(());
+                    } else {
+                        // Shutdown signal not received, so this is likely an unexpected crash
+                        error_panic!("Initial sync channel closed unexpectedly (blocks thread may have crashed): {e}");
+                    }
+                }
             }
         }
     }
