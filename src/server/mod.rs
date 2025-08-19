@@ -97,6 +97,10 @@ pub struct Arguments {
     /// Maximum capacity for the derivation cache
     #[arg(env, long, default_value = "1000000")]
     pub derivation_cache_capacity: usize,
+
+    /// Interval in minutes to log RocksDB statistics
+    #[arg(env, long, default_value = "1440")]
+    pub logs_rocksdb_stat_every: u64,
 }
 
 impl Arguments {
@@ -289,6 +293,7 @@ pub async fn inner_main(
                 args.network.into(),
                 initial_sync_tx,
                 shutdown_future,
+                args.logs_rocksdb_stat_every,
             )
             .await
         })

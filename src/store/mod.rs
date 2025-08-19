@@ -13,6 +13,14 @@ pub enum AnyStore {
     Db(db::DBStore),
     Mem(memory::MemoryStore),
 }
+impl AnyStore {
+    pub(crate) fn stats(&self) -> Option<String> {
+        match self {
+            AnyStore::Db(dbstore) => dbstore.stats(),
+            AnyStore::Mem(_) => None,
+        }
+    }
+}
 
 pub trait Store {
     /// Hash the given script

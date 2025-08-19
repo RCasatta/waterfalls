@@ -21,6 +21,7 @@ pub(crate) async fn blocks_infallible(
     family: Family,
     initial_sync_tx: tokio::sync::oneshot::Sender<()>,
     shutdown_signal: impl Future<Output = ()>,
+    logs_rocksdb_stat_every_minutes: u64,
 ) {
     if let Err(e) = index(
         shared_state,
@@ -28,6 +29,7 @@ pub(crate) async fn blocks_infallible(
         family,
         initial_sync_tx,
         shutdown_signal,
+        logs_rocksdb_stat_every_minutes,
     )
     .await
     {
@@ -96,6 +98,7 @@ pub async fn index(
     family: Family,
     initial_sync_tx: tokio::sync::oneshot::Sender<()>,
     shutdown_signal: impl Future<Output = ()>,
+    logs_rocksdb_stat_every_minutes: u64,
 ) -> Result<(), Error> {
     let db = &state.store;
 
@@ -118,6 +121,8 @@ pub async fn index(
 
     let start = Instant::now();
     let mut last_logging = Instant::now();
+    let mut last_rocksdb_stats_logging = Instant::now();
+    let rocksdb_stats_interval = Duration::from_secs(logs_rocksdb_stat_every_minutes * 60);
     let mut signal = std::pin::pin!(shutdown_signal);
 
     loop {
@@ -150,7 +155,16 @@ pub async fn index(
                 "{} {speed:.2} blocks/s {txs_count} txs",
                 block_to_index.height
             );
+
             last_logging = Instant::now();
+        }
+
+        // Log RocksDB stats at the specified interval (independent of initial sync)
+        if last_rocksdb_stats_logging.elapsed() >= rocksdb_stats_interval {
+            if let Some(stats) = db.stats() {
+                log::info!("RocksDB Stats:\n{}", stats);
+            }
+            last_rocksdb_stats_logging = Instant::now();
         }
 
         let mut history_map = BTreeMap::new();

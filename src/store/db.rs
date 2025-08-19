@@ -257,6 +257,90 @@ impl DBStore {
         self.db.write(batch)?;
         Ok(())
     }
+
+    pub(crate) fn stats(&self) -> Option<String> {
+        let mut result = String::new();
+
+        // Overall database stats
+        if let Ok(Some(stats)) = self.db.property_value("rocksdb.stats") {
+            result.push_str("=== Overall Database Stats ===\n");
+            result.push_str(&stats);
+            result.push_str("\n");
+        }
+
+        // Column family specific information
+        result.push_str("=== Column Family Stats ===\n");
+        for cf_name in COLUMN_FAMILIES {
+            if let Some(cf) = self.db.cf_handle(cf_name) {
+                result.push_str(&format!("\n--- {} ---\n", cf_name));
+
+                // Size information
+                if let Ok(Some(size)) = self
+                    .db
+                    .property_value_cf(&cf, "rocksdb.total-sst-files-size")
+                {
+                    let size_bytes: u64 = size.parse().unwrap_or(0);
+                    result.push_str(&format!(
+                        "SST Files Size: {:.2} MB\n",
+                        size_bytes as f64 / 1024.0 / 1024.0
+                    ));
+                }
+
+                if let Ok(Some(live_size)) = self
+                    .db
+                    .property_value_cf(&cf, "rocksdb.live-sst-files-size")
+                {
+                    let size_bytes: u64 = live_size.parse().unwrap_or(0);
+                    result.push_str(&format!(
+                        "Live SST Size: {:.2} MB\n",
+                        size_bytes as f64 / 1024.0 / 1024.0
+                    ));
+                }
+
+                // Memory usage
+                if let Ok(Some(memtable_size)) = self
+                    .db
+                    .property_value_cf(&cf, "rocksdb.cur-size-all-mem-tables")
+                {
+                    let size_bytes: u64 = memtable_size.parse().unwrap_or(0);
+                    result.push_str(&format!(
+                        "Memtable Size: {:.2} MB\n",
+                        size_bytes as f64 / 1024.0 / 1024.0
+                    ));
+                }
+
+                // Number of keys
+                if let Ok(Some(num_keys)) =
+                    self.db.property_value_cf(&cf, "rocksdb.estimate-num-keys")
+                {
+                    let keys: u64 = num_keys.parse().unwrap_or(0);
+                    result.push_str(&format!("Estimated Keys: {}\n", keys));
+                }
+
+                for i in 0..3 {
+                    if let Ok(Some(num)) = self
+                        .db
+                        .property_value_cf(&cf, &format!("rocksdb.num-files-at-level{i}"))
+                    {
+                        result.push_str(&format!("L{i} Number of files: {}\n", num));
+                    }
+
+                    if let Ok(Some(ratio)) = self
+                        .db
+                        .property_value_cf(&cf, &format!("rocksdb.compression-ratio-at-level{i}"))
+                    {
+                        result.push_str(&format!("L{i} compression-ratio-at-level: {ratio}\n"));
+                    }
+                }
+            }
+        }
+
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
 }
 
 fn estimate_history_size(add: &BTreeMap<u64, Vec<TxSeen>>) -> usize {
