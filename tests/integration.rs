@@ -742,3 +742,67 @@ async fn wollet_scan(
     }
     panic!("No update found in 10 seconds");
 }
+
+async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> usize {
+    use lwk_wollet::{clients, ElementsNetwork, Wollet, WolletDescriptor};
+    use std::str::FromStr;
+
+    let network = if desc.contains("xpub") {
+        ElementsNetwork::Liquid
+    } else {
+        ElementsNetwork::LiquidTestnet
+    };
+
+    let _ = env_logger::try_init();
+
+    let desc = WolletDescriptor::from_str(desc).unwrap();
+
+    let mut wollets = vec![];
+    for waterfalls in [true, false] {
+        let start = Instant::now();
+        let mut wollet = Wollet::without_persist(network, desc.clone()).unwrap();
+        let mut client = clients::asyncr::EsploraClientBuilder::new(url, network)
+            .waterfalls(waterfalls)
+            .concurrency(2)
+            .build()
+            .unwrap();
+        let update = client.full_scan(&wollet).await.unwrap().unwrap();
+        wollet.apply_update(update).unwrap();
+        let first_scan = start.elapsed();
+
+        println!(
+            "waterfall:{waterfalls} first_scan: {}ms {} txs",
+            first_scan.as_millis(),
+            wollet.transactions().unwrap().len(),
+        );
+
+        let start_second = Instant::now();
+        client.full_scan(&wollet).await.unwrap();
+        let second_scan = start_second.elapsed();
+
+        println!(
+            "waterfall:{waterfalls} first_scan: {}ms second_scan: {}ms",
+            first_scan.as_millis(),
+            second_scan.as_millis()
+        );
+        wollets.push(wollet);
+    }
+
+    assert_eq!(wollets[0].balance().unwrap(), wollets[1].balance().unwrap());
+    assert_eq!(
+        wollets[0].transactions().unwrap(),
+        wollets[1].transactions().unwrap()
+    );
+
+    wollets[0].transactions().unwrap().len()
+}
+
+#[tokio::test]
+#[ignore = "requires internet and testnet deployment"]
+async fn test_waterfalls_vs_esplora_performance() {
+    let url = "https://waterfalls.liquidwebwallet.org/liquidtestnet/api";
+    let descriptor = "ct(slip77(ac53739ddde9fdf6bba3dbc51e989b09aa8c9cdce7b7d7eddd49cec86ddf71f7),elwpkh([93970d14/84'/1'/0']tpubDC3BrFCCjXq4jAceV8k6UACxDDJCFb1eb7R7BiKYUGZdNagEhNfJoYtUrRdci9JFs1meiGGModvmNm8PrqkrEjJ6mpt6gA1DRNU8vu7GqXH/<0;1>/*))#u0y4axgs";
+
+    let tx_count = test_esplora_waterfalls_desc(descriptor, url).await;
+    println!("Performance test completed with {} transactions", tx_count);
+}

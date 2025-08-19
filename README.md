@@ -4,7 +4,16 @@ Waterfalls is a new scanning mechanism for web light-clients wallets that levera
 
 It also has an UTXO-only mode to allow wallets to know their balance and being able to construct transaction in a faster way, at the expense of not knowing entire transaction history.
 
-## Old client
+## Comparison
+
+We are going to compare the waterfalls scan against the traditional scan using the Esplora API using LWK full_scan.
+The measures are calculated using a test in this repository:
+
+```
+cargo test --release test_waterfalls_vs_esplora_performance -- --ignored --nocapture
+```
+
+## Esplora
 
 Due to browser limitations the web wallet must use HTTP esplora API. 
 
@@ -12,14 +21,12 @@ With this API we cannot batch requests like it's done in the electrum client, an
 
 Since we are persisting wallet data in the browser (encrypted), the scan following the first are faster.
 
-### Scan
+```
+waterfall:false first_scan: 7343ms 65 txs
+waterfall:false first_scan: 7343ms second_scan: 5202ms
+```
 
-Txs | First          | Following
-----|----------------|----------------
- 80 | 66s (344 reqs) | 33s (187 reqs)
-  3 | 11s (63 reqs)  | 11s (65 reqs)
-
-## New client
+## Waterfalls
 
 Currently used at https://liquidwebwallet.org
 
@@ -27,14 +34,10 @@ The new waterfalls client avoids multiple requests by sending the bitcoin descri
 This has privacy implications, but we argue it's not that different than sending all of our addresses separately to the server. Specifically in the latter case we are not sending the knowledge of future addresses that are derivable from the descriptor in the former case. The real privacy gain is moving to a self-hosted server or to a personal node.
 Moreover, liquid specifically has the advantage of having confidential transactions and the blinding key is not sent to the server, thus a malicious server would know about the transactions of the wallet, but nothing about the assets exchanged and the value transacted.
 
-### Scan
-
-Note the scan results in the first iteration includes the transaction unblinding which is roughly 100ms per tx.
-
-Txs | First         | Following
-----|---------------|-------------
- 80 | 22s (85 reqs) | 1s (5 reqs)
-  3 | 2s (11 reqs)  | 1s (5 reqs)
+```
+waterfall:true first_scan: 1800ms 65 txs
+waterfall:true first_scan: 1800ms second_scan: 143ms
+```
 
 ## Docker
 
