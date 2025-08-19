@@ -101,6 +101,10 @@ pub struct Arguments {
     /// Interval in minutes to log RocksDB statistics
     #[arg(env, long, default_value = "1440")]
     pub logs_rocksdb_stat_every: u64,
+
+    /// Force a manual RocksDB compaction at startup
+    #[arg(env, long)]
+    pub do_compaction: bool,
 }
 
 impl Arguments {
@@ -225,9 +229,17 @@ fn get_store(args: &Arguments) -> Result<AnyStore, Error> {
             let mut path = p.clone();
             path.push("db");
             path.push(args.network.to_string());
-            AnyStore::Db(
-                store::db::DBStore::open(&path).map_err(|e| Error::DBOpen(format!("{e:?}")))?,
-            )
+            let db_store =
+                store::db::DBStore::open(&path).map_err(|e| Error::DBOpen(format!("{e:?}")))?;
+
+            // Perform manual compaction if requested
+            if args.do_compaction {
+                db_store
+                    .compact_database()
+                    .map_err(|e| Error::DBOpen(format!("Compaction failed: {e:?}")))?;
+            }
+
+            AnyStore::Db(db_store)
         }
         None => AnyStore::Mem(MemoryStore::new()),
     })

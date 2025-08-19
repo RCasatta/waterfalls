@@ -341,6 +341,25 @@ impl DBStore {
             Some(result)
         }
     }
+
+    /// Perform manual compaction on all column families
+    pub fn compact_database(&self) -> Result<()> {
+        log::info!("Starting manual RocksDB compaction...");
+
+        // Compact the default column family
+        self.db.compact_range::<&[u8], &[u8]>(None, None);
+
+        // Compact all other column families
+        for cf_name in COLUMN_FAMILIES {
+            if let Some(cf) = self.db.cf_handle(cf_name) {
+                log::info!("Compacting column family: {}", cf_name);
+                self.db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
+            }
+        }
+
+        log::info!("Manual RocksDB compaction completed");
+        Ok(())
+    }
 }
 
 fn estimate_history_size(add: &BTreeMap<u64, Vec<TxSeen>>) -> usize {
