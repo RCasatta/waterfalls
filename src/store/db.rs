@@ -6,7 +6,7 @@ use elements::{
     BlockHash, OutPoint, Txid,
 };
 use fxhash::FxHasher;
-use rocksdb::{BoundColumnFamily, MergeOperands, Options, DB};
+use rocksdb::{BoundColumnFamily, DBCompressionType, MergeOperands, Options, DB};
 
 use crate::V;
 
@@ -85,9 +85,18 @@ impl DBStore {
             .iter()
             .map(|&name| {
                 let mut db_opts = Options::default();
+
                 if name == HISTORY_CF {
                     db_opts.set_merge_operator_associative("concat_merge", concat_merge);
                 }
+
+                // Configure compression for column families
+                let compression = match name {
+                    UTXO_CF => DBCompressionType::Zstd, // Data shows 1.88 ratio on this table (mainnet 329k blocks indexed)
+                    _ => DBCompressionType::None,
+                };
+                db_opts.set_compression_type(compression);
+
                 rocksdb::ColumnFamilyDescriptor::new(name, db_opts)
             })
             .collect()
@@ -98,6 +107,9 @@ impl DBStore {
 
         db_opts.create_if_missing(true);
         db_opts.create_missing_column_families(true);
+
+        // Configure zstd compression for the default column family
+        db_opts.set_compression_type(DBCompressionType::Zstd);
 
         let db = rocksdb::DB::open_cf_descriptors(&db_opts, path, Self::create_cf_descriptors())
             .with_context(|| format!("failed to open DB: {}", path.display()))?;

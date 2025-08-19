@@ -28,6 +28,7 @@ reqwest = "0.12.12"
 anyhow = "1.0.86"
 rocksdb = { version = "0.24.0", features = [
     "multi-threaded-cf",
+    "zstd",
 ], optional = true }
 fxhash = "0.2.1"
 elements-miniscript = "0.4.0"
