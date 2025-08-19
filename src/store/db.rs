@@ -593,16 +593,14 @@ fn concat_merge(
     existing_val: Option<&[u8]>,
     operands: &MergeOperands,
 ) -> Option<Vec<u8>> {
-    let mut result: Vec<u8> = Vec::with_capacity(operands.len());
+    let needed_bytes = existing_val.map(|e| e.len()).unwrap_or(0)
+        + operands.iter().map(|e| e.len()).sum::<usize>();
+    let mut result: Vec<u8> = Vec::with_capacity(needed_bytes);
     if let Some(v) = existing_val {
-        for e in v {
-            result.push(*e)
-        }
+        result.extend_from_slice(v);
     }
     for op in operands {
-        for e in op {
-            result.push(*e)
-        }
+        result.extend_from_slice(op);
     }
     Some(result)
 }
