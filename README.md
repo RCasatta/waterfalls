@@ -1,6 +1,8 @@
-# Waterfall
+# Waterfalls
 
-Waterfall is a proposed new scanning mechanism for web light-clients wallets that leverages a new server endpoint.
+Waterfalls is a new scanning mechanism for web light-clients wallets that leverages a new server endpoint. It works for bitcoin and liquid.
+
+It also has an UTXO-only mode to allow wallets to know their balance and being able to construct transaction in a faster way, at the expense of not knowing entire transaction history.
 
 ## Old client
 
