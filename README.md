@@ -120,6 +120,10 @@ See [v2 response example](tests/data/waterfall_response_v2_pretty.json) and [v3 
 
 We suggest new implementation to use v2 endpoint.
 
+## File limit
+
+Rocksdb may open a lot of files, it's suggested to raise file limits to avoid incurring in the "Too many open files" error.
+
 ## ADR
 
 * The endpoint is GET, allowing requests to be cached for a minimum amount of time (even 5s) to prevent DOS. It's possible to encrypt the descriptor with the server key. The server is going to know it anyway, but it's a measure to minimize the probability to have it in server and browser logs.
