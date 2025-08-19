@@ -363,8 +363,10 @@ impl Store for DBStore {
         }
 
         self.set_hash_ts(block_meta);
-        self.update_history(&history_map)?;
-        self.insert_utxos(&utxo_created)?;
+        self.update_history(&history_map)
+            .with_context(|| format!("failed to update history for block {block_meta:?}"))?;
+        self.insert_utxos(&utxo_created)
+            .with_context(|| format!("failed to insert utxos for block {block_meta:?}"))?;
 
         // Store reorg data for potential blockchain reorganization correction
         {
