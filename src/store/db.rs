@@ -136,17 +136,12 @@ impl DBStore {
             .unwrap();
     }
 
-    fn insert_utxos<'a, I>(&self, adds: I) -> Result<()>
+    fn insert_utxos<'a, I>(&self, batch: &mut rocksdb::WriteBatch, adds: I) -> Result<()>
     where
         I: IntoIterator<Item = (&'a OutPoint, &'a ScriptHash)>,
         I::IntoIter: ExactSizeIterator,
     {
         let iter = adds.into_iter();
-        let size_hint = iter.len();
-
-        // Pre-size the batch based on the exact iterator size
-        // Each entry takes ~44 bytes (36 for key + 8 for value)
-        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(size_hint * 44);
         let cf = self.utxo_cf();
         let mut key_buf = vec![0u8; 36];
         for (outpoint, script_hash) in iter {
@@ -156,7 +151,6 @@ impl DBStore {
             batch.put_cf(&cf, &key_buf, val);
         }
 
-        self.db.write(batch)?;
         Ok(())
     }
 
@@ -191,13 +185,15 @@ impl DBStore {
         Ok(result)
     }
 
-    fn update_history(&self, add: &BTreeMap<ScriptHash, Vec<TxSeen>>) -> Result<()> {
+    fn update_history(
+        &self,
+        batch: &mut rocksdb::WriteBatch,
+        add: &BTreeMap<ScriptHash, Vec<TxSeen>>,
+    ) -> Result<()> {
         if add.is_empty() {
             return Ok(());
         }
         log::debug!("update_history {add:?}");
-        let estimate_size = estimate_history_size(add);
-        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(estimate_size);
         let cf = self.history_cf();
 
         let mut keys = Vec::with_capacity(add.len());
@@ -211,7 +207,6 @@ impl DBStore {
                 vec_tx_seen_to_be_bytes(new_heights),
             )
         }
-        self.db.write(batch)?;
         Ok(())
     }
 
@@ -363,10 +358,18 @@ impl Store for DBStore {
         }
 
         self.set_hash_ts(block_meta);
-        self.update_history(&history_map)
+
+        // Create a single batch with capacity for both operations
+        let history_size = estimate_history_size(&history_map);
+        let utxo_size = utxo_created.len() * 44; // 44 bytes per UTXO entry
+        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(history_size + utxo_size);
+
+        self.update_history(&mut batch, &history_map)
             .with_context(|| format!("failed to update history for block {block_meta:?}"))?;
-        self.insert_utxos(&utxo_created)
+        self.insert_utxos(&mut batch, &utxo_created)
             .with_context(|| format!("failed to insert utxos for block {block_meta:?}"))?;
+
+        self.db.write(batch)?;
 
         // Store reorg data for potential blockchain reorganization correction
         {
@@ -382,14 +385,21 @@ impl Store for DBStore {
     fn reorg(&self) {
         let reorg_data = self.reorg_data.lock().unwrap();
 
+        // Estimate batch size for UTXO restoration
+        let utxo_restore_size = reorg_data.spent.len() * 44; // 44 bytes per UTXO entry
+        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(utxo_restore_size);
+
         // Restore UTXOs that were spent in the reorged block
         self.insert_utxos(
+            &mut batch,
             reorg_data
                 .spent
                 .iter()
                 .map(|(outpoint, script_hash)| (outpoint, script_hash)),
         )
         .unwrap(); // TODO handle unwrap;
+
+        self.db.write(batch).unwrap(); // TODO handle unwrap;
 
         // Remove UTXOs that were created in the reorged block
         if !reorg_data.utxos_created.is_empty() {
@@ -489,7 +499,7 @@ mod test {
 
     use crate::store::{
         db::{
-            get_or_init_salt, serialize_outpoint, vec_tx_seen_from_be_bytes,
+            estimate_history_size, get_or_init_salt, serialize_outpoint, vec_tx_seen_from_be_bytes,
             vec_tx_seen_to_be_bytes, TxSeen,
         },
         Store,
@@ -518,7 +528,9 @@ mod test {
         let v: BTreeMap<_, _> = vec![(o, expected), (o1, expected + 1)]
             .into_iter()
             .collect();
-        db.insert_utxos(&v).unwrap();
+        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(v.len() * 44);
+        db.insert_utxos(&mut batch, &v).unwrap();
+        db.db.write(batch).unwrap();
         let res = db.remove_utxos(&[o]).unwrap();
         assert_eq!(1, res.len());
         assert_eq!(expected, res[0].1);
@@ -536,7 +548,10 @@ mod test {
         ];
         new_history.insert(7u64, txs_seen.clone());
         new_history.insert(9u64, vec![TxSeen::new(txid, 5, V::Undefined)]);
-        db.update_history(&new_history).unwrap();
+        let history_size = estimate_history_size(&new_history);
+        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(history_size);
+        db.update_history(&mut batch, &new_history).unwrap();
+        db.db.write(batch).unwrap();
         let result = db.get_history(&[7]).unwrap();
         assert_eq!(result[0], txs_seen);
 
