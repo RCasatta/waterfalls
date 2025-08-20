@@ -749,6 +749,8 @@ struct TestResult {
     first_scan: Duration,
     second_scan: Duration,
     waterfalls: bool,
+    first_scan_requests: usize,
+    second_scan_requests: usize,
 }
 
 impl TestResult {
@@ -756,8 +758,13 @@ impl TestResult {
         let first_duration = format!("{:.3}s", self.first_scan.as_secs_f64());
         let second_duration = format!("{:.3}s", self.second_scan.as_secs_f64());
         format!(
-            "{:>6} | {:>5} | {:>9} | {:>9}",
-            self.txs, self.waterfalls, first_duration, second_duration,
+            "{:>6} | {:>5} | {:>9} | {:>9} | {:>6} | {:>6}",
+            self.txs,
+            self.waterfalls,
+            first_duration,
+            second_duration,
+            self.first_scan_requests,
+            self.second_scan_requests,
         )
     }
 }
@@ -789,6 +796,7 @@ async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> Vec<TestResult> 
         let update = client.full_scan(&wollet).await.unwrap().unwrap();
         wollet.apply_update(update).unwrap();
         let first_scan = start.elapsed();
+        let first_scan_requests = client.requests();
 
         println!(
             "waterfall:{waterfalls} first_scan: {}ms {} txs",
@@ -799,6 +807,7 @@ async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> Vec<TestResult> 
         let start_second = Instant::now();
         client.full_scan(&wollet).await.unwrap();
         let second_scan = start_second.elapsed();
+        let second_scan_requests = client.requests() - first_scan_requests;
 
         println!(
             "waterfall:{waterfalls} first_scan: {}ms second_scan: {}ms",
@@ -810,6 +819,8 @@ async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> Vec<TestResult> 
             first_scan,
             second_scan,
             waterfalls,
+            first_scan_requests,
+            second_scan_requests,
         });
         wollets.push(wollet);
     }

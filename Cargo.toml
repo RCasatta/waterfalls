@@ -64,7 +64,8 @@ test_env = ["bitcoind"]
 local_exec = []
 
 [patch.crates-io]
-lwk_wollet = { git = "https://github.com/blockstream/lwk", rev = "cb56d401acf6d6012097832b8a461abc3e98e67b" }
+lwk_wollet = { git = "https://github.com/blockstream/lwk", rev = "ba7eaf71e7be497abaf3f3b88003c9e639f145a3" }
+lwk_common = { git = "https://github.com/blockstream/lwk", rev = "ba7eaf71e7be497abaf3f3b88003c9e639f145a3" }
 
 [[bench]]
 name = "benches"
