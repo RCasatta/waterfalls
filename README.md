@@ -13,7 +13,7 @@ The measures are calculated using a test in this repository:
 cargo test --release test_waterfalls_vs_esplora_performance -- --ignored --nocapture
 ```
 
-## Esplora
+### Esplora
 
 Due to browser limitations the web wallet must use HTTP esplora API. 
 
@@ -21,12 +21,7 @@ With this API we cannot batch requests like it's done in the electrum client, an
 
 Since we are persisting wallet data in the browser (encrypted), the scan following the first are faster.
 
-```
-waterfall:false first_scan: 7343ms 65 txs
-waterfall:false first_scan: 7343ms second_scan: 5202ms
-```
-
-## Waterfalls
+### Waterfalls
 
 Currently used at https://liquidwebwallet.org
 
@@ -34,9 +29,17 @@ The new waterfalls client avoids multiple requests by sending the bitcoin descri
 This has privacy implications, but we argue it's not that different than sending all of our addresses separately to the server. Specifically in the latter case we are not sending the knowledge of future addresses that are derivable from the descriptor in the former case. The real privacy gain is moving to a self-hosted server or to a personal node.
 Moreover, liquid specifically has the advantage of having confidential transactions and the blinding key is not sent to the server, thus a malicious server would know about the transactions of the wallet, but nothing about the assets exchanged and the value transacted.
 
+
+### Results
+
 ```
-waterfall:true first_scan: 1800ms 65 txs
-waterfall:true first_scan: 1800ms second_scan: 143ms
+   txs | water |     first |    second
+     2 |  true |    0.413s |    0.065s
+     2 | false |    2.231s |    1.909s
+    65 |  true |    1.890s |    0.078s
+    65 | false |    8.280s |    5.238s
+  6442 |  true |  125.870s |    1.602s
+  6442 | false |  434.703s |  215.387s
 ```
 
 ## Docker
