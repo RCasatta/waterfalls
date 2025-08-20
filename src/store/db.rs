@@ -185,12 +185,12 @@ impl DBStore {
 
         let mut batch = rocksdb::WriteBatch::with_capacity_bytes(outpoints.len() * 36);
         let cf = self.utxo_cf();
-        let mut keys = Vec::with_capacity(outpoints.len());
+        let mut key_buf: Vec<u8> = vec![0u8; 36];
+
         for outpoint in outpoints {
-            keys.push((&cf, serialize_outpoint(outpoint)));
-        }
-        for key in keys {
-            batch.delete_cf(&cf, &key.1);
+            outpoint.consensus_encode(&mut key_buf)?;
+            batch.delete_cf(&cf, &key_buf);
+            key_buf.clear();
         }
 
         self.db.write(batch)?;
