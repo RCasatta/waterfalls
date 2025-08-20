@@ -32,15 +32,22 @@ Moreover, liquid specifically has the advantage of having confidential transacti
 
 ### Results
 
-```
-   txs | water |     first |    second
-     2 |  true |    0.413s |    0.065s
-     2 | false |    2.231s |    1.909s
-    65 |  true |    1.890s |    0.078s
-    65 | false |    8.280s |    5.238s
-  6442 |  true |  125.870s |    1.602s
-  6442 | false |  434.703s |  215.387s
-```
+| txs  | water | first     | second    | req #1 | req #2 |
+|-----:|-------|----------:|----------:|-------:|-------:|
+| 2    | true  | 0.383s    | 0.197s    | 7      | 2      |
+| 2    | false | 3.218s    | 2.124s    | 68     | 62     |
+| 65   | true  | 1.840s    | 0.100s    | 70     | 2      |
+| 65   | false | 13.087s   | 7.138s    | 294    | 164    |
+| 6442 | true  | 197.917s  | 1.216s    | 6454   | 10     |
+| 6442 | false | 529.405s  | 260.857s  | 18894  | 6504   |
+
+Legend:
+* txs: number of the transaction in the considered wallet
+* water: wether waterfalls scan is active
+* first: time taken by the wallet the first time it scans
+* second: time taken by the wallet on the second full scan. All the transactions are already in the wallet cache and they are already unblinded.
+* req #1: number of network requests performed for the first scan
+* req #2: number of network requests performed for the second scan
 
 ## Docker
 
