@@ -3,7 +3,7 @@ use crate::{
     fetch::Client,
     server::{derivation_cache::DerivationCache, sign::sign_response, Error, State},
     store::Store,
-    AddressesRequest, DescriptorRequest, TxSeen, WaterfallRequest, WaterfallResponse,
+    AddressesRequest, DescriptorRequest, Family, TxSeen, WaterfallRequest, WaterfallResponse,
     WaterfallResponseV3, V,
 };
 use age::x25519::Identity;
@@ -112,6 +112,10 @@ pub async fn route(
             handle_waterfalls_req(state, inputs, true, true, true).await
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {
+            // this method return the seconds since last block
+            // and a static string for a simple freshness check,
+            // it consider 10 times the expected interval between blocks to be "strange"
+
             let ts = state.tip_timestamp().await;
             let s = match ts {
                 Some(ts) => {
@@ -119,15 +123,27 @@ pub async fn route(
                         .duration_since(UNIX_EPOCH)
                         .map_err(|e| Error::String(e.to_string()))?;
                     let delta = now.as_secs().saturating_sub(ts as u64);
-                    if delta > 600 {
-                        "more than 10 minutes"
-                    } else {
-                        "less than 10 minutes"
-                    }
+                    let more_or_less = match network.into() {
+                        Family::Elements => {
+                            if delta > 600 {
+                                "more than 10 minutes"
+                            } else {
+                                "less than 10 minutes"
+                            }
+                        }
+                        Family::Bitcoin => {
+                            if delta > 6000 {
+                                "more than 100 minutes"
+                            } else {
+                                "less than 100 minutes"
+                            }
+                        }
+                    };
+                    format!("{delta} seconds since last block, {more_or_less}")
                 }
-                None => "unknown",
+                None => "unknown".to_string(),
             };
-            str_resp(s.to_string(), StatusCode::OK)
+            str_resp(s, StatusCode::OK)
         }
         (&Method::GET, "/blocks/tip/hash", None) => {
             let block_hash = state.tip_hash().await;
