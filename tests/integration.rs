@@ -743,7 +743,26 @@ async fn wollet_scan(
     panic!("No update found in 10 seconds");
 }
 
-async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> usize {
+#[derive(Debug)]
+struct TestResult {
+    txs: usize,
+    first_scan: Duration,
+    second_scan: Duration,
+    waterfalls: bool,
+}
+
+impl TestResult {
+    fn md_row(&self) -> String {
+        let first_duration = format!("{:.3}s", self.first_scan.as_secs_f64());
+        let second_duration = format!("{:.3}s", self.second_scan.as_secs_f64());
+        format!(
+            "{:>6} | {:>5} | {:>9} | {:>9}",
+            self.txs, self.waterfalls, first_duration, second_duration,
+        )
+    }
+}
+
+async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> Vec<TestResult> {
     use lwk_wollet::{clients, ElementsNetwork, Wollet, WolletDescriptor};
     use std::str::FromStr;
 
@@ -758,6 +777,7 @@ async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> usize {
     let desc = WolletDescriptor::from_str(desc).unwrap();
 
     let mut wollets = vec![];
+    let mut results = vec![];
     for waterfalls in [true, false] {
         let start = Instant::now();
         let mut wollet = Wollet::without_persist(network, desc.clone()).unwrap();
@@ -785,6 +805,12 @@ async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> usize {
             first_scan.as_millis(),
             second_scan.as_millis()
         );
+        results.push(TestResult {
+            txs: wollet.transactions().unwrap().len(),
+            first_scan,
+            second_scan,
+            waterfalls,
+        });
         wollets.push(wollet);
     }
 
@@ -793,16 +819,26 @@ async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> usize {
         wollets[0].transactions().unwrap(),
         wollets[1].transactions().unwrap()
     );
-
-    wollets[0].transactions().unwrap().len()
+    results
 }
 
 #[tokio::test]
 #[ignore = "requires internet and testnet deployment"]
 async fn test_waterfalls_vs_esplora_performance() {
-    let url = "https://waterfalls.liquidwebwallet.org/liquidtestnet/api";
-    let descriptor = "ct(slip77(ac53739ddde9fdf6bba3dbc51e989b09aa8c9cdce7b7d7eddd49cec86ddf71f7),elwpkh([93970d14/84'/1'/0']tpubDC3BrFCCjXq4jAceV8k6UACxDDJCFb1eb7R7BiKYUGZdNagEhNfJoYtUrRdci9JFs1meiGGModvmNm8PrqkrEjJ6mpt6gA1DRNU8vu7GqXH/<0;1>/*))#u0y4axgs";
+    let mut all_results = vec![];
 
-    let tx_count = test_esplora_waterfalls_desc(descriptor, url).await;
-    println!("Performance test completed with {} transactions", tx_count);
+    let url = "https://waterfalls.liquidwebwallet.org/liquidtestnet/api";
+    let descriptors = [
+        "ct(slip77(0371e66dde8ab9f3cb19d2c20c8fa2d7bd1ddc73454e6b7ef15f0c5f624d4a86),elsh(wpkh([75ea4a43/49'/1'/0']tpubDDRMQzj8FGnDXxAhr8zgM22VT7BT2H2cPUdCRDSi3ima15TRUZEkT32zExr1feVReMYvBEm21drG1qKryjHf3cD6iD4j1nkPkbPDuQxCJG4/<0;1>/*)))#utnwh7dr",
+         "ct(slip77(ac53739ddde9fdf6bba3dbc51e989b09aa8c9cdce7b7d7eddd49cec86ddf71f7),elwpkh([93970d14/84'/1'/0']tpubDC3BrFCCjXq4jAceV8k6UACxDDJCFb1eb7R7BiKYUGZdNagEhNfJoYtUrRdci9JFs1meiGGModvmNm8PrqkrEjJ6mpt6gA1DRNU8vu7GqXH/<0;1>/*))#u0y4axgs",
+"ct(slip77(1bda6cd71a1e206e3eb793e5a4d98a46c3fa473c9ab7bdef9bb9c814764d6614),elwpkh([cb4ba44a/84'/1'/0']tpubDDrybtUajFcgXC85rvwPsh1oU7Azx4kJ9BAiRzMbByqK7UnVXY3gDRJPwEDfaQwguNUZFzrhavJGgEhbsfuebyxUSZQnjLezWVm2Vdqb7UM/<0;1>/*))#za9ktavp",
+    ];
+
+    for descriptor in descriptors {
+        all_results.extend(test_esplora_waterfalls_desc(descriptor, url).await);
+    }
+
+    for result in all_results {
+        println!("{}", result.md_row());
+    }
 }
