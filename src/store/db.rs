@@ -113,6 +113,7 @@ impl DBStore {
 
         let db = rocksdb::DB::open_cf_descriptors(&db_opts, path, Self::create_cf_descriptors())
             .with_context(|| format!("failed to open DB: {}", path.display()))?;
+        log::info!("DB opened at path: {}", path.display());
         let salt = get_or_init_salt(&db)?;
         let store = DBStore {
             db,
