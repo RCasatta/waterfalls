@@ -45,7 +45,7 @@ async fn sync_mempool_once(
             let mut txs = vec![];
             for new_txid in new {
                 match client.tx(*new_txid, family).await {
-                    Ok(tx) => txs.push(tx),
+                    Ok(tx) => txs.push((*new_txid, tx)),
                     Err(e) => {
                         if let Some(crate::fetch::Error::TxNotFound(_, _)) = e.downcast_ref() {
                             // tx not found, it was replaced from mempool with RBF for example

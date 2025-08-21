@@ -49,9 +49,9 @@ impl Mempool {
             .retain(|k, _| !txids.contains(&k.txid));
     }
 
-    pub fn add(&mut self, db: &AnyStore, txs: &[be::Transaction]) {
+    pub fn add(&mut self, db: &AnyStore, txs: &[(Txid, be::Transaction)]) {
         let txs_map: HashMap<Txid, &be::Transaction> =
-            txs.iter().map(|tx| (tx.txid(), tx)).collect();
+            txs.iter().map(|(txid, tx)| (*txid, tx)).collect();
 
         // update the unconfirmed utxo set
         let outputs_created = txs_map
@@ -73,7 +73,7 @@ impl Mempool {
 
         let prevouts: Vec<OutPoint> = txs
             .iter()
-            .flat_map(|e| e.inputs_iter())
+            .flat_map(|e| e.1.inputs_iter())
             .map(|i| i.previous_output())
             .collect();
         let spending_script_hashes = db.get_utxos(&prevouts).unwrap();
