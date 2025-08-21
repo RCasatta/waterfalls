@@ -90,6 +90,9 @@ impl DBStore {
                     db_opts.set_merge_operator_associative("concat_merge", concat_merge);
                 }
 
+                // Set default compression to none
+                db_opts.set_compression_type(DBCompressionType::None);
+
                 // Configure compression for column families
                 if name == UTXO_CF {
                     // Use no compression for level 0 to reduce zstd usage,
@@ -116,9 +119,6 @@ impl DBStore {
                         DBCompressionType::Snappy, // Level 6
                     ];
                     db_opts.set_compression_per_level(&compression_levels);
-                } else {
-                    // Other column families use no compression
-                    db_opts.set_compression_type(DBCompressionType::None);
                 }
 
                 rocksdb::ColumnFamilyDescriptor::new(name, db_opts)
@@ -131,9 +131,6 @@ impl DBStore {
 
         db_opts.create_if_missing(true);
         db_opts.create_missing_column_families(true);
-
-        // Configure zstd compression for the default column family
-        db_opts.set_compression_type(DBCompressionType::Zstd);
 
         let db = rocksdb::DB::open_cf_descriptors(&db_opts, path, Self::create_cf_descriptors())
             .with_context(|| format!("failed to open DB: {}", path.display()))?;
