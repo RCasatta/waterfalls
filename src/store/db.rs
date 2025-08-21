@@ -209,10 +209,6 @@ impl DBStore {
         log::debug!("update_history {add:?}");
         let cf = self.history_cf();
 
-        let mut keys = Vec::with_capacity(add.len());
-        for a in add {
-            keys.push(*a.0);
-        }
         for (script_hash, new_heights) in add {
             batch.merge_cf(
                 &cf,
