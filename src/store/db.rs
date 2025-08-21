@@ -104,6 +104,18 @@ impl DBStore {
                         DBCompressionType::Zstd, // Level 6
                     ];
                     db_opts.set_compression_per_level(&compression_levels);
+                } else if name == HISTORY_CF {
+                    // Use fast snappy compression only for level 6 (oldest, least accessed data)
+                    let compression_levels = vec![
+                        DBCompressionType::None,   // Level 0
+                        DBCompressionType::None,   // Level 1
+                        DBCompressionType::None,   // Level 2
+                        DBCompressionType::None,   // Level 3
+                        DBCompressionType::None,   // Level 4
+                        DBCompressionType::None,   // Level 5
+                        DBCompressionType::Snappy, // Level 6
+                    ];
+                    db_opts.set_compression_per_level(&compression_levels);
                 } else {
                     // Other column families use no compression
                     db_opts.set_compression_type(DBCompressionType::None);
