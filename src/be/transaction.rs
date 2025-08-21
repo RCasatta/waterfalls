@@ -123,14 +123,6 @@ impl Output {
         }
     }
 
-    // We are using elements::Script also for bitcoin script which is ugly but less impactfull for now
-    pub(crate) fn script_pubkey(&self) -> elements::Script {
-        match self {
-            Output::Bitcoin(output) => output.script_pubkey.to_bytes().into(),
-            Output::Elements(output) => output.script_pubkey.clone(),
-        }
-    }
-
     pub(crate) fn script_pubkey_bytes(&self) -> &[u8] {
         match self {
             Output::Bitcoin(output) => output.script_pubkey.as_bytes(),
