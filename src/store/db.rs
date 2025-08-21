@@ -286,6 +286,11 @@ impl DBStore {
             if let Some(cf) = self.db.cf_handle(cf_name) {
                 result.push_str(&format!("\n--- {} ---\n", cf_name));
 
+                // column family overall stats
+                if let Ok(Some(stats)) = self.db.property_value_cf(&cf, "rocksdb.stats") {
+                    result.push_str(&format!("{}\n", stats));
+                }
+
                 // Size information
                 if let Ok(Some(size)) = self
                     .db
