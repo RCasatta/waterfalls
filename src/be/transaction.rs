@@ -130,6 +130,13 @@ impl Output {
             Output::Elements(output) => output.script_pubkey.clone(),
         }
     }
+
+    pub(crate) fn script_pubkey_bytes(&self) -> &[u8] {
+        match self {
+            Output::Bitcoin(output) => output.script_pubkey.as_bytes(),
+            Output::Elements(output) => output.script_pubkey.as_bytes(),
+        }
+    }
 }
 
 impl Input {
