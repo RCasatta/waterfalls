@@ -273,13 +273,6 @@ impl DBStore {
     pub(crate) fn stats(&self) -> Option<String> {
         let mut result = String::new();
 
-        // Overall database stats
-        if let Ok(Some(stats)) = self.db.property_value("rocksdb.stats") {
-            result.push_str("=== Overall Database Stats ===\n");
-            result.push_str(&stats);
-            result.push_str("\n");
-        }
-
         // Column family specific information
         result.push_str("=== Column Family Stats ===\n");
         for cf_name in COLUMN_FAMILIES {
