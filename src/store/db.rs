@@ -353,6 +353,10 @@ impl DBStore {
                         .db
                         .property_value_cf(&cf, &format!("rocksdb.num-files-at-level{i}"))
                     {
+                        if num.parse::<u64>().unwrap_or(0) == 0 {
+                            // avoid printing if there are no files at this level
+                            continue;
+                        }
                         result.push_str(&format!("L{i} Number of files: {}\n", num));
                     }
 
