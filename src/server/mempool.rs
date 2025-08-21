@@ -56,7 +56,7 @@ impl Mempool {
         // update the unconfirmed utxo set
         let outputs_created = txs_map
             .iter()
-            .flat_map(|(txid, tx)| tx.outputs().into_iter().enumerate().zip(iter::repeat(txid)))
+            .flat_map(|(txid, tx)| tx.outputs_iter().enumerate().zip(iter::repeat(txid)))
             .map(|((vout, txout), txid)| {
                 (
                     OutPoint::new(*txid, vout as u32),
@@ -73,14 +73,14 @@ impl Mempool {
 
         let prevouts: Vec<OutPoint> = txs
             .iter()
-            .flat_map(|e| e.inputs().into_iter())
+            .flat_map(|e| e.inputs_iter())
             .map(|i| i.previous_output())
             .collect();
         let spending_script_hashes = db.get_utxos(&prevouts).unwrap();
 
         let mut prevouts_index = 0usize;
         for (txid, tx) in txs_map {
-            for (vin, input) in tx.inputs().iter().enumerate() {
+            for (vin, input) in tx.inputs_iter().enumerate() {
                 let e = match spending_script_hashes[prevouts_index] {
                     Some(e) => e,
                     None => {
@@ -104,7 +104,7 @@ impl Mempool {
                 prevouts_index += 1;
             }
 
-            for (vout, output) in tx.outputs().iter().enumerate() {
+            for (vout, output) in tx.outputs_iter().enumerate() {
                 let e = db.hash(output.script_pubkey_bytes());
                 txid_hashes.entry(txid).or_default().insert(e);
                 // Positive position for outputs: vout + 1

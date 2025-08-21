@@ -180,10 +180,10 @@ pub async fn index(
             }
         };
 
-        for tx in block.transactions().into_iter() {
+        for tx in block.transactions_iter() {
             txs_count += 1;
             let txid = tx.txid();
-            for (j, output) in tx.outputs().into_iter().enumerate() {
+            for (j, output) in tx.outputs_iter().enumerate() {
                 if output.skip_indexing() {
                     if output.script_pubkey_bytes().is_empty() {
                         // while we don't want to index this, we need to add it to the UTXO set because an empty script is spendable.
@@ -203,7 +203,7 @@ pub async fn index(
             }
 
             if !tx.is_coinbase() {
-                for (vin, input) in tx.inputs().into_iter().enumerate() {
+                for (vin, input) in tx.inputs_iter().enumerate() {
                     if input.skip_indexing() {
                         continue;
                     }

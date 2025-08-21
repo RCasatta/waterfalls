@@ -34,20 +34,27 @@ impl Block {
         }
     }
 
-    pub(crate) fn transactions(&self) -> Vec<be::Transaction> {
+    /// Iterator over transactions without cloning - more efficient for indexing
+    pub(crate) fn transactions_iter(&self) -> impl Iterator<Item = be::TransactionRef> {
         match self {
-            Block::Bitcoin(block) => block
-                .txdata
-                .iter()
-                .cloned()
-                .map(be::Transaction::Bitcoin)
-                .collect(),
-            Block::Elements(block) => block
-                .txdata
-                .iter()
-                .cloned()
-                .map(be::Transaction::Elements)
-                .collect(),
+            Block::Bitcoin(block) => TransactionIterator::Bitcoin(block.txdata.iter()),
+            Block::Elements(block) => TransactionIterator::Elements(block.txdata.iter()),
+        }
+    }
+}
+
+pub(crate) enum TransactionIterator<'a> {
+    Bitcoin(std::slice::Iter<'a, bitcoin::Transaction>),
+    Elements(std::slice::Iter<'a, elements::Transaction>),
+}
+
+impl<'a> Iterator for TransactionIterator<'a> {
+    type Item = be::TransactionRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            TransactionIterator::Bitcoin(iter) => iter.next().map(be::TransactionRef::Bitcoin),
+            TransactionIterator::Elements(iter) => iter.next().map(be::TransactionRef::Elements),
         }
     }
 }

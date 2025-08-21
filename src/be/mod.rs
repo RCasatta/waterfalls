@@ -8,7 +8,7 @@ pub use address::Address;
 pub use block::Block;
 pub use block_header::BlockHeader;
 pub use descriptor::{bitcoin_descriptor, Descriptor};
-pub use transaction::{Input, Output, Transaction};
+pub use transaction::{Input, InputRef, Output, OutputRef, Transaction, TransactionRef};
 
 use crate::server::Network;
 

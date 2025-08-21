@@ -581,7 +581,10 @@ mod test {
         assert_eq!(genesis_block._block_hash(), genesis_hash);
         let block = client.block(genesis_hash, network.into()).await.unwrap();
         assert_eq!(block._block_hash(), genesis_hash);
-        assert_eq!(block.transactions()[0].txid(), genesis_txid);
+        assert_eq!(
+            block.transactions_iter().next().unwrap().txid(),
+            genesis_txid
+        );
 
         // Genesis transaction cannot be fetched via REST API in Bitcoin networks
         // It's only available embedded within the genesis block

@@ -8,14 +8,30 @@ pub enum Transaction {
     Elements(elements::Transaction),
 }
 
+#[derive(Debug)]
+pub enum TransactionRef<'a> {
+    Bitcoin(&'a bitcoin::Transaction),
+    Elements(&'a elements::Transaction),
+}
+
 pub enum Output {
     Bitcoin(Box<bitcoin::TxOut>),
     Elements(Box<elements::TxOut>),
 }
 
+pub enum OutputRef<'a> {
+    Bitcoin(&'a bitcoin::TxOut),
+    Elements(&'a elements::TxOut),
+}
+
 pub enum Input {
     Bitcoin(Box<bitcoin::TxIn>),
     Elements(Box<elements::TxIn>),
+}
+
+pub enum InputRef<'a> {
+    Bitcoin(&'a bitcoin::TxIn),
+    Elements(&'a elements::TxIn),
 }
 
 fn elements_txid(txid: bitcoin::Txid) -> elements::Txid {
@@ -31,44 +47,19 @@ impl Transaction {
         }
     }
 
-    pub(crate) fn is_coinbase(&self) -> bool {
+    /// Iterator over outputs without cloning - more efficient for indexing
+    pub(crate) fn outputs_iter(&self) -> impl Iterator<Item = be::OutputRef> {
         match self {
-            Transaction::Bitcoin(tx) => tx.is_coinbase(),
-            Transaction::Elements(tx) => tx.is_coinbase(),
+            Transaction::Bitcoin(tx) => OutputIterator::Bitcoin(tx.output.iter()),
+            Transaction::Elements(tx) => OutputIterator::Elements(tx.output.iter()),
         }
     }
 
-    pub(crate) fn outputs(&self) -> Vec<be::Output> {
+    /// Iterator over inputs without cloning - more efficient for indexing
+    pub(crate) fn inputs_iter(&self) -> impl Iterator<Item = be::InputRef> {
         match self {
-            Transaction::Bitcoin(tx) => tx
-                .output
-                .iter()
-                .cloned()
-                .map(|output| be::Output::Bitcoin(Box::new(output)))
-                .collect(),
-            Transaction::Elements(tx) => tx
-                .output
-                .iter()
-                .cloned()
-                .map(|output| be::Output::Elements(Box::new(output)))
-                .collect(),
-        }
-    }
-
-    pub(crate) fn inputs(&self) -> Vec<be::Input> {
-        match self {
-            Transaction::Bitcoin(tx) => tx
-                .input
-                .iter()
-                .cloned()
-                .map(|input| be::Input::Bitcoin(Box::new(input)))
-                .collect(),
-            Transaction::Elements(tx) => tx
-                .input
-                .iter()
-                .cloned()
-                .map(|input| be::Input::Elements(Box::new(input)))
-                .collect(),
+            Transaction::Bitcoin(tx) => InputIterator::Bitcoin(tx.input.iter()),
+            Transaction::Elements(tx) => InputIterator::Elements(tx.input.iter()),
         }
     }
 
@@ -111,13 +102,77 @@ impl Transaction {
     }
 }
 
-impl Output {
+impl<'a> TransactionRef<'a> {
+    pub fn txid(&self) -> elements::Txid {
+        match self {
+            TransactionRef::Bitcoin(tx) => elements_txid(tx.compute_txid()),
+            TransactionRef::Elements(tx) => tx.txid(),
+        }
+    }
+
+    pub(crate) fn is_coinbase(&self) -> bool {
+        match self {
+            TransactionRef::Bitcoin(tx) => tx.is_coinbase(),
+            TransactionRef::Elements(tx) => tx.is_coinbase(),
+        }
+    }
+
+    /// Iterator over outputs without cloning - more efficient for indexing
+    pub(crate) fn outputs_iter(&self) -> impl Iterator<Item = be::OutputRef> {
+        match self {
+            TransactionRef::Bitcoin(tx) => OutputIterator::Bitcoin(tx.output.iter()),
+            TransactionRef::Elements(tx) => OutputIterator::Elements(tx.output.iter()),
+        }
+    }
+
+    /// Iterator over inputs without cloning - more efficient for indexing
+    pub(crate) fn inputs_iter(&self) -> impl Iterator<Item = be::InputRef> {
+        match self {
+            TransactionRef::Bitcoin(tx) => InputIterator::Bitcoin(tx.input.iter()),
+            TransactionRef::Elements(tx) => InputIterator::Elements(tx.input.iter()),
+        }
+    }
+}
+
+pub(crate) enum OutputIterator<'a> {
+    Bitcoin(std::slice::Iter<'a, bitcoin::TxOut>),
+    Elements(std::slice::Iter<'a, elements::TxOut>),
+}
+
+impl<'a> Iterator for OutputIterator<'a> {
+    type Item = be::OutputRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            OutputIterator::Bitcoin(iter) => iter.next().map(be::OutputRef::Bitcoin),
+            OutputIterator::Elements(iter) => iter.next().map(be::OutputRef::Elements),
+        }
+    }
+}
+
+pub(crate) enum InputIterator<'a> {
+    Bitcoin(std::slice::Iter<'a, bitcoin::TxIn>),
+    Elements(std::slice::Iter<'a, elements::TxIn>),
+}
+
+impl<'a> Iterator for InputIterator<'a> {
+    type Item = be::InputRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            InputIterator::Bitcoin(iter) => iter.next().map(be::InputRef::Bitcoin),
+            InputIterator::Elements(iter) => iter.next().map(be::InputRef::Elements),
+        }
+    }
+}
+
+impl<'a> OutputRef<'a> {
     pub(crate) fn skip_indexing(&self) -> bool {
         match self {
-            Output::Bitcoin(output) => {
+            OutputRef::Bitcoin(output) => {
                 output.script_pubkey.is_empty() || output.script_pubkey.is_op_return()
             }
-            Output::Elements(output) => {
+            OutputRef::Elements(output) => {
                 output.is_null_data() || output.is_fee() || output.script_pubkey.is_empty()
             }
         }
@@ -125,27 +180,27 @@ impl Output {
 
     pub(crate) fn script_pubkey_bytes(&self) -> &[u8] {
         match self {
-            Output::Bitcoin(output) => output.script_pubkey.as_bytes(),
-            Output::Elements(output) => output.script_pubkey.as_bytes(),
+            OutputRef::Bitcoin(output) => output.script_pubkey.as_bytes(),
+            OutputRef::Elements(output) => output.script_pubkey.as_bytes(),
         }
     }
 }
 
-impl Input {
+impl<'a> InputRef<'a> {
     pub(crate) fn skip_indexing(&self) -> bool {
         match self {
-            Input::Bitcoin(_) => false,
-            Input::Elements(input) => input.is_pegin(),
+            InputRef::Bitcoin(_) => false,
+            InputRef::Elements(input) => input.is_pegin(),
         }
     }
 
     pub(crate) fn previous_output(&self) -> elements::OutPoint {
         match self {
-            Input::Bitcoin(input) => elements::OutPoint::new(
+            InputRef::Bitcoin(input) => elements::OutPoint::new(
                 elements_txid(input.previous_output.txid),
                 input.previous_output.vout,
             ),
-            Input::Elements(input) => input.previous_output,
+            InputRef::Elements(input) => input.previous_output,
         }
     }
 }
