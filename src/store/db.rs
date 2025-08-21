@@ -208,13 +208,16 @@ impl DBStore {
         }
         log::debug!("update_history {add:?}");
         let cf = self.history_cf();
+        let longer_vec = add
+            .values()
+            .map(|v| v.len())
+            .max()
+            .expect("add is not empty");
+        let mut buf = vec![0u8; longer_vec * VEC_TX_SEEN_MAX_SIZE];
 
         for (script_hash, new_heights) in add {
-            batch.merge_cf(
-                &cf,
-                script_hash.to_be_bytes(),
-                vec_tx_seen_to_be_bytes(new_heights),
-            )
+            let len = vec_tx_seen_to_be_bytes_on_buffer(new_heights, &mut buf);
+            batch.merge_cf(&cf, script_hash.to_be_bytes(), &buf[..len])
         }
         Ok(())
     }
