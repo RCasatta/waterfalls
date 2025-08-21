@@ -535,18 +535,24 @@ fn serialize_outpoint(o: &OutPoint) -> Vec<u8> {
 
 fn vec_tx_seen_to_be_bytes(v: &[TxSeen]) -> Vec<u8> {
     let mut result = vec![0u8; v.len() * VEC_TX_SEEN_MAX_SIZE];
+    let len = vec_tx_seen_to_be_bytes_on_buffer(v, &mut result);
+    result.truncate(len);
+    result
+}
+
+/// panics if buf is too small
+fn vec_tx_seen_to_be_bytes_on_buffer(v: &[TxSeen], buf: &mut [u8]) -> usize {
     let mut offset = 0;
     for TxSeen {
         txid, height, v, ..
     } in v
     {
-        result[offset..offset + 32].copy_from_slice(txid.as_byte_array());
+        buf[offset..offset + 32].copy_from_slice(txid.as_byte_array());
         offset += 32;
-        offset += height.encode_prefix_varint(&mut result[offset..]);
-        offset += v.raw().encode_prefix_varint(&mut result[offset..]);
+        offset += height.encode_prefix_varint(&mut buf[offset..]);
+        offset += v.raw().encode_prefix_varint(&mut buf[offset..]);
     }
-    result.truncate(offset);
-    result
+    offset
 }
 
 fn vec_tx_seen_from_be_bytes(s: &[u8]) -> Result<Vec<TxSeen>> {
