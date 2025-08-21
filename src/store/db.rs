@@ -91,11 +91,23 @@ impl DBStore {
                 }
 
                 // Configure compression for column families
-                let compression = match name {
-                    UTXO_CF => DBCompressionType::Zstd, // Data shows 1.88 ratio on this table (mainnet 329k blocks indexed)
-                    _ => DBCompressionType::None,
-                };
-                db_opts.set_compression_type(compression);
+                if name == UTXO_CF {
+                    // Use no compression for level 0 to reduce zstd usage,
+                    // but zstd for levels 1+ since compression ratio is high
+                    let compression_levels = vec![
+                        DBCompressionType::None, // Level 0
+                        DBCompressionType::Zstd, // Level 1
+                        DBCompressionType::Zstd, // Level 2
+                        DBCompressionType::Zstd, // Level 3
+                        DBCompressionType::Zstd, // Level 4
+                        DBCompressionType::Zstd, // Level 5
+                        DBCompressionType::Zstd, // Level 6
+                    ];
+                    db_opts.set_compression_per_level(&compression_levels);
+                } else {
+                    // Other column families use no compression
+                    db_opts.set_compression_type(DBCompressionType::None);
+                }
 
                 rocksdb::ColumnFamilyDescriptor::new(name, db_opts)
             })
