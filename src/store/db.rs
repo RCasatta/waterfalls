@@ -299,7 +299,7 @@ impl DBStore {
 
         // Column family specific information
         result.push_str("=== Column Family Stats ===\n");
-        for cf_name in COLUMN_FAMILIES {
+        for cf_name in [UTXO_CF, HISTORY_CF] {
             if let Some(cf) = self.db.cf_handle(cf_name) {
                 result.push_str(&format!("\n--- {} ---\n", cf_name));
 
