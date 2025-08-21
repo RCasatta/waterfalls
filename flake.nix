@@ -103,7 +103,7 @@
             ELEMENTSD_EXEC = "${pkgs.elementsd}/bin/elementsd";
             BITCOIND_EXEC = "${pkgs.bitcoind}/bin/bitcoind";
 
-            buildInputs = with pkgs; [ ];
+            buildInputs = with pkgs; [ heaptrack ];
           };
         }
       );
