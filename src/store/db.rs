@@ -329,7 +329,7 @@ impl DBStore {
                     result.push_str(&format!("Estimated Keys: {}\n", keys));
                 }
 
-                for i in 0..3 {
+                for i in 0..=6 {
                     if let Ok(Some(num)) = self
                         .db
                         .property_value_cf(&cf, &format!("rocksdb.num-files-at-level{i}"))

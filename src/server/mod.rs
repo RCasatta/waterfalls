@@ -99,7 +99,7 @@ pub struct Arguments {
     pub derivation_cache_capacity: usize,
 
     /// Interval in minutes to log RocksDB statistics
-    #[arg(env, long, default_value = "1440")]
+    #[arg(env, long, default_value = "120")]
     pub logs_rocksdb_stat_every: u64,
 
     /// Force a manual RocksDB compaction at startup
