@@ -87,7 +87,7 @@ const VEC_TX_SEEN_MAX_SIZE: usize = 50; // 32 bytes (txid) + 9 bytes (height) + 
 const VEC_TX_SEEN_MIN_SIZE: usize = 34; // 32 bytes (txid) + 1 byte (height) + 1 byte (v)
 
 impl DBStore {
-    fn create_cf_descriptors() -> Vec<rocksdb::ColumnFamilyDescriptor> {
+    fn create_cf_descriptors(point_lookup_cache_mb: u64) -> Vec<rocksdb::ColumnFamilyDescriptor> {
         COLUMN_FAMILIES
             .iter()
             .map(|&name| {
@@ -97,10 +97,7 @@ impl DBStore {
                 db_opts.set_compression_type(DBCompressionType::None);
 
                 if name == UTXO_CF || name == HISTORY_CF {
-                    // Set up a bigger block based cache (from default 32Mb to the given value)
-                    // It also creates bloom filter to avoid disk reads
-                    // TODO: make this configurable, and default based on network.
-                    db_opts.optimize_for_point_lookup(1_000);
+                    db_opts.optimize_for_point_lookup(point_lookup_cache_mb);
                 }
 
                 if name == HISTORY_CF {
@@ -128,14 +125,18 @@ impl DBStore {
             .collect()
     }
 
-    pub fn open(path: &Path) -> Result<Self> {
+    pub fn open(path: &Path, point_lookup_cache_mb: u64) -> Result<Self> {
         let mut db_opts = Options::default();
 
         db_opts.create_if_missing(true);
         db_opts.create_missing_column_families(true);
 
-        let db = rocksdb::DB::open_cf_descriptors(&db_opts, path, Self::create_cf_descriptors())
-            .with_context(|| format!("failed to open DB: {}", path.display()))?;
+        let db = rocksdb::DB::open_cf_descriptors(
+            &db_opts,
+            path,
+            Self::create_cf_descriptors(point_lookup_cache_mb),
+        )
+        .with_context(|| format!("failed to open DB: {}", path.display()))?;
         log::info!("DB opened at path: {}", path.display());
         let salt = get_or_init_salt(&db)?;
         let store = DBStore {
@@ -668,7 +669,7 @@ mod test {
     #[test]
     fn test_db() {
         let tempdir = tempfile::TempDir::new().unwrap();
-        let db = DBStore::open(tempdir.path()).unwrap();
+        let db = DBStore::open(tempdir.path(), 64).unwrap();
 
         let salt = get_or_init_salt(&db.db).unwrap();
         assert_ne!(salt, 0);
