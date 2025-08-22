@@ -92,6 +92,7 @@ impl DBStore {
                 if name == UTXO_CF || name == HISTORY_CF {
                     // Set up a bigger block based cache (from default 32Mb to the given value)
                     // It also creates bloom filter to avoid disk reads
+                    // TODO: make this configurable, and default based on network.
                     db_opts.optimize_for_point_lookup(1_000);
                 }
 
