@@ -86,12 +86,18 @@ impl DBStore {
             .map(|&name| {
                 let mut db_opts = Options::default();
 
+                // Set default compression to none
+                db_opts.set_compression_type(DBCompressionType::None);
+
+                if name == UTXO_CF || name == HISTORY_CF {
+                    // Set up a bigger block based cache (from default 32Mb to the given value)
+                    // It also creates bloom filter to avoid disk reads
+                    db_opts.optimize_for_point_lookup(1_000);
+                }
+
                 if name == HISTORY_CF {
                     db_opts.set_merge_operator_associative("concat_merge", concat_merge);
                 }
-
-                // Set default compression to none
-                db_opts.set_compression_type(DBCompressionType::None);
 
                 // Configure compression for column families
                 if name == UTXO_CF {
@@ -105,18 +111,6 @@ impl DBStore {
                         DBCompressionType::Zstd, // Level 4
                         DBCompressionType::Zstd, // Level 5
                         DBCompressionType::Zstd, // Level 6
-                    ];
-                    db_opts.set_compression_per_level(&compression_levels);
-                } else if name == HISTORY_CF {
-                    // Use fast snappy compression only for level 6 (oldest, least accessed data)
-                    let compression_levels = vec![
-                        DBCompressionType::None,   // Level 0
-                        DBCompressionType::None,   // Level 1
-                        DBCompressionType::None,   // Level 2
-                        DBCompressionType::None,   // Level 3
-                        DBCompressionType::None,   // Level 4
-                        DBCompressionType::None,   // Level 5
-                        DBCompressionType::Snappy, // Level 6
                     ];
                     db_opts.set_compression_per_level(&compression_levels);
                 }
