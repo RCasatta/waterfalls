@@ -92,6 +92,8 @@ impl Store for MemoryStore {
     fn reorg(&self) {
         self.insert_utxos(&self.last_block.lock().unwrap());
     }
+
+    fn ibd_finished(&self) {}
 }
 
 impl MemoryStore {

@@ -49,6 +49,9 @@ pub trait Store {
 
     /// Reorg, reinsert the last block unspent utxos
     fn reorg(&self);
+
+    /// Called when the initial block download is finished
+    fn ibd_finished(&self);
 }
 
 impl Store for AnyStore {
@@ -103,6 +106,14 @@ impl Store for AnyStore {
             #[cfg(feature = "db")]
             AnyStore::Db(d) => d.reorg(),
             AnyStore::Mem(m) => m.reorg(),
+        }
+    }
+
+    fn ibd_finished(&self) {
+        match self {
+            #[cfg(feature = "db")]
+            AnyStore::Db(d) => d.ibd_finished(),
+            AnyStore::Mem(m) => m.ibd_finished(),
         }
     }
 }

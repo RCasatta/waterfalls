@@ -15,7 +15,10 @@ use std::{
     collections::BTreeMap,
     hash::Hasher,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use crate::{
@@ -50,6 +53,10 @@ pub struct DBStore {
 
     /// Reorg data for handling blockchain reorganizations
     reorg_data: Mutex<ReorgData>,
+
+    /// Whether we are in Initial Block Download mode.
+    /// during initial block download we do something different to speed up initial indexing, like writing disabling the wal.
+    ibd: AtomicBool,
 }
 
 // Can txid be indexed by u32? At the time of writing (2025-02-06) there are about 1B txs on mainnet, so it's possible to have u32 -> txid (u32 is 4B).
@@ -135,6 +142,7 @@ impl DBStore {
             db,
             salt,
             reorg_data: Mutex::new(ReorgData::default()),
+            ibd: AtomicBool::new(true),
         };
         Ok(store)
     }
@@ -209,7 +217,7 @@ impl DBStore {
             key_buf.clear();
         }
 
-        self.db.write(batch)?;
+        self.write(batch)?;
 
         Ok(result)
     }
@@ -281,8 +289,7 @@ impl DBStore {
                 );
             }
         }
-
-        self.db.write(batch)?;
+        self.write(batch)?;
         Ok(())
     }
 
@@ -389,6 +396,14 @@ impl DBStore {
 
         log::info!("Manual RocksDB compaction completed");
         Ok(())
+    }
+
+    fn write(&self, batch: rocksdb::WriteBatch) -> Result<()> {
+        Ok(if self.ibd.load(Ordering::Relaxed) {
+            self.db.write_without_wal(batch)?
+        } else {
+            self.db.write(batch)?
+        })
     }
 }
 
@@ -502,7 +517,7 @@ impl Store for DBStore {
         self.insert_utxos(&mut batch, &utxo_created)
             .with_context(|| format!("failed to insert utxos for block {block_meta:?}"))?;
 
-        self.db.write(batch)?;
+        self.write(batch)?;
 
         // Store reorg data for potential blockchain reorganization correction
         {
@@ -532,7 +547,7 @@ impl Store for DBStore {
         )
         .unwrap(); // TODO handle unwrap;
 
-        self.db.write(batch).unwrap(); // TODO handle unwrap;
+        self.write(batch).unwrap(); // TODO handle unwrap;
 
         // Remove UTXOs that were created in the reorged block
         if !reorg_data.utxos_created.is_empty() {
@@ -545,6 +560,11 @@ impl Store for DBStore {
         if !reorg_data.history.is_empty() {
             self.remove_history_entries(&reorg_data.history).unwrap(); // TODO handle unwrap;
         }
+    }
+
+    fn ibd_finished(&self) {
+        log::info!("Initial block download finished, setting ibd to false in the store");
+        self.ibd.store(false, Ordering::Relaxed);
     }
 }
 

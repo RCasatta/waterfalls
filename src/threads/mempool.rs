@@ -2,6 +2,7 @@ use crate::{
     be::Family,
     fetch::Client,
     server::{Error, State},
+    store::Store,
 };
 use std::{collections::HashSet, future::Future, sync::Arc};
 use tokio::time::{sleep, timeout};
@@ -89,7 +90,10 @@ async fn mempool_sync(
         }
         result = initial_sync_rx => {
             match result {
-                Ok(_) => log::info!("Initial block download completed, starting mempool sync"),
+                Ok(_) => {
+                    log::info!("Initial block download completed, starting mempool sync");
+                    state.store.ibd_finished();
+                }
                 Err(e) => {
                     // RecvError indicates the sender was dropped. Check if this is due to expected shutdown
                     // or an unexpected crash of the blocks thread by testing if shutdown signal is ready
