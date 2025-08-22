@@ -130,6 +130,13 @@ impl DBStore {
 
         db_opts.create_if_missing(true);
         db_opts.create_missing_column_families(true);
+        let parallelism = std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(1)
+            .min(4) as i32;
+        log::info!("Setting RocksDB parallelism to {} threads", parallelism);
+        db_opts.increase_parallelism(parallelism);
+        db_opts.set_max_background_jobs(parallelism);
 
         let db = rocksdb::DB::open_cf_descriptors(
             &db_opts,
