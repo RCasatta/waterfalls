@@ -89,9 +89,9 @@ const VEC_TX_SEEN_MAX_SIZE: usize = 50; // 32 bytes (txid) + 9 bytes (height) + 
 const VEC_TX_SEEN_MIN_SIZE: usize = 34; // 32 bytes (txid) + 1 byte (height) + 1 byte (v)
 
 impl DBStore {
-    fn create_cf_descriptors(point_lookup_cache_mb: u64) -> Vec<rocksdb::ColumnFamilyDescriptor> {
+    fn create_cf_descriptors(shared_db_cache_mb: u64) -> Vec<rocksdb::ColumnFamilyDescriptor> {
         // Create a shared LRU cache for block-based tables
-        let cache_size = (point_lookup_cache_mb * 1024 * 1024) as usize; // Convert MB to bytes
+        let cache_size = (shared_db_cache_mb * 1024 * 1024) as usize; // Convert MB to bytes
         let shared_cache = Cache::new_lru_cache(cache_size);
 
         COLUMN_FAMILIES
@@ -140,7 +140,7 @@ impl DBStore {
             .collect()
     }
 
-    pub fn open(path: &Path, point_lookup_cache_mb: u64) -> Result<Self> {
+    pub fn open(path: &Path, shared_db_cache_mb: u64) -> Result<Self> {
         let mut db_opts = Options::default();
 
         db_opts.create_if_missing(true);
@@ -156,7 +156,7 @@ impl DBStore {
         let db = rocksdb::DB::open_cf_descriptors(
             &db_opts,
             path,
-            Self::create_cf_descriptors(point_lookup_cache_mb),
+            Self::create_cf_descriptors(shared_db_cache_mb),
         )
         .with_context(|| format!("failed to open DB: {}", path.display()))?;
         log::info!("DB opened at path: {}", path.display());
