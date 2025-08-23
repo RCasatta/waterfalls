@@ -109,6 +109,10 @@ pub struct Arguments {
     /// RocksDB point lookup cache size in MB for UTXO and HISTORY column families
     #[arg(env, long, default_value = "64")]
     pub shared_db_cache_mb: u64,
+
+    /// Enable RocksDB statistics collection for detailed metrics
+    #[arg(env, long)]
+    pub enable_db_statistics: bool,
 }
 
 impl Arguments {
@@ -233,8 +237,9 @@ fn get_store(args: &Arguments) -> Result<AnyStore, Error> {
             let mut path = p.clone();
             path.push("db");
             path.push(args.network.to_string());
-            let db_store = store::db::DBStore::open(&path, args.shared_db_cache_mb)
-                .map_err(|e| Error::DBOpen(format!("{e:?}")))?;
+            let db_store =
+                store::db::DBStore::open(&path, args.shared_db_cache_mb, args.enable_db_statistics)
+                    .map_err(|e| Error::DBOpen(format!("{e:?}")))?;
 
             // Perform manual compaction if requested
             if args.do_compaction {

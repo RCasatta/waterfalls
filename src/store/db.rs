@@ -142,11 +142,13 @@ impl DBStore {
             .collect()
     }
 
-    pub fn open(path: &Path, shared_db_cache_mb: u64) -> Result<Self> {
+    pub fn open(path: &Path, shared_db_cache_mb: u64, enable_statistics: bool) -> Result<Self> {
         let mut db_opts = Options::default();
 
         // Enable statistics collection for detailed metrics including bloom filter stats
-        db_opts.enable_statistics();
+        if enable_statistics {
+            db_opts.enable_statistics();
+        }
         db_opts.create_if_missing(true);
         db_opts.create_missing_column_families(true);
         let parallelism = std::thread::available_parallelism()
@@ -695,7 +697,7 @@ mod test {
     #[test]
     fn test_db() {
         let tempdir = tempfile::TempDir::new().unwrap();
-        let db = DBStore::open(tempdir.path(), 64).unwrap();
+        let db = DBStore::open(tempdir.path(), 64, true).unwrap();
 
         let salt = get_or_init_salt(&db.db).unwrap();
         assert_ne!(salt, 0);
