@@ -6,7 +6,9 @@ use elements::{
     BlockHash, OutPoint, Txid,
 };
 use fxhash::FxHasher;
-use rocksdb::{BoundColumnFamily, DBCompressionType, MergeOperands, Options, DB};
+use rocksdb::{
+    BlockBasedOptions, BoundColumnFamily, Cache, DBCompressionType, MergeOperands, Options, DB,
+};
 
 use crate::V;
 
@@ -88,6 +90,10 @@ const VEC_TX_SEEN_MIN_SIZE: usize = 34; // 32 bytes (txid) + 1 byte (height) + 1
 
 impl DBStore {
     fn create_cf_descriptors(point_lookup_cache_mb: u64) -> Vec<rocksdb::ColumnFamilyDescriptor> {
+        // Create a shared LRU cache for block-based tables
+        let cache_size = (point_lookup_cache_mb * 1024 * 1024) as usize; // Convert MB to bytes
+        let shared_cache = Cache::new_lru_cache(cache_size);
+
         COLUMN_FAMILIES
             .iter()
             .map(|&name| {
@@ -97,7 +103,16 @@ impl DBStore {
                 db_opts.set_compression_type(DBCompressionType::None);
 
                 if name == UTXO_CF || name == HISTORY_CF {
-                    db_opts.optimize_for_point_lookup(point_lookup_cache_mb);
+                    // Use shared cache instead of optimize_for_point_lookup
+                    let mut block_opts = BlockBasedOptions::default();
+                    block_opts.set_block_cache(&shared_cache);
+
+                    // Configure for point lookups similar to optimize_for_point_lookup
+                    block_opts.set_block_size(16 * 1024); // 16KB blocks
+                    block_opts.set_cache_index_and_filter_blocks(true);
+                    block_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
+
+                    db_opts.set_block_based_table_factory(&block_opts);
                 }
 
                 if name == HISTORY_CF {
