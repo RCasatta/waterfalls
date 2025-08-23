@@ -112,6 +112,8 @@ impl DBStore {
                     block_opts.set_cache_index_and_filter_blocks(true);
                     block_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
 
+                    block_opts.set_bloom_filter(10.0, true);
+
                     db_opts.set_block_based_table_factory(&block_opts);
                 }
 
@@ -143,6 +145,8 @@ impl DBStore {
     pub fn open(path: &Path, shared_db_cache_mb: u64) -> Result<Self> {
         let mut db_opts = Options::default();
 
+        // Enable statistics collection for detailed metrics including bloom filter stats
+        db_opts.enable_statistics();
         db_opts.create_if_missing(true);
         db_opts.create_missing_column_families(true);
         let parallelism = std::thread::available_parallelism()
