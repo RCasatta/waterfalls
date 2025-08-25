@@ -22,7 +22,7 @@ pub(crate) async fn mempool_sync_infallible(
 async fn sync_mempool_once(
     client: &Client,
     support_verbose: bool,
-    mempool_txids: &mut HashSet<elements::Txid>,
+    mempool_txids: &mut HashSet<crate::be::Txid>,
     state: &Arc<State>,
     family: Family,
 ) {
@@ -35,7 +35,7 @@ async fn sync_mempool_once(
             if !new.is_empty() {
                 log::debug!("new txs in mempool {:?}, tip: {tip:?}", new);
             }
-            if !removed.is_empty() {
+            if removed.len() > 1 {
                 log::info!(
                     "removed {} txs from mempool, tip: {tip:?}, still in mempool: {}",
                     removed.len(),

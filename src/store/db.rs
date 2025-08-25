@@ -3,7 +3,7 @@ use elements::{
     encode::Encodable,
     hashes::Hash,
     secp256k1_zkp::rand::{thread_rng, Rng},
-    BlockHash, OutPoint, Txid,
+    BlockHash, OutPoint,
 };
 use fxhash::FxHasher;
 use rocksdb::{
@@ -523,7 +523,7 @@ impl Store for DBStore {
     fn update(
         &self,
         block_meta: &BlockMeta,
-        utxo_spent: Vec<(u32, OutPoint, Txid)>,
+        utxo_spent: Vec<(u32, OutPoint, crate::be::Txid)>,
         history_map: BTreeMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: BTreeMap<OutPoint, ScriptHash>,
     ) -> Result<()> {
@@ -636,7 +636,7 @@ fn vec_tx_seen_from_be_bytes(s: &[u8]) -> Result<Vec<TxSeen>> {
     let mut offset = 0;
 
     loop {
-        let txid = Txid::from_slice(&s[offset..offset + 32])?;
+        let txid = crate::be::Txid::from_slice(&s[offset..offset + 32])?;
         offset += 32;
         let (height, byte_len) = Height::decode_prefix_varint(&s[offset..])?;
         offset += byte_len;
@@ -728,7 +728,7 @@ mod test {
         assert_eq!(expected + 1, res[0].1);
         assert_eq!(1, res.len());
 
-        let txid = Txid::all_zeros();
+        let txid = crate::be::Txid::all_zeros();
 
         let mut new_history = BTreeMap::new();
         let txs_seen = vec![
@@ -800,14 +800,14 @@ mod test {
 
     #[test]
     fn test_static_txseen_round_trip() {
-        let txseen = TxSeen::new(Txid::all_zeros(), 0, V::Undefined);
+        let txseen = TxSeen::new(crate::be::Txid::all_zeros(), 0, V::Undefined);
         let txs = vec![txseen.clone()];
         let serialized = vec_tx_seen_to_be_bytes(&txs);
         assert_eq!(serialized.len(), 34);
         let deserialized = vec_tx_seen_from_be_bytes(&serialized).unwrap();
         assert_eq!(txs, deserialized);
 
-        let mut txseen = TxSeen::new(Txid::all_zeros(), 0, V::Undefined);
+        let mut txseen = TxSeen::new(crate::be::Txid::all_zeros(), 0, V::Undefined);
         txseen.block_hash = Some(BlockHash::all_zeros());
         txseen.block_timestamp = Some(42);
         let txs = vec![txseen.clone()];
@@ -819,7 +819,7 @@ mod test {
             "block_hash and block_timestamp must not be serialized"
         );
 
-        let txseen = TxSeen::new(Txid::all_zeros(), 0, V::Vout(1));
+        let txseen = TxSeen::new(crate::be::Txid::all_zeros(), 0, V::Vout(1));
         let txs = vec![txseen.clone()];
         let serialized = vec_tx_seen_to_be_bytes(&txs);
         assert_eq!(serialized.len(), 34);

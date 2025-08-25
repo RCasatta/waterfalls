@@ -34,16 +34,12 @@ pub enum InputRef<'a> {
     Elements(&'a elements::TxIn),
 }
 
-fn elements_txid(txid: bitcoin::Txid) -> elements::Txid {
-    elements::Txid::from_raw_hash(txid.to_raw_hash())
-}
-
 impl Transaction {
     // We are using elements::Txid also for bitcoin txid which is ugly but less impactfull for now (they serialize to the same 32 bytes)
-    pub fn txid(&self) -> elements::Txid {
+    pub fn txid(&self) -> crate::be::Txid {
         match self {
-            Transaction::Bitcoin(tx) => elements_txid(tx.compute_txid()),
-            Transaction::Elements(tx) => tx.txid(),
+            Transaction::Bitcoin(tx) => tx.compute_txid().into(),
+            Transaction::Elements(tx) => tx.txid().into(),
         }
     }
 
@@ -103,10 +99,10 @@ impl Transaction {
 }
 
 impl<'a> TransactionRef<'a> {
-    pub fn txid(&self) -> elements::Txid {
+    pub fn txid(&self) -> crate::be::Txid {
         match self {
-            TransactionRef::Bitcoin(tx) => elements_txid(tx.compute_txid()),
-            TransactionRef::Elements(tx) => tx.txid(),
+            TransactionRef::Bitcoin(tx) => tx.compute_txid().into(),
+            TransactionRef::Elements(tx) => tx.txid().into(),
         }
     }
 
@@ -167,13 +163,34 @@ impl<'a> Iterator for InputIterator<'a> {
 }
 
 impl<'a> OutputRef<'a> {
+    pub(crate) fn skip_utxo(&self) -> bool {
+        match self {
+            OutputRef::Bitcoin(output) => output.script_pubkey.is_op_return(),
+            OutputRef::Elements(output) => output.is_null_data() || output.is_fee(),
+        }
+    }
+
     pub(crate) fn skip_indexing(&self) -> bool {
         match self {
             OutputRef::Bitcoin(output) => {
-                output.script_pubkey.is_empty() || output.script_pubkey.is_op_return()
+                output.script_pubkey.is_empty()
+                    || output.script_pubkey.is_op_return()
+                    || bitcoin::Address::from_script(
+                        &output.script_pubkey,
+                        bitcoin::Network::Regtest,
+                    )
+                    .is_err()
             }
             OutputRef::Elements(output) => {
-                output.is_null_data() || output.is_fee() || output.script_pubkey.is_empty()
+                output.is_null_data()
+                    || output.is_fee()
+                    || output.script_pubkey.is_empty()
+                    || elements::Address::from_script(
+                        &output.script_pubkey,
+                        None,
+                        &elements::AddressParams::ELEMENTS,
+                    )
+                    .is_none()
             }
         }
     }
@@ -197,7 +214,7 @@ impl<'a> InputRef<'a> {
     pub(crate) fn previous_output(&self) -> elements::OutPoint {
         match self {
             InputRef::Bitcoin(input) => elements::OutPoint::new(
-                elements_txid(input.previous_output.txid),
+                crate::be::Txid::from(input.previous_output.txid).elements(),
                 input.previous_output.vout,
             ),
             InputRef::Elements(input) => input.previous_output,

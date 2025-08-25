@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use bitcoin::hex::FromHex;
-use elements::{encode::Decodable, BlockHash, Txid};
+use elements::{encode::Decodable, BlockHash};
 use hyper::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
@@ -20,7 +20,7 @@ use crate::{
 
 #[derive(Debug)]
 pub enum Error {
-    TxNotFound(String, Txid),
+    TxNotFound(String, crate::be::Txid),
     BlockNotFound(String, BlockHash),
     BlockHeaderNotFound(String, BlockHash),
     UnexpectedStatus(String, StatusCode),
@@ -291,7 +291,7 @@ impl Client {
     // curl http://127.0.0.1:7041/rest/
     // curl -s http://localhost:7041/rest/mempool/contents.json | jq
     // verbose false is not supported on liquid
-    pub async fn mempool(&self, support_verbose: bool) -> Result<HashSet<Txid>> {
+    pub async fn mempool(&self, support_verbose: bool) -> Result<HashSet<crate::be::Txid>> {
         let base = &self.base_url;
         let url = if self.use_esplora {
             format!("{base}/mempool/txids")
@@ -320,7 +320,7 @@ impl Client {
             .with_context(|| format!("failure reading {url} body in bytes"))?;
 
         Ok(if self.use_esplora {
-            let content: HashSet<Txid> = serde_json::from_slice(&body_bytes)
+            let content: HashSet<crate::be::Txid> = serde_json::from_slice(&body_bytes)
                 .with_context(|| format!("failure converting {url} body in HashSet<Txid>"))?;
             content
         } else {
@@ -328,7 +328,7 @@ impl Client {
                 serde_json::from_slice(&body_bytes)
                     .with_context(|| format!("failure converting {url} body in HashSet<Txid> "))?
             } else {
-                let content: HashMap<Txid, Empty> = serde_json::from_slice(&body_bytes)
+                let content: HashMap<crate::be::Txid, Empty> = serde_json::from_slice(&body_bytes)
                     .with_context(|| {
                         format!("failure converting {url} body in HashMap<Txid, Empty> ")
                     })?;
@@ -339,7 +339,7 @@ impl Client {
     }
 
     /// GET /rest/tx/<TX-HASH>.<bin|hex|json>
-    pub async fn tx(&self, txid: Txid, family: Family) -> Result<be::Transaction> {
+    pub async fn tx(&self, txid: crate::be::Txid, family: Family) -> Result<be::Transaction> {
         let base = &self.base_url;
         let url = if self.use_esplora {
             format!("{base}/tx/{txid}/raw")
@@ -372,7 +372,7 @@ impl Client {
     /// When using the node it must go through RPC interface because the node doesn't support broadcasting via REST
     /// We can't go full RPC for other methods because RPC doesn't return binary data
     ///
-    pub async fn broadcast(&self, tx: &be::Transaction) -> Result<Txid> {
+    pub async fn broadcast(&self, tx: &be::Transaction) -> Result<crate::be::Txid> {
         let tx_hex = tx.serialize_hex();
 
         let response = if self.use_esplora {
@@ -413,7 +413,7 @@ impl Client {
             .as_str()
             .ok_or(anyhow!("unexpected non-string result"))?;
 
-        let txid = Txid::from_str(txid_text)?;
+        let txid = crate::be::Txid::from_str(txid_text)?;
         assert_eq!(txid, tx.txid());
         Ok(txid)
     }
@@ -460,7 +460,7 @@ pub struct HeaderJson {
 mod test {
     use std::str::FromStr;
 
-    use elements::{BlockHash, Txid};
+    use elements::BlockHash;
 
     use crate::{
         server::{Arguments, Network},
@@ -572,7 +572,7 @@ mod test {
         };
 
         let genesis_hash = BlockHash::from_str(&genesis_hash).unwrap();
-        let genesis_txid = Txid::from_str(&genesis_txid).unwrap();
+        let genesis_txid = crate::be::Txid::from_str(&genesis_txid).unwrap();
 
         let fetched = client.block_hash(0).await.unwrap().unwrap();
         assert_eq!(genesis_hash, fetched, "network:{network}");
@@ -615,7 +615,7 @@ mod test {
         }
 
         if let Some(another_txid) = another_txid {
-            let another_txid = Txid::from_str(another_txid).unwrap();
+            let another_txid = crate::be::Txid::from_str(another_txid).unwrap();
             let another_tx = client.tx(another_txid, network.into()).await.unwrap();
             assert_eq!(another_tx.txid(), another_txid);
         }

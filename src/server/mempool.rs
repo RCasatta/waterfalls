@@ -3,7 +3,7 @@ use std::{
     iter,
 };
 
-use elements::{OutPoint, Txid};
+use elements::OutPoint;
 
 use crate::{
     be,
@@ -12,8 +12,8 @@ use crate::{
 };
 
 pub struct Mempool {
-    txid_hashes: HashMap<Txid, HashSet<ScriptHash>>,
-    hash_txids: HashMap<ScriptHash, Vec<(Txid, i32)>>,
+    txid_hashes: HashMap<crate::be::Txid, HashSet<ScriptHash>>,
+    hash_txids: HashMap<ScriptHash, Vec<(crate::be::Txid, i32)>>,
     outpoints_created: HashMap<OutPoint, ScriptHash>,
 }
 
@@ -32,7 +32,7 @@ impl Mempool {
         }
     }
 
-    pub fn remove(&mut self, txids: &[Txid]) {
+    pub fn remove(&mut self, txids: &[crate::be::Txid]) {
         for txid in txids {
             if let Some(hashes) = self.txid_hashes.remove(txid) {
                 for hash in hashes {
@@ -46,11 +46,11 @@ impl Mempool {
             }
         }
         self.outpoints_created
-            .retain(|k, _| !txids.contains(&k.txid));
+            .retain(|k, _| !txids.contains(&k.txid.into()));
     }
 
-    pub fn add(&mut self, db: &AnyStore, txs: &[(Txid, be::Transaction)]) {
-        let txs_map: HashMap<Txid, &be::Transaction> =
+    pub fn add(&mut self, db: &AnyStore, txs: &[(crate::be::Txid, be::Transaction)]) {
+        let txs_map: HashMap<crate::be::Txid, &be::Transaction> =
             txs.iter().map(|(txid, tx)| (*txid, tx)).collect();
 
         // update the unconfirmed utxo set
@@ -59,7 +59,7 @@ impl Mempool {
             .flat_map(|(txid, tx)| tx.outputs_iter().enumerate().zip(iter::repeat(txid)))
             .map(|((vout, txout), txid)| {
                 (
-                    OutPoint::new(*txid, vout as u32),
+                    OutPoint::new(txid.elements(), vout as u32),
                     db.hash(txout.script_pubkey_bytes()),
                 )
             });
@@ -68,8 +68,9 @@ impl Mempool {
         // we need to build this map for every txid all the ScriptHash involved, for output is easy
         // while for input we have to check the ScriptHash of previous output, the previous output must
         // be fetched from the db or from the mempool itself
-        let mut txid_hashes: HashMap<Txid, HashSet<ScriptHash>> = HashMap::new();
-        let mut txid_script_positions: HashMap<Txid, Vec<(ScriptHash, i32)>> = HashMap::new();
+        let mut txid_hashes: HashMap<crate::be::Txid, HashSet<ScriptHash>> = HashMap::new();
+        let mut txid_script_positions: HashMap<crate::be::Txid, Vec<(ScriptHash, i32)>> =
+            HashMap::new();
 
         let prevouts: Vec<OutPoint> = txs
             .iter()
@@ -143,7 +144,7 @@ impl Mempool {
         result
     }
 
-    pub(crate) fn txids(&self) -> HashSet<Txid> {
+    pub(crate) fn txids(&self) -> HashSet<crate::be::Txid> {
         self.txid_hashes.keys().cloned().collect()
     }
 }

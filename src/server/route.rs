@@ -7,7 +7,7 @@ use crate::{
     WaterfallResponseV3, V,
 };
 use age::x25519::Identity;
-use elements::{BlockHash, Txid};
+use elements::BlockHash;
 use http_body_util::{BodyExt, Full};
 use hyper::{
     body::{Bytes, Incoming},
@@ -195,7 +195,7 @@ pub async fn route(
                 }
 
                 (Some(""), Some("tx"), Some(v), Some("raw"), None) => {
-                    let txid = Txid::from_str(v).map_err(|_| Error::InvalidTxid)?;
+                    let txid = crate::be::Txid::from_str(v).map_err(|_| Error::InvalidTxid)?;
                     let tx = match client.lock().await.tx(txid, network.into()).await {
                         Ok(tx) => tx,
                         Err(e) => {
@@ -354,7 +354,7 @@ async fn handle_single_address(
 ) -> Result<Response<Full<Bytes>>, Error> {
     #[derive(Serialize)]
     struct EsploraTx {
-        txid: elements::Txid,
+        txid: crate::be::Txid,
         status: Status,
     }
 

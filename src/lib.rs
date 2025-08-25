@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 
-use crate::cbor::{cbor_block_hash, cbor_opt_block_hash, cbor_txid, cbor_txids};
+use crate::cbor::{cbor_block_hash, cbor_opt_block_hash};
 pub use be::Family;
-use elements::{BlockHash, OutPoint, Txid};
+use elements::{BlockHash, OutPoint};
 use lazy_static::lazy_static;
 use minicbor::{Decode, Encode};
 use prometheus::{
-    labels, opts, register_counter, register_histogram_vec, register_int_counter_vec, Counter,
-    HistogramVec, IntCounterVec,
+    labels, opts, register_counter, register_histogram_vec, register_int_counter_vec,
+    register_int_gauge, Counter, HistogramVec, IntCounterVec, IntGauge,
 };
 use serde::{Deserialize, Serialize};
 
@@ -96,8 +96,8 @@ pub struct WaterfallResponseV3 {
     pub page: u16,
     #[cbor(n(2), with = "cbor_block_hash")]
     pub tip: BlockHash,
-    #[cbor(n(3), with = "cbor_txids")]
-    pub txids: Vec<Txid>,
+    #[cbor(n(3))]
+    pub txids: Vec<crate::be::Txid>,
     #[cbor(n(4))]
     pub blocks_meta: Vec<BlockMeta>,
 }
@@ -274,8 +274,9 @@ impl From<i32> for V {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Encode, Decode)]
 pub struct TxSeen {
-    #[cbor(n(0), with = "cbor_txid")]
-    pub txid: Txid,
+    #[cbor(n(0))]
+    pub txid: crate::be::Txid,
+
     #[cbor(n(1))]
     pub height: Height,
 
@@ -302,7 +303,7 @@ pub struct TxSeen {
 }
 
 impl TxSeen {
-    pub fn new(txid: Txid, height: Height, v: V) -> Self {
+    pub fn new(txid: crate::be::Txid, height: Height, v: V) -> Self {
         Self {
             txid,
             height,
@@ -312,12 +313,14 @@ impl TxSeen {
         }
     }
 
-    pub fn mempool(txid: Txid, v: V) -> TxSeen {
+    pub fn mempool(txid: crate::be::Txid, v: V) -> TxSeen {
         TxSeen::new(txid, 0, v)
     }
 
     pub fn outpoint(&self) -> Option<OutPoint> {
-        self.v.vout().map(|vout| OutPoint::new(self.txid, vout))
+        self.v
+            .vout()
+            .map(|vout| OutPoint::new(self.txid.elements(), vout))
     }
 }
 
@@ -325,7 +328,7 @@ impl TryFrom<WaterfallResponse> for WaterfallResponseV3 {
     type Error = String;
 
     fn try_from(value: WaterfallResponse) -> Result<Self, Self::Error> {
-        let mut txids: Vec<Txid> = value
+        let mut txids: Vec<crate::be::Txid> = value
             .txs_seen
             .iter()
             .flat_map(|(_, v)| v.iter())
@@ -418,6 +421,8 @@ lazy_static! {
         labels! {"handler" => "all",}
     ))
     .unwrap();
+    pub(crate) static ref BLOCKCHAIN_TIP: IntGauge =
+        register_int_gauge!(opts!("blockchain_tip", "Blockchain tip height.")).unwrap();
     pub(crate) static ref WATERFALLS_HISTOGRAM: HistogramVec = register_histogram_vec!(
         "waterfalls_request_duration_seconds",
         "The waterfalls request latencies in seconds.",
@@ -447,6 +452,7 @@ pub(crate) fn cache_counter(cache_name: &str, hit_miss: bool) {
 
 #[cfg(test)]
 mod tests {
+
     use std::str::FromStr;
 
     use bitcoin::hex::DisplayHex;
@@ -508,9 +514,10 @@ mod tests {
 
     #[test]
     fn test_cbor_txseen() {
-        let txid =
-            Txid::from_str("1111111111111111111111111111111111111111111111111111111111111111")
-                .unwrap();
+        let txid = crate::be::Txid::from_str(
+            "1111111111111111111111111111111111111111111111111111111111111111",
+        )
+        .unwrap();
         let txseen = TxSeen::new(txid, 3_000_001, V::Undefined); // Was 0, meaning undefined
         let cbor = minicbor::to_vec(&txseen).unwrap();
 

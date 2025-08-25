@@ -49,6 +49,16 @@ Legend:
 * req #1: number of network requests performed for the first scan
 * req #2: number of network requests performed for the second scan
 
+## Database size
+
+| Network | Blocks Dir | Waterfalls Db | Height |
+| :--- | ---: | ---: | ---: |
+| **Bitcoin** | 724G | 245G | 911k |
+| **Bitcoin Signet** | 15G | 6.9G | 266k |
+| **Liquid** | 38G | 876M | 3510k |
+| **Liquid Testnet** | 4.1G | 258M | 2064k |
+
+
 ## Docker
 
 You can run Waterfalls in a Docker container using the included Nix configuration.

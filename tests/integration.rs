@@ -221,13 +221,13 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
             // assert_eq!(txid, tx_blind.txid()); // TODO: fix this
         }
         Family::Elements => {
-            assert_eq!(txid, tx_blind.txid());
+            assert_eq!(txid, tx_blind.txid().into());
         }
     }
 
     // Test getting tx
     let tx = client.tx(txid).await.unwrap();
-    assert_eq!(tx.txid(), txid);
+    assert_eq!(crate::be::Txid::from(tx.txid()), txid);
 
     // Test server_address
     let server_address = test_env.server_address();
@@ -379,7 +379,7 @@ async fn test_no_txindex() {
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
     let elementsd = bitcoind::BitcoinD::with_conf(exe, &conf).unwrap();
     let test_env = waterfalls::test_env::launch_with_node(&elementsd, None, Family::Elements).await;
-    let txid = elements::Txid::from_str(
+    let txid = crate::be::Txid::from_str(
         "0000000000000000000000000000000000000000000000000000000000000000",
     )
     .unwrap();

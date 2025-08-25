@@ -1,6 +1,6 @@
 use crate::{Height, ScriptHash, Timestamp, TxSeen};
 use anyhow::Result;
-use elements::{BlockHash, OutPoint, Txid};
+use elements::{BlockHash, OutPoint};
 use std::collections::BTreeMap;
 
 #[cfg(feature = "db")]
@@ -42,7 +42,7 @@ pub trait Store {
     fn update(
         &self,
         block_meta: &BlockMeta,
-        utxo_spent: Vec<(u32, OutPoint, Txid)>,
+        utxo_spent: Vec<(u32, OutPoint, crate::be::Txid)>,
         history_map: BTreeMap<ScriptHash, Vec<TxSeen>>, // We want this sorted because when inserted in the write batch it's faster (see benches and test guaranteeing encoding order match struct ordering)
         utxo_created: BTreeMap<OutPoint, ScriptHash>, // We want this sorted because when inserted in the write batch it's faster (see benches and test guaranteeing encoding order match struct ordering)
     ) -> Result<()>;
@@ -90,7 +90,7 @@ impl Store for AnyStore {
     fn update(
         &self,
         block_meta: &BlockMeta,
-        utxo_spent: Vec<(u32, OutPoint, Txid)>,
+        utxo_spent: Vec<(u32, OutPoint, crate::be::Txid)>,
         history_map: BTreeMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: BTreeMap<OutPoint, ScriptHash>,
     ) -> Result<()> {
