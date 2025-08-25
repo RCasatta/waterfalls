@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
-use bitcoin::hashes::sha256d;
+use bitcoin::hashes::{sha256d, Hash};
+use minicbor::{bytes::ByteArray, Decoder, Encoder};
 
 /// A transaction identifier.
 ///
@@ -22,5 +23,66 @@ impl FromStr for Txid {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Txid(sha256d::Hash::from_str(s)?))
+    }
+}
+
+impl minicbor::Encode<()> for Txid {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut Encoder<W>,
+        _ctx: &mut (),
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        e.bytes(self.0.as_ref())?;
+        Ok(())
+    }
+}
+
+impl minicbor::Decode<'_, ()> for Txid {
+    fn decode(d: &mut Decoder<'_>, _ctx: &mut ()) -> Result<Self, minicbor::decode::Error> {
+        let bytes = d.decode::<ByteArray<32>>()?;
+        Ok(Txid(sha256d::Hash::from_slice(bytes.as_slice()).map_err(
+            |_| minicbor::decode::Error::message("invalid 32-byte hash"),
+        )?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_txid_cbor_roundtrip() {
+        let txid_str = "1111111111111111111111111111111111111111111111111111111111111111";
+        let txid = Txid::from_str(txid_str).unwrap();
+
+        // Test encoding
+        let mut buffer = Vec::new();
+        minicbor::encode(&txid, &mut buffer).unwrap();
+
+        // Test decoding
+        let decoded_txid: Txid = minicbor::decode(&buffer).unwrap();
+
+        // Verify roundtrip
+        assert_eq!(txid.0, decoded_txid.0);
+
+        // Test conversion methods still work
+        let _bitcoin_txid = decoded_txid.bitcoin();
+        let _elements_txid = txid.elements();
+    }
+
+    #[test]
+    fn test_txid_cbor_format() {
+        let txid_str = "1111111111111111111111111111111111111111111111111111111111111111";
+        let txid = Txid::from_str(txid_str).unwrap();
+
+        let mut buffer = Vec::new();
+        minicbor::encode(&txid, &mut buffer).unwrap();
+
+        // Should be encoded as bytes (32 bytes + CBOR overhead)
+        assert_eq!(buffer.len(), 34); // 1 byte for type + 1 byte for length + 32 bytes for hash
+
+        // First byte should indicate bytes type with length 32
+        assert_eq!(buffer[0], 0x58); // Major type 2 (bytes), additional info 24 (1-byte length follows)
+        assert_eq!(buffer[1], 32); // Length is 32 bytes
     }
 }
