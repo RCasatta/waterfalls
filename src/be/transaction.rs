@@ -170,10 +170,24 @@ impl<'a> OutputRef<'a> {
     pub(crate) fn skip_indexing(&self) -> bool {
         match self {
             OutputRef::Bitcoin(output) => {
-                output.script_pubkey.is_empty() || output.script_pubkey.is_op_return()
+                output.script_pubkey.is_empty()
+                    || output.script_pubkey.is_op_return()
+                    || bitcoin::Address::from_script(
+                        &output.script_pubkey,
+                        bitcoin::Network::Regtest,
+                    )
+                    .is_err()
             }
             OutputRef::Elements(output) => {
-                output.is_null_data() || output.is_fee() || output.script_pubkey.is_empty()
+                output.is_null_data()
+                    || output.is_fee()
+                    || output.script_pubkey.is_empty()
+                    || elements::Address::from_script(
+                        &output.script_pubkey,
+                        None,
+                        &elements::AddressParams::ELEMENTS,
+                    )
+                    .is_none()
             }
         }
     }
