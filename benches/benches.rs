@@ -1,4 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 
 use bitcoin::key::Secp256k1;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -19,7 +21,8 @@ criterion_group!(
     encoding_decoding,
     conversion,
     sign_verify,
-    writebatch_sorting
+    writebatch_sorting,
+    hasher
 );
 criterion_main!(benches);
 
@@ -297,4 +300,53 @@ pub fn sign_verify(c: &mut Criterion) {
                 black_box(result);
             });
         });
+}
+
+pub fn hasher(c: &mut Criterion) {
+    use elements::hashes::Hash;
+    use elements::secp256k1_zkp::rand::{thread_rng, RngCore};
+
+    // Generate test data
+    let mut rng = thread_rng();
+    let mut txid_bytes = [0u8; 32];
+    rng.fill_bytes(&mut txid_bytes);
+
+    let elements_txid = elements::Txid::from_byte_array(txid_bytes);
+    let bitcoin_txid = bitcoin::Txid::from_byte_array(txid_bytes);
+    let waterfalls_txid = waterfalls::be::Txid::from(bitcoin_txid);
+
+    c.benchmark_group("hasher")
+        .bench_function(
+            "single hash elements::Txid",
+            |b: &mut criterion::Bencher<'_>| {
+                b.iter(|| {
+                    let mut hasher = DefaultHasher::new();
+                    elements_txid.hash(&mut hasher);
+                    let hash_result = hasher.finish();
+                    black_box(hash_result);
+                });
+            },
+        )
+        .bench_function(
+            "single hash bitcoin::Txid",
+            |b: &mut criterion::Bencher<'_>| {
+                b.iter(|| {
+                    let mut hasher = DefaultHasher::new();
+                    bitcoin_txid.hash(&mut hasher);
+                    let hash_result = hasher.finish();
+                    black_box(hash_result);
+                });
+            },
+        )
+        .bench_function(
+            "single hash waterfalls::be::Txid",
+            |b: &mut criterion::Bencher<'_>| {
+                b.iter(|| {
+                    let mut hasher = DefaultHasher::new();
+                    waterfalls_txid.hash(&mut hasher);
+                    let hash_result = hasher.finish();
+                    black_box(hash_result);
+                });
+            },
+        );
 }
