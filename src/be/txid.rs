@@ -7,8 +7,20 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// A transaction identifier.
 ///
 /// This type don't discriminate between bitcoin and elements, so that in binary format doesn't occupy more space.
-#[derive(Clone, PartialEq, Eq, Debug, Copy, Ord, PartialOrd, Hash)]
+#[derive(Clone, PartialEq, Eq, Debug, Copy, Ord, PartialOrd)]
 pub struct Txid(sha256d::Hash);
+
+impl std::hash::Hash for Txid {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let hash_bytes: &[u8] = self.0.as_ref();
+
+        let first_half = u128::from_be_bytes(hash_bytes[0..16].try_into().unwrap());
+        let second_half = u128::from_be_bytes(hash_bytes[16..32].try_into().unwrap());
+
+        let combined = first_half ^ second_half;
+        state.write_u128(combined);
+    }
+}
 
 impl Txid {
     pub fn bitcoin(self) -> bitcoin::Txid {
@@ -206,5 +218,18 @@ mod tests {
         let deserialized_txid: Txid = serde_json::from_str(&json).unwrap();
         assert_eq!(txid.0, deserialized_txid.0);
         assert_eq!(txid.to_string(), deserialized_txid.to_string());
+    }
+
+    #[test]
+    fn test_hash_value() {
+        use std::hash::BuildHasher;
+        let txid =
+            Txid::from_str("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+                .unwrap();
+        let random_state = std::collections::hash_map::RandomState::new();
+        let mut hasher = random_state.build_hasher();
+        std::hash::Hash::hash(&txid, &mut hasher);
+        let hash = std::hash::Hasher::finish(&hasher);
+        println!("hash: {}", hash);
     }
 }
