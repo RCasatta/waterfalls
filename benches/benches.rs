@@ -113,6 +113,16 @@ pub fn encoding_decoding(c: &mut Criterion) {
             },
         )
         .bench_function(
+            "decode mempool json String",
+            |b: &mut criterion::Bencher<'_>| {
+                let s = include_str!("../tests/data/mempool-verbose-false.json");
+                b.iter(|| {
+                    let json: HashSet<String> = serde_json::from_str(s).unwrap();
+                    black_box(json);
+                });
+            },
+        )
+        .bench_function(
             "decode mempool json from_reader",
             |b: &mut criterion::Bencher<'_>| {
                 let bytes = include_bytes!("../tests/data/mempool-verbose-false.json");
