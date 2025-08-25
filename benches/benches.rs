@@ -82,13 +82,36 @@ pub fn encoding_decoding(c: &mut Criterion) {
                 black_box(json);
             });
         })
-        .bench_function("decode mempool json", |b: &mut criterion::Bencher<'_>| {
-            let s = include_str!("../tests/data/mempool-verbose-false.json");
-            b.iter(|| {
-                let json: HashSet<Txid> = serde_json::from_str(s).unwrap();
-                black_box(json);
-            });
-        })
+        .bench_function(
+            "decode mempool json elements::Txid",
+            |b: &mut criterion::Bencher<'_>| {
+                let s = include_str!("../tests/data/mempool-verbose-false.json");
+                b.iter(|| {
+                    let json: HashSet<elements::Txid> = serde_json::from_str(s).unwrap();
+                    black_box(json);
+                });
+            },
+        )
+        .bench_function(
+            "decode mempool json bitcoin::Txid",
+            |b: &mut criterion::Bencher<'_>| {
+                let s = include_str!("../tests/data/mempool-verbose-false.json");
+                b.iter(|| {
+                    let json: HashSet<bitcoin::Txid> = serde_json::from_str(s).unwrap();
+                    black_box(json);
+                });
+            },
+        )
+        .bench_function(
+            "decode mempool json crate::be::Txid",
+            |b: &mut criterion::Bencher<'_>| {
+                let s = include_str!("../tests/data/mempool-verbose-false.json");
+                b.iter(|| {
+                    let json: HashSet<waterfalls::be::Txid> = serde_json::from_str(s).unwrap();
+                    black_box(json);
+                });
+            },
+        )
         .bench_function(
             "decode mempool json from_reader",
             |b: &mut criterion::Bencher<'_>| {
