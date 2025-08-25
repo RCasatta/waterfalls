@@ -26,6 +26,12 @@ impl FromStr for Txid {
     }
 }
 
+impl std::fmt::Display for Txid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl minicbor::Encode<()> for Txid {
     fn encode<W: minicbor::encode::Write>(
         &self,
@@ -84,5 +90,48 @@ mod tests {
         // First byte should indicate bytes type with length 32
         assert_eq!(buffer[0], 0x58); // Major type 2 (bytes), additional info 24 (1-byte length follows)
         assert_eq!(buffer[1], 32); // Length is 32 bytes
+    }
+
+    #[test]
+    fn test_txid_string_roundtrip() {
+        // Use non-symmetric bytes to catch ordering issues
+        let txid_str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+        let txid = Txid::from_str(txid_str).unwrap();
+
+        // Test string roundtrip
+        let roundtrip_str = txid.to_string();
+        assert_eq!(txid_str, roundtrip_str);
+
+        // Test parsing the roundtrip string
+        let roundtrip_txid = Txid::from_str(&roundtrip_str).unwrap();
+        assert_eq!(txid.0, roundtrip_txid.0);
+    }
+
+    #[test]
+    fn test_txid_consistency_with_bitcoin() {
+        // Use non-symmetric bytes to catch ordering issues
+        let txid_str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+        let our_txid = Txid::from_str(txid_str).unwrap();
+
+        // Create bitcoin txid from the same string
+        let bitcoin_txid = bitcoin::Txid::from_str(txid_str).unwrap();
+
+        // Verify our string representation matches bitcoin
+        assert_eq!(our_txid.to_string(), bitcoin_txid.to_string());
+
+        // Test conversion - need separate instance since method consumes self
+        let our_txid_for_bitcoin = Txid::from_str(txid_str).unwrap();
+
+        // Verify conversion produces the same underlying value
+        assert_eq!(our_txid_for_bitcoin.bitcoin(), bitcoin_txid);
+
+        // Verify the converted txid also produces the same string representation
+        let converted_bitcoin = Txid::from_str(txid_str).unwrap().bitcoin();
+        assert_eq!(converted_bitcoin.to_string(), bitcoin_txid.to_string());
+
+        // Test that elements conversion works (even if string representation differs)
+        let our_txid_for_elements = Txid::from_str(txid_str).unwrap();
+        let elements_txid = elements::Txid::from_str(txid_str).unwrap();
+        assert_eq!(our_txid_for_elements.elements(), elements_txid);
     }
 }
