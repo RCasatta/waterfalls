@@ -35,7 +35,7 @@ async fn sync_mempool_once(
             if !new.is_empty() {
                 log::debug!("new txs in mempool {:?}, tip: {tip:?}", new);
             }
-            if !removed.is_empty() {
+            if removed.len() > 1 {
                 log::info!(
                     "removed {} txs from mempool, tip: {tip:?}, still in mempool: {}",
                     removed.len(),
