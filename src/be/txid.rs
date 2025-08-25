@@ -2,7 +2,10 @@ use std::str::FromStr;
 
 use bitcoin::hashes::{sha256d, Hash};
 use minicbor::{bytes::ByteArray, Decoder, Encoder};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{
+    de::{self, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 
 /// A transaction identifier.
 ///
@@ -113,8 +116,34 @@ impl<'de> Deserialize<'de> for Txid {
         D: Deserializer<'de>,
     {
         if deserializer.is_human_readable() {
-            let s = String::deserialize(deserializer)?;
-            Txid::from_str(&s).map_err(serde::de::Error::custom)
+            struct TxidVisitor;
+
+            impl<'de> Visitor<'de> for TxidVisitor {
+                type Value = Txid;
+
+                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    write!(formatter, "a 64-character hexadecimal string")
+                }
+
+                fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+                where
+                    E: de::Error,
+                {
+                    if value.len() != 64 {
+                        return Err(E::invalid_length(value.len(), &"64 characters"));
+                    }
+                    Txid::from_str(value).map_err(E::custom)
+                }
+
+                fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+                where
+                    E: de::Error,
+                {
+                    self.visit_str(&value)
+                }
+            }
+
+            deserializer.deserialize_str(TxidVisitor)
         } else {
             panic!("Non-human readable deserialization not implemented for Txid")
         }
@@ -231,5 +260,24 @@ mod tests {
         std::hash::Hash::hash(&txid, &mut hasher);
         let hash = std::hash::Hasher::finish(&hasher);
         println!("hash: {}", hash);
+    }
+
+    #[test]
+    fn test_txid_serde_invalid_length() {
+        // Test deserialization with invalid length (too short)
+        let short_json = "\"00010203\"";
+        let result: Result<Txid, _> = serde_json::from_str(short_json);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("invalid length"));
+        assert!(error_msg.contains("64 characters"));
+
+        // Test deserialization with invalid length (too long)
+        let long_json = "\"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00\"";
+        let result: Result<Txid, _> = serde_json::from_str(long_json);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("invalid length"));
+        assert!(error_msg.contains("64 characters"));
     }
 }
