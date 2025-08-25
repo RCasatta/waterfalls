@@ -227,6 +227,8 @@ pub async fn index(
         state.set_hash_ts(&block_to_index).await;
         db.update(&block_to_index, utxo_spent, history_map, utxo_created)
             .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
+
+        crate::BLOCKCHAIN_TIP.set(block_to_index.height as i64);
         last_indexed = Some(block_to_index);
     }
 }

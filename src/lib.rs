@@ -6,8 +6,8 @@ use elements::{BlockHash, OutPoint, Txid};
 use lazy_static::lazy_static;
 use minicbor::{Decode, Encode};
 use prometheus::{
-    labels, opts, register_counter, register_histogram_vec, register_int_counter_vec, Counter,
-    HistogramVec, IntCounterVec,
+    labels, opts, register_counter, register_histogram_vec, register_int_counter_vec,
+    register_int_gauge, Counter, HistogramVec, IntCounterVec, IntGauge,
 };
 use serde::{Deserialize, Serialize};
 
@@ -418,6 +418,8 @@ lazy_static! {
         labels! {"handler" => "all",}
     ))
     .unwrap();
+    pub(crate) static ref BLOCKCHAIN_TIP: IntGauge =
+        register_int_gauge!(opts!("blockchain_tip", "Blockchain tip height.")).unwrap();
     pub(crate) static ref WATERFALLS_HISTOGRAM: HistogramVec = register_histogram_vec!(
         "waterfalls_request_duration_seconds",
         "The waterfalls request latencies in seconds.",
