@@ -22,7 +22,7 @@ pub(crate) async fn mempool_sync_infallible(
 async fn sync_mempool_once(
     client: &Client,
     support_verbose: bool,
-    mempool_txids: &mut HashSet<elements::Txid>,
+    mempool_txids: &mut HashSet<crate::be::Txid>,
     state: &Arc<State>,
     family: Family,
 ) {

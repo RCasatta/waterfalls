@@ -7,6 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// A transaction identifier.
 ///
 /// This type don't discriminate between bitcoin and elements, so that in binary format doesn't occupy more space.
+#[derive(Clone, PartialEq, Eq, Debug, Copy, Ord, PartialOrd, Hash)]
 pub struct Txid(sha256d::Hash);
 
 impl Txid {
@@ -16,6 +17,34 @@ impl Txid {
 
     pub fn elements(self) -> elements::Txid {
         elements::Txid::from_raw_hash(self.0)
+    }
+
+    pub fn from_raw_hash(hash: sha256d::Hash) -> Self {
+        Self(hash)
+    }
+
+    pub(crate) fn from_slice(slice: &[u8]) -> Result<Self, anyhow::Error> {
+        Ok(Self(sha256d::Hash::from_slice(slice)?))
+    }
+
+    pub(crate) fn as_byte_array(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+
+    pub fn all_zeros() -> Self {
+        Self(sha256d::Hash::from_slice(&[0u8; 32]).unwrap())
+    }
+}
+
+impl From<elements::Txid> for Txid {
+    fn from(txid: elements::Txid) -> Self {
+        Self(txid.into())
+    }
+}
+
+impl From<bitcoin::Txid> for Txid {
+    fn from(txid: bitcoin::Txid) -> Self {
+        Self(txid.into())
     }
 }
 
@@ -33,19 +62,19 @@ impl std::fmt::Display for Txid {
     }
 }
 
-impl minicbor::Encode<()> for Txid {
+impl<Ctx> minicbor::Encode<Ctx> for Txid {
     fn encode<W: minicbor::encode::Write>(
         &self,
         e: &mut Encoder<W>,
-        _ctx: &mut (),
+        _ctx: &mut Ctx,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
         e.bytes(self.0.as_ref())?;
         Ok(())
     }
 }
 
-impl minicbor::Decode<'_, ()> for Txid {
-    fn decode(d: &mut Decoder<'_>, _ctx: &mut ()) -> Result<Self, minicbor::decode::Error> {
+impl<'b, Ctx> minicbor::Decode<'b, Ctx> for Txid {
+    fn decode(d: &mut Decoder<'b>, _ctx: &mut Ctx) -> Result<Self, minicbor::decode::Error> {
         let bytes = d.decode::<ByteArray<32>>()?;
         Ok(Txid(sha256d::Hash::from_slice(bytes.as_slice()).map_err(
             |_| minicbor::decode::Error::message("invalid 32-byte hash"),

@@ -21,7 +21,7 @@ use bitcoind::{
 use elements::{
     bitcoin::{Amount, Denomination},
     encode::{serialize_hex, Decodable},
-    BlockHash, Txid,
+    BlockHash,
 };
 use hyper::HeaderMap;
 use serde::{Deserialize, Serialize};
@@ -201,7 +201,7 @@ impl<'a> TestEnv<'a> {
         &self.base_url
     }
 
-    pub fn send_to(&self, address: &be::Address, satoshis: u64) -> Txid {
+    pub fn send_to(&self, address: &be::Address, satoshis: u64) -> crate::be::Txid {
         let amount = Amount::from_sat(satoshis);
         let btc = amount.to_string_in(Denomination::Bitcoin);
         let val = self
@@ -209,7 +209,7 @@ impl<'a> TestEnv<'a> {
             .client
             .call::<Value>("sendtoaddress", &[address.to_string().into(), btc.into()])
             .unwrap();
-        Txid::from_str(val.as_str().unwrap()).unwrap()
+        crate::be::Txid::from_str(val.as_str().unwrap()).unwrap()
     }
 
     pub fn get_new_address(&self, kind: Option<&str>) -> be::Address {
@@ -546,7 +546,7 @@ impl WaterfallClient {
             .map(|a| a.assume_checked())
     }
 
-    pub async fn tx(&self, txid: Txid) -> anyhow::Result<be::Transaction> {
+    pub async fn tx(&self, txid: crate::be::Txid) -> anyhow::Result<be::Transaction> {
         let url = format!("{}/tx/{}/raw", self.base_url, txid);
         let response = self.client.get(&url).send().await?;
         let status_code = response.status().as_u16();
@@ -557,14 +557,14 @@ impl WaterfallClient {
         be::Transaction::from_bytes(&bytes, self.family)
     }
 
-    pub async fn broadcast(&self, tx: &be::Transaction) -> anyhow::Result<Txid> {
+    pub async fn broadcast(&self, tx: &be::Transaction) -> anyhow::Result<crate::be::Txid> {
         let url = format!("{}/tx", self.base_url);
         let tx_hex = tx.serialize_hex();
         let response = self.client.post(&url).body(tx_hex).send().await?;
         let status_code = response.status().as_u16();
         let text = response.text().await?;
         if status_code == 200 {
-            let txid = Txid::from_str(&text)?;
+            let txid = crate::be::Txid::from_str(&text)?;
             Ok(txid)
         } else {
             bail!("broadcast response is not 200 but: {status_code} text: {text}");

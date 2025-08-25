@@ -34,16 +34,12 @@ pub enum InputRef<'a> {
     Elements(&'a elements::TxIn),
 }
 
-fn elements_txid(txid: bitcoin::Txid) -> elements::Txid {
-    elements::Txid::from_raw_hash(txid.to_raw_hash())
-}
-
 impl Transaction {
     // We are using elements::Txid also for bitcoin txid which is ugly but less impactfull for now (they serialize to the same 32 bytes)
-    pub fn txid(&self) -> elements::Txid {
+    pub fn txid(&self) -> crate::be::Txid {
         match self {
-            Transaction::Bitcoin(tx) => elements_txid(tx.compute_txid()),
-            Transaction::Elements(tx) => tx.txid(),
+            Transaction::Bitcoin(tx) => tx.compute_txid().into(),
+            Transaction::Elements(tx) => tx.txid().into(),
         }
     }
 
@@ -103,10 +99,10 @@ impl Transaction {
 }
 
 impl<'a> TransactionRef<'a> {
-    pub fn txid(&self) -> elements::Txid {
+    pub fn txid(&self) -> crate::be::Txid {
         match self {
-            TransactionRef::Bitcoin(tx) => elements_txid(tx.compute_txid()),
-            TransactionRef::Elements(tx) => tx.txid(),
+            TransactionRef::Bitcoin(tx) => tx.compute_txid().into(),
+            TransactionRef::Elements(tx) => tx.txid().into(),
         }
     }
 
@@ -218,7 +214,7 @@ impl<'a> InputRef<'a> {
     pub(crate) fn previous_output(&self) -> elements::OutPoint {
         match self {
             InputRef::Bitcoin(input) => elements::OutPoint::new(
-                elements_txid(input.previous_output.txid),
+                crate::be::Txid::from(input.previous_output.txid).elements(),
                 input.previous_output.vout,
             ),
             InputRef::Elements(input) => input.previous_output,

@@ -62,7 +62,7 @@ impl Store for MemoryStore {
     fn update(
         &self,
         block_meta: &BlockMeta,
-        utxo_spent: Vec<(u32, elements::OutPoint, elements::Txid)>,
+        utxo_spent: Vec<(u32, elements::OutPoint, crate::be::Txid)>,
         history_map: std::collections::BTreeMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: std::collections::BTreeMap<elements::OutPoint, ScriptHash>,
     ) -> anyhow::Result<()> {

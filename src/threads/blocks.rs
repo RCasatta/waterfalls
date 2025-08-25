@@ -186,7 +186,7 @@ pub async fn index(
             for (j, output) in tx.outputs_iter().enumerate() {
                 if !output.skip_utxo() {
                     // We skip utxos only when we are sure they are not spendable.
-                    let out_point = OutPoint::new(txid, j as u32);
+                    let out_point = OutPoint::new(txid.elements(), j as u32);
                     utxo_created.insert(out_point, db.hash(b""));
                 }
                 if output.skip_indexing() {
@@ -196,7 +196,7 @@ pub async fn index(
                 let el = history_map.entry(script_hash).or_insert(vec![]);
                 el.push(TxSeen::new(txid, block_to_index.height, V::Vout(j as u32)));
 
-                let out_point = OutPoint::new(txid, j as u32);
+                let out_point = OutPoint::new(txid.elements(), j as u32);
                 log::debug!("inserting {out_point}");
                 utxo_created.insert(out_point, script_hash);
             }
