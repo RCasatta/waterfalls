@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use bitcoin::hashes::{sha256d, Hash};
 use minicbor::{bytes::ByteArray, Decoder, Encoder};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A transaction identifier.
 ///
@@ -49,6 +50,33 @@ impl minicbor::Decode<'_, ()> for Txid {
         Ok(Txid(sha256d::Hash::from_slice(bytes.as_slice()).map_err(
             |_| minicbor::decode::Error::message("invalid 32-byte hash"),
         )?))
+    }
+}
+
+impl Serialize for Txid {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if serializer.is_human_readable() {
+            serializer.serialize_str(&self.to_string())
+        } else {
+            panic!("Non-human readable serialization not implemented for Txid")
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Txid {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        if deserializer.is_human_readable() {
+            let s = String::deserialize(deserializer)?;
+            Txid::from_str(&s).map_err(serde::de::Error::custom)
+        } else {
+            panic!("Non-human readable deserialization not implemented for Txid")
+        }
     }
 }
 
@@ -133,5 +161,21 @@ mod tests {
         let our_txid_for_elements = Txid::from_str(txid_str).unwrap();
         let elements_txid = elements::Txid::from_str(txid_str).unwrap();
         assert_eq!(our_txid_for_elements.elements(), elements_txid);
+    }
+
+    #[test]
+    fn test_txid_serde_json() {
+        // Test with a specific txid string
+        let txid_str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+        let txid = Txid::from_str(txid_str).unwrap();
+
+        // Test serialization to JSON (human readable)
+        let json = serde_json::to_string(&txid).unwrap();
+        assert_eq!(json, format!("\"{}\"", txid_str));
+
+        // Test deserialization from JSON (human readable)
+        let deserialized_txid: Txid = serde_json::from_str(&json).unwrap();
+        assert_eq!(txid.0, deserialized_txid.0);
+        assert_eq!(txid.to_string(), deserialized_txid.to_string());
     }
 }
