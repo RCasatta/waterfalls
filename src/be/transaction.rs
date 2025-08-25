@@ -167,6 +167,13 @@ impl<'a> Iterator for InputIterator<'a> {
 }
 
 impl<'a> OutputRef<'a> {
+    pub(crate) fn skip_utxo(&self) -> bool {
+        match self {
+            OutputRef::Bitcoin(output) => output.script_pubkey.is_op_return(),
+            OutputRef::Elements(output) => output.is_null_data() || output.is_fee(),
+        }
+    }
+
     pub(crate) fn skip_indexing(&self) -> bool {
         match self {
             OutputRef::Bitcoin(output) => {

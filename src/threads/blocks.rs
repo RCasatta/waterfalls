@@ -184,13 +184,12 @@ pub async fn index(
             txs_count += 1;
             let txid = tx.txid();
             for (j, output) in tx.outputs_iter().enumerate() {
+                if !output.skip_utxo() {
+                    // We skip utxos only when we are sure they are not spendable.
+                    let out_point = OutPoint::new(txid, j as u32);
+                    utxo_created.insert(out_point, db.hash(b""));
+                }
                 if output.skip_indexing() {
-                    if output.script_pubkey_bytes().is_empty() {
-                        // while we don't want to index this, we need to add it to the UTXO set because an empty script is spendable.
-                        // see for example mainnet 4fb1ee7b2e8121baf400b4a947508b431c39d64e2192059ff482624ba58f01d2
-                        let out_point = OutPoint::new(txid, j as u32);
-                        utxo_created.insert(out_point, db.hash(b""));
-                    }
                     continue;
                 }
                 let script_hash = db.hash(output.script_pubkey_bytes());
