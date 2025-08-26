@@ -10,24 +10,42 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  tests:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build
     - name: Run tests
-      run: cargo test --lib --no-default-features --features test_env,db
+      run: cargo test --lib
+    - name: Download bitcoind 28.0
+      run: curl -sSL https://bitcoincore.org/bin/bitcoin-core-28.0/bitcoin-28.0-x86_64-linux-gnu.tar.gz | tar -xz
+    - name: Download elementsd 23.2.4
+      run: curl -sSL https://github.com/ElementsProject/elements/releases/download/elements-23.2.4/elements-23.2.4-x86_64-linux-gnu.tar.gz | tar -xz
+    - name: Run ignored tests
+      run: cargo test --lib -- --ignored
+      env:
+        BITCOIND_EXEC: ${{ github.workspace }}/bitcoin-28.0/bin/bitcoind
+        ELEMENTSD_EXEC: ${{ github.workspace }}/elements-23.2.4/bin/elementsd
+
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Check
+      run: cargo check
+    - name: Check benches
+      run: cargo check --benches
+    - name: Check tests
+      run: cargo check --tests
 
   nix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v25
-        with:
-          extra_nix_config: |
-            trusted-public-keys = nix.casatta.it:HseKZh7436/vKXfZDBHbhr7wwAkzjLwY5BIq+OOrITg= cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
-            substituters = https://nix.casatta.it https://cache.nixos.org/
-      - run: nix build .
+    - uses: actions/checkout@v4
+    - uses: cachix/install-nix-action@v25
+      with:
+        extra_nix_config: |
+          trusted-public-keys = nix.casatta.it:HseKZh7436/vKXfZDBHbhr7wwAkzjLwY5BIq+OOrITg= cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
+          substituters = https://nix.casatta.it https://cache.nixos.org/
+    - run: nix build .
