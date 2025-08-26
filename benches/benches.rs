@@ -13,13 +13,11 @@ use elements_miniscript::DescriptorPublicKey;
 use rocksdb::{Options, WriteBatch, DB};
 use tempfile;
 use waterfalls::WaterfallResponse;
-use waterfalls::WaterfallResponseV3;
 
 criterion_group!(
     benches,
     descriptor,
     encoding_decoding,
-    conversion,
     sign_verify,
     writebatch_sorting,
     hasher,
@@ -56,8 +54,8 @@ pub fn descriptor(c: &mut Criterion) {
 pub fn encoding_decoding(c: &mut Criterion) {
     c.benchmark_group("encoding")
         .bench_function("encode cbor", |b: &mut criterion::Bencher<'_>| {
-            let buffer = include_bytes!("../tests/data/waterfall_response_v3.cbor");
-            let resp: WaterfallResponseV3 = minicbor::decode(buffer).unwrap();
+            let buffer = include_bytes!("../tests/data/waterfall_response_v2.cbor");
+            let resp: WaterfallResponse = minicbor::decode(buffer).unwrap();
             b.iter(|| {
                 let mut buffer = vec![];
                 minicbor::encode(&resp, &mut buffer).unwrap();
@@ -65,24 +63,24 @@ pub fn encoding_decoding(c: &mut Criterion) {
             });
         })
         .bench_function("decode cbor", |b: &mut criterion::Bencher<'_>| {
-            let buffer = include_bytes!("../tests/data/waterfall_response_v3.cbor");
+            let buffer = include_bytes!("../tests/data/waterfall_response_v2.cbor");
             b.iter(|| {
-                let cbor: WaterfallResponseV3 = minicbor::decode(buffer).unwrap();
+                let cbor: WaterfallResponse = minicbor::decode(buffer).unwrap();
                 black_box(cbor);
             });
         })
         .bench_function("encode json", |b: &mut criterion::Bencher<'_>| {
-            let s = include_str!("../tests/data/waterfall_response_v3.json");
-            let resp: WaterfallResponseV3 = serde_json::from_str(s).unwrap();
+            let s = include_str!("../tests/data/waterfall_response_v2.json");
+            let resp: WaterfallResponse = serde_json::from_str(s).unwrap();
             b.iter(|| {
                 let s = serde_json::to_string(&resp).unwrap();
                 black_box(s);
             });
         })
         .bench_function("decode json", |b: &mut criterion::Bencher<'_>| {
-            let s = include_str!("../tests/data/waterfall_response_v3.json");
+            let s = include_str!("../tests/data/waterfall_response_v2.json");
             b.iter(|| {
-                let json: WaterfallResponseV3 = serde_json::from_str(s).unwrap();
+                let json: WaterfallResponse = serde_json::from_str(s).unwrap();
                 black_box(json);
             });
         })
@@ -173,26 +171,6 @@ pub fn encoding_decoding(c: &mut Criterion) {
                 });
             },
         );
-}
-
-pub fn conversion(c: &mut Criterion) {
-    c.benchmark_group("conversion")
-        .bench_function("v3 -> v2 ", |b: &mut criterion::Bencher<'_>| {
-            let buffer = include_bytes!("../tests/data/waterfall_response_v3.cbor");
-            let resp: WaterfallResponseV3 = minicbor::decode(buffer).unwrap();
-            b.iter(|| {
-                let resp_v2: WaterfallResponse = resp.clone().into();
-                black_box(resp_v2);
-            });
-        })
-        .bench_function("v2 -> v3 ", |b: &mut criterion::Bencher<'_>| {
-            let buffer = include_bytes!("../tests/data/waterfall_response_v2.cbor");
-            let resp: WaterfallResponse = minicbor::decode(buffer).unwrap();
-            b.iter(|| {
-                let resp_v3: WaterfallResponseV3 = resp.clone().try_into().unwrap();
-                black_box(resp_v3);
-            });
-        });
 }
 
 pub fn writebatch_sorting(c: &mut Criterion) {

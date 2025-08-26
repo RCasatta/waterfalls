@@ -131,6 +131,8 @@ curl 'https://waterfalls.liquidwebwallet.org/liquid/api/v1/waterfalls?descriptor
 
 ## Waterfalls response versioning
 
+** UPDATE v3 version removed **
+
 At the moment there are 3 versions for the `/waterfalls` endpoint and these are the differences between versions:
 
 v1 and v2 differs only for the fact that v2 includes the current tip of the blockchain for the server.

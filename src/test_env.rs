@@ -1,7 +1,7 @@
 use crate::{
     be::{self, Family},
     server::{inner_main, sign::p2pkh, Arguments, Network},
-    WaterfallResponse, WaterfallResponseV3,
+    WaterfallResponse,
 };
 use std::{
     error::Error,
@@ -375,9 +375,9 @@ impl WaterfallClient {
     ///
     /// it can accept the bitcoin descriptor part of the ct descriptor in plaintext
     /// or encrypted with the server key
-    pub async fn waterfalls(&self, desc: &str) -> anyhow::Result<(WaterfallResponseV3, HeaderMap)> {
+    pub async fn waterfalls(&self, desc: &str) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         // this code is duplicated from waterfalls_version but we need to use the v3 endpoint which return a different object
-        let descriptor_url = format!("{}/v3/waterfalls", self.base_url);
+        let descriptor_url = format!("{}/v2/waterfalls", self.base_url);
 
         let response = self
             .client
@@ -398,9 +398,9 @@ impl WaterfallClient {
     pub async fn waterfalls_addresses(
         &self,
         addressess: &[be::Address],
-    ) -> anyhow::Result<(WaterfallResponseV3, HeaderMap)> {
+    ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         // this code is duplicated from waterfalls_version but we need to use the v3 endpoint which return a different object
-        let descriptor_url = format!("{}/v3/waterfalls", self.base_url);
+        let descriptor_url = format!("{}/v2/waterfalls", self.base_url);
 
         let addresses_str = addressess
             .iter()

@@ -66,7 +66,6 @@ mod tests {
 
     use crate::BlockMeta;
     use crate::WaterfallResponse;
-    use crate::WaterfallResponseV3;
 
     #[test]
     fn test_encode_cbor() {
@@ -110,15 +109,6 @@ mod tests {
         assert_eq!(buffer.len(), 70);
         let test_decoded: Test = minicbor::decode(&buffer).unwrap();
         assert_eq!(test_decoded, test);
-
-        let s = include_str!("../tests/data/waterfall_response_v3.json");
-        assert_eq!(s.len(), 3029);
-        let resp: WaterfallResponseV3 = serde_json::from_str(&s).unwrap();
-        let mut buffer = vec![];
-        minicbor::encode(&resp, &mut buffer).unwrap();
-        assert_eq!(buffer.len(), 1529);
-        let resp_decoded: WaterfallResponseV3 = minicbor::decode(&buffer).unwrap();
-        assert_eq!(resp_decoded, resp);
 
         let s = include_str!("../tests/data/waterfall_response_v2.json");
         assert_eq!(s.len(), 8065);

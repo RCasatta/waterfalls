@@ -3,8 +3,7 @@ use crate::{
     fetch::Client,
     server::{derivation_cache::DerivationCache, sign::sign_response, Error, State},
     store::Store,
-    AddressesRequest, DescriptorRequest, Family, TxSeen, WaterfallRequest, WaterfallResponse,
-    WaterfallResponseV3, V,
+    AddressesRequest, DescriptorRequest, Family, TxSeen, WaterfallRequest, WaterfallResponse, V,
 };
 use age::x25519::Identity;
 use elements::BlockHash;
@@ -59,7 +58,7 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, false, false, false).await
+            handle_waterfalls_req(state, inputs, false, false).await
         }
         (&Method::GET, "/v2/waterfalls", Some(query)) => {
             let inputs = parse_query(
@@ -69,17 +68,10 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, true, false, false).await
+            handle_waterfalls_req(state, inputs, true, false).await
         }
-        (&Method::GET, "/v3/waterfalls", Some(query)) => {
-            let inputs = parse_query(
-                query,
-                &state.key,
-                is_testnet_or_regtest,
-                state.max_addresses,
-                network,
-            )?;
-            handle_waterfalls_req(state, inputs, true, true, false).await
+        (&Method::GET, "/v3/waterfalls", Some(_)) => {
+            str_resp("v3 endpoint removed".to_string(), StatusCode::NOT_FOUND)
         }
         (&Method::GET, "/v1/waterfalls.cbor", Some(query)) => {
             let inputs = parse_query(
@@ -89,7 +81,7 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, false, false, true).await
+            handle_waterfalls_req(state, inputs, false, true).await
         }
         (&Method::GET, "/v2/waterfalls.cbor", Some(query)) => {
             let inputs = parse_query(
@@ -99,17 +91,10 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, true, false, true).await
+            handle_waterfalls_req(state, inputs, true, true).await
         }
-        (&Method::GET, "/v3/waterfalls.cbor", Some(query)) => {
-            let inputs = parse_query(
-                query,
-                &state.key,
-                is_testnet_or_regtest,
-                state.max_addresses,
-                network,
-            )?;
-            handle_waterfalls_req(state, inputs, true, true, true).await
+        (&Method::GET, "/v3/waterfalls.cbor", Some(_)) => {
+            str_resp("v3 endpoint removed".to_string(), StatusCode::NOT_FOUND)
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {
             // this method return the seconds since last block
@@ -419,7 +404,6 @@ async fn handle_waterfalls_req(
     state: &Arc<State>,
     inputs: WaterfallRequest,
     with_tip: bool,
-    v3: bool,
     cbor: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
     let db = &state.store;
@@ -535,20 +519,7 @@ async fn handle_waterfalls_req(
     } else {
         "application/json"
     };
-    let result = if v3 {
-        let waterfall_response_v3: WaterfallResponseV3 =
-            waterfall_response.try_into().expect("has tip");
-        if cbor {
-            let mut bytes = Vec::new();
-            minicbor::encode(&waterfall_response_v3, &mut bytes).unwrap();
-            bytes
-        } else {
-            serde_json::to_string(&waterfall_response_v3)
-                .expect("does not contain a map with non-string keys")
-                .as_bytes()
-                .to_vec()
-        }
-    } else if cbor {
+    let result = if cbor {
         let mut bytes = Vec::new();
         minicbor::encode(&waterfall_response, &mut bytes).unwrap();
         bytes
