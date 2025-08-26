@@ -242,7 +242,7 @@ pub fn writebatch_sorting(c: &mut Criterion) {
                         batch.put(&key, value);
                     }
                     let result = db.write(batch);
-                    black_box(result);
+                    let _ = black_box(result);
                 },
                 criterion::BatchSize::SmallInput,
             )
@@ -267,7 +267,7 @@ pub fn writebatch_sorting(c: &mut Criterion) {
                         batch.put(&key, value);
                     }
                     let result = db.write(batch);
-                    black_box(result);
+                    let _ = black_box(result);
                 },
                 criterion::BatchSize::SmallInput,
             )
@@ -358,39 +358,47 @@ pub fn txid_from_hex(c: &mut Criterion) {
 
     c.benchmark_group("txid_from_hex")
         .bench_function(
-            "waterfalls::be::Txid from hex",
+            "bitcoin::Txid from hex",
             |b: &mut criterion::Bencher<'_>| {
                 b.iter(|| {
                     let bitcoin_txid: bitcoin::Txid = hex_str.parse().unwrap();
                     let txid = waterfalls::be::Txid::from(bitcoin_txid);
-                    black_box(txid);
+                    let _ = black_box(txid);
                 });
             },
         )
         .bench_function(
-            "waterfalls::be::Txid from array",
+            "waterfalls::be::Txid from hex",
             |b: &mut criterion::Bencher<'_>| {
                 b.iter(|| {
-                    // use hex library to decode directly into a byte array [u8; 32]
+                    let txid: waterfalls::be::Txid = hex_str.parse().unwrap();
+                    let _ = black_box(txid);
+                });
+            },
+        )
+        .bench_function(
+            "waterfalls::be::Txid from array crate hex",
+            |b: &mut criterion::Bencher<'_>| {
+                b.iter(|| {
                     let mut array = [0u8; 32];
                     hex::decode_to_slice(hex_str, &mut array).unwrap();
-                    // use Txid::from_array to create the txid
+                    array.reverse();
                     let txid = waterfalls::be::Txid::from_array(array);
-                    black_box(txid);
+                    let _ = black_box(txid);
                 });
             },
         )
         .bench_function(
-            "waterfalls::be::Txid from array hex-simd",
+            "waterfalls::be::Txid from array crate hex-simd",
             |b: &mut criterion::Bencher<'_>| {
                 b.iter(|| {
-                    // use hex-simd library to decode directly into a byte array [u8; 32]
                     let mut array = [0u8; 32];
                     hex_simd::decode(hex_str.as_bytes(), hex_simd::AsOut::as_out(&mut array[..]))
                         .unwrap();
+                    array.reverse();
                     // use Txid::from_array to create the txid
                     let txid = waterfalls::be::Txid::from_array(array);
-                    black_box(txid);
+                    let _ = black_box(txid);
                 });
             },
         );

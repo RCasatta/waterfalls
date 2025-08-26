@@ -71,7 +71,21 @@ impl FromStr for Txid {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Txid(sha256d::Hash::from_str(s)?))
+        if s.len() != 64 {
+            return Err(anyhow::anyhow!(
+                "Invalid txid length: expected 64 characters, got {}",
+                s.len()
+            ));
+        }
+
+        let mut array = [0u8; 32];
+        hex_simd::decode(s.as_bytes(), hex_simd::AsOut::as_out(&mut array[..]))
+            .map_err(|e| anyhow::anyhow!("Failed to decode hex string: {}", e))?;
+
+        // Bitcoin/Elements TXIDs are displayed in reverse byte order
+        array.reverse();
+
+        Ok(Self::from_array(array))
     }
 }
 

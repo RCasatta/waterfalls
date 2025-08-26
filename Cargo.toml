@@ -49,6 +49,7 @@ minicbor = { version = "0.23", default-features = false, features = [
 ] }
 prefix_uvarint = "0.6.1"
 lrumap = "0.1.0"
+hex-simd = "0.8.0"
 
 
 [dev-dependencies]
@@ -56,7 +57,6 @@ criterion = "0.5.1"
 tempfile = "3.10.1"
 lwk_wollet = { version = "0.10.0", features = ["test_wallet"] }
 lwk_common = { version = "0.10.0" }
-hex-simd = "0.8.0"
 
 [features]
 default = ["test_env", "db", "local_exec"]
