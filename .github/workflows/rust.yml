@@ -18,17 +18,17 @@ jobs:
       uses: Swatinem/rust-cache@v2
     - name: Build
       run: cargo build
-    - name: Run tests
-      run: cargo test --lib
     - name: Download bitcoind 28.0
       run: curl -sSL https://bitcoincore.org/bin/bitcoin-core-28.0/bitcoin-28.0-x86_64-linux-gnu.tar.gz | tar -xz
     - name: Download elementsd 23.2.4
       run: curl -sSL https://github.com/ElementsProject/elements/releases/download/elements-23.2.4/elements-23.2.4-x86_64-linux-gnu.tar.gz | tar -xz
+    - name: Run tests
+      run: cargo test --lib
     - name: Run ignored tests
       run: cargo test --lib -- --ignored
-      env:
-        BITCOIND_EXEC: ${{ github.workspace }}/bitcoin-28.0/bin/bitcoind
-        ELEMENTSD_EXEC: ${{ github.workspace }}/elements-23.2.4/bin/elementsd
+    env:
+      BITCOIND_EXEC: ${{ github.workspace }}/bitcoin-28.0/bin/bitcoind
+      ELEMENTSD_EXEC: ${{ github.workspace }}/elements-23.2.4/bin/elementsd
 
   checks:
     runs-on: ubuntu-latest
