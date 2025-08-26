@@ -15,7 +15,7 @@ use age::x25519::{Identity, Recipient};
 use anyhow::{bail, Context};
 use bitcoin::{key::Secp256k1, secp256k1::All, NetworkKind, PrivateKey};
 use bitcoind::{
-    bitcoincore_rpc::{bitcoin::hex::FromHex, Client, RpcApi},
+    bitcoincore_rpc::{Client, RpcApi},
     get_available_port, BitcoinD, Conf,
 };
 use elements::{
@@ -287,7 +287,7 @@ impl<'a> TestEnv<'a> {
             )
             .unwrap();
         let tx_hex = val.as_str().unwrap();
-        let bytes = Vec::<u8>::from_hex(tx_hex).unwrap();
+        let bytes = hex_simd::decode_to_vec(tx_hex.as_bytes()).unwrap();
         elements::Transaction::consensus_decode(&bytes[..]).unwrap()
     }
 

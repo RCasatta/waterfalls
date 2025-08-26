@@ -1,5 +1,3 @@
-use elements::hex::FromHex;
-
 use crate::{be, Family};
 
 #[derive(Debug)]
@@ -93,7 +91,7 @@ impl Transaction {
     }
 
     pub(crate) fn from_str(tx_hex: &str, family: be::Family) -> Result<Self, anyhow::Error> {
-        let bytes = Vec::<u8>::from_hex(tx_hex).unwrap();
+        let bytes = hex_simd::decode_to_vec(tx_hex.as_bytes())?;
         Self::from_bytes(&bytes, family)
     }
 }

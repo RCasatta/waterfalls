@@ -1,6 +1,5 @@
 use crate::be::block::elements_block_hash;
 use crate::{be, Family};
-use elements::hex::FromHex;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockHeader {
@@ -59,7 +58,7 @@ impl BlockHeader {
     }
 
     pub(crate) fn from_str(header_hex: &str, family: be::Family) -> Result<Self, anyhow::Error> {
-        let bytes = Vec::<u8>::from_hex(header_hex).unwrap();
+        let bytes = hex_simd::decode_to_vec(header_hex.as_bytes())?;
         Self::from_bytes(&bytes, family)
     }
 }

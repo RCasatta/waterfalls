@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use bitcoin::hex::FromHex;
 use elements::{encode::Decodable, BlockHash};
 use hyper::StatusCode;
 use serde::Deserialize;
@@ -262,7 +261,7 @@ impl Client {
                 Family::Bitcoin => {
                     let bytes = if self.use_esplora {
                         let text = resp.text().await?;
-                        Vec::<u8>::from_hex(&text)
+                        hex_simd::decode_to_vec(text.as_bytes())
                             .map_err(|_| anyhow!("failing converting {text} to bytes"))?
                     } else {
                         resp.bytes().await?.to_vec()
@@ -276,7 +275,7 @@ impl Client {
                 Family::Elements => {
                     let bytes = if self.use_esplora {
                         let text = resp.text().await?;
-                        Vec::<u8>::from_hex(&text)
+                        hex_simd::decode_to_vec(text.as_bytes())
                             .map_err(|_| anyhow!("failing converting {text} to bytes"))?
                     } else {
                         resp.bytes().await?.to_vec()
