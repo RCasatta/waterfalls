@@ -3838,7 +3838,6 @@ dependencies = [
  "env_logger",
  "form_urlencoded",
  "fxhash",
- "hex",
  "hex-simd",
  "http-body-util",
  "hyper",

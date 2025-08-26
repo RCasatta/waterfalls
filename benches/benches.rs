@@ -377,18 +377,6 @@ pub fn txid_from_hex(c: &mut Criterion) {
             },
         )
         .bench_function(
-            "waterfalls::be::Txid from array crate hex",
-            |b: &mut criterion::Bencher<'_>| {
-                b.iter(|| {
-                    let mut array = [0u8; 32];
-                    hex::decode_to_slice(hex_str, &mut array).unwrap();
-                    array.reverse();
-                    let txid = waterfalls::be::Txid::from_array(array);
-                    let _ = black_box(txid);
-                });
-            },
-        )
-        .bench_function(
             "waterfalls::be::Txid from array crate hex-simd",
             |b: &mut criterion::Bencher<'_>| {
                 b.iter(|| {
