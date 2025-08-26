@@ -23,9 +23,9 @@ jobs:
     - name: Download elementsd 23.2.4
       run: curl -sSL https://github.com/ElementsProject/elements/releases/download/elements-23.2.4/elements-23.2.4-x86_64-linux-gnu.tar.gz | tar -xz
     - name: Run tests
-      run: cargo test --lib
+      run: cargo test
     - name: Run ignored tests
-      run: cargo test --lib -- --ignored
+      run: cargo test -- --ignored
     env:
       BITCOIND_EXEC: ${{ github.workspace }}/bitcoin-28.0/bin/bitcoind
       ELEMENTSD_EXEC: ${{ github.workspace }}/elements-23.2.4/bin/elementsd
