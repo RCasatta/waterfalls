@@ -22,7 +22,8 @@ criterion_group!(
     conversion,
     sign_verify,
     writebatch_sorting,
-    hasher
+    hasher,
+    txid_from_hex
 );
 criterion_main!(benches);
 
@@ -346,6 +347,50 @@ pub fn hasher(c: &mut Criterion) {
                     waterfalls_txid.hash(&mut hasher);
                     let hash_result = hasher.finish();
                     black_box(hash_result);
+                });
+            },
+        );
+}
+
+pub fn txid_from_hex(c: &mut Criterion) {
+    // Test hex string (64 chars representing 32 bytes)
+    let hex_str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    c.benchmark_group("txid_from_hex")
+        .bench_function(
+            "waterfalls::be::Txid from hex",
+            |b: &mut criterion::Bencher<'_>| {
+                b.iter(|| {
+                    let bitcoin_txid: bitcoin::Txid = hex_str.parse().unwrap();
+                    let txid = waterfalls::be::Txid::from(bitcoin_txid);
+                    black_box(txid);
+                });
+            },
+        )
+        .bench_function(
+            "waterfalls::be::Txid from array",
+            |b: &mut criterion::Bencher<'_>| {
+                b.iter(|| {
+                    // use hex library to decode directly into a byte array [u8; 32]
+                    let mut array = [0u8; 32];
+                    hex::decode_to_slice(hex_str, &mut array).unwrap();
+                    // use Txid::from_array to create the txid
+                    let txid = waterfalls::be::Txid::from_array(array);
+                    black_box(txid);
+                });
+            },
+        )
+        .bench_function(
+            "waterfalls::be::Txid from array hex-simd",
+            |b: &mut criterion::Bencher<'_>| {
+                b.iter(|| {
+                    // use hex-simd library to decode directly into a byte array [u8; 32]
+                    let mut array = [0u8; 32];
+                    hex_simd::decode(hex_str.as_bytes(), hex_simd::AsOut::as_out(&mut array[..]))
+                        .unwrap();
+                    // use Txid::from_array to create the txid
+                    let txid = waterfalls::be::Txid::from_array(array);
+                    black_box(txid);
                 });
             },
         );
