@@ -327,8 +327,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
     assert!(true);
 }
 
-#[ignore = "Test to examine the log manually"]
-#[cfg(feature = "test_env")]
+#[cfg(feature = "examine_logs")]
 #[tokio::test]
 async fn test_no_rest() {
     use waterfalls::Family;
@@ -355,8 +354,7 @@ async fn test_no_rest() {
         waterfalls::test_env::launch_with_node(&elementsd, None, Family::Elements).await;
 }
 
-#[ignore = "Test to examine the log manually"]
-#[cfg(feature = "test_env")]
+#[cfg(feature = "examine_logs")]
 #[tokio::test]
 async fn test_no_txindex() {
     use std::str::FromStr;
@@ -659,7 +657,7 @@ async fn test_lwk_wollet_mainnet() {
 }
 
 #[tokio::test]
-#[ignore = "requires internet and testnet deployment"]
+#[cfg(feature = "bench_test")]
 async fn test_lwk_wollet_huge_testnet() {
     let _ = env_logger::try_init();
     // full history is 6442 txs
@@ -743,6 +741,7 @@ async fn wollet_scan(
     panic!("No update found in 10 seconds");
 }
 
+#[cfg(feature = "bench_test")]
 #[derive(Debug)]
 struct TestResult {
     txs: usize,
@@ -753,6 +752,7 @@ struct TestResult {
     second_scan_requests: usize,
 }
 
+#[cfg(feature = "bench_test")]
 impl TestResult {
     fn md_row(&self) -> String {
         let first_duration = format!("{:.3}s", self.first_scan.as_secs_f64());
@@ -769,6 +769,7 @@ impl TestResult {
     }
 }
 
+#[cfg(feature = "bench_test")]
 async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> Vec<TestResult> {
     use lwk_wollet::{clients, ElementsNetwork, Wollet, WolletDescriptor};
     use std::str::FromStr;
@@ -834,7 +835,7 @@ async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> Vec<TestResult> 
 }
 
 #[tokio::test]
-#[ignore = "requires internet and testnet deployment"]
+#[cfg(feature = "bench_test")]
 async fn test_waterfalls_vs_esplora_performance() {
     let mut all_results = vec![];
 

@@ -149,6 +149,16 @@ We suggest new implementation to use v2 endpoint.
 
 Rocksdb may open a lot of files, it's suggested to raise file limits to avoid incurring in the "Too many open files" error.
 
+## Rules for tests
+
+1) Every test run with `cargo test --lib` should run in under a second and not require internet to be executed.
+
+2) Every test not respecting rule 1 must be marked with ignored
+
+3) CI must run ignored tests
+
+4) Every test with other special requirements like requiring a synced node, or performing very long bench, or requiring to manual inspect logs must be feature gated (`synced_node`, `bench_test`, `examine_logs`) on a feature not active by default.
+
 ## ADR
 
 * The endpoint is GET, allowing requests to be cached for a minimum amount of time (even 5s) to prevent DOS. It's possible to encrypt the descriptor with the server key. The server is going to know it anyway, but it's a measure to minimize the probability to have it in server and browser logs.

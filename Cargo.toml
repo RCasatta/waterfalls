@@ -58,10 +58,15 @@ lwk_wollet = { version = "0.10.0", features = ["test_wallet"] }
 lwk_common = { version = "0.10.0" }
 
 [features]
-default = ["test_env", "db", "local_exec"]
+default = ["test_env", "db"]
 db = ["rocksdb"]
 test_env = ["bitcoind"]
-local_exec = []
+
+# tests that require a locally running synced node, or taking very long time to run like the one
+# creating the benchmark table in the readme or the one inspecting logs
+synced_node = []
+bench_test = []
+examine_logs = []
 
 [patch.crates-io]
 lwk_wollet = { git = "https://github.com/blockstream/lwk", rev = "ba7eaf71e7be497abaf3f3b88003c9e639f145a3" }

@@ -497,7 +497,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[cfg_attr(not(feature = "local_exec"), ignore = "skipped in CI")]
     async fn test_client_local_regtest_elements() {
         let elementsd = test_env::launch_elements(
             std::env::var("ELEMENTSD_EXEC").expect("ELEMENTSD_EXEC must be set"),
@@ -511,27 +510,27 @@ mod test {
     }
 
     #[tokio::test]
-    #[cfg(feature = "local_exec")]
+    #[cfg(feature = "synced_node")]
     async fn test_client_local_liquid() {
         let client = init_client(Network::Liquid);
         test(client, Network::Liquid).await;
     }
 
     #[tokio::test]
-    #[cfg(feature = "local_exec")]
+    #[cfg(feature = "synced_node")]
     async fn test_client_local_liquid_testnet() {
         let client = init_client(Network::LiquidTestnet);
         test(client, Network::LiquidTestnet).await;
     }
 
     #[tokio::test]
-    #[cfg(feature = "local_exec")]
+    #[cfg(feature = "synced_node")]
     async fn test_client_local_bitcoin() {
         let client = init_client(Network::Bitcoin);
         test(client, Network::Bitcoin).await;
     }
 
-    #[cfg(feature = "local_exec")]
+    #[cfg(feature = "synced_node")]
     fn init_client(network: Network) -> Client {
         let mut args = Arguments::default();
         args.use_esplora = false;
@@ -540,7 +539,6 @@ mod test {
     }
 
     #[tokio::test]
-    #[cfg_attr(not(feature = "local_exec"), ignore = "skipped in CI")]
     async fn test_client_local_regtest_bitcoin() {
         let _ = env_logger::try_init();
         let bitcoind = test_env::launch_bitcoin(
