@@ -511,26 +511,27 @@ mod test {
     }
 
     #[tokio::test]
-    #[ignore = "connects to local node instance"]
+    #[cfg(feature = "local_exec")]
     async fn test_client_local_liquid() {
         let client = init_client(Network::Liquid);
         test(client, Network::Liquid).await;
     }
 
     #[tokio::test]
-    #[ignore = "connects to local node instance"]
+    #[cfg(feature = "local_exec")]
     async fn test_client_local_liquid_testnet() {
         let client = init_client(Network::LiquidTestnet);
         test(client, Network::LiquidTestnet).await;
     }
 
     #[tokio::test]
-    #[ignore = "connects to local node instance"]
+    #[cfg(feature = "local_exec")]
     async fn test_client_local_bitcoin() {
         let client = init_client(Network::Bitcoin);
         test(client, Network::Bitcoin).await;
     }
 
+    #[cfg(feature = "local_exec")]
     fn init_client(network: Network) -> Client {
         let mut args = Arguments::default();
         args.use_esplora = false;
