@@ -144,8 +144,8 @@ impl Mempool {
         result
     }
 
-    pub(crate) fn txids(&self) -> HashSet<crate::be::Txid> {
-        self.txid_hashes.keys().cloned().collect()
+    pub(crate) fn txids_iter(&self) -> impl Iterator<Item = crate::be::Txid> + '_ {
+        self.txid_hashes.keys().cloned()
     }
 }
 
