@@ -208,7 +208,21 @@ impl Client {
             }
 
             let text = resp.text().await?;
-            let mut header: Vec<HeaderJson> = serde_json::from_str(&text)?;
+            let mut header: Vec<HeaderJson> = if self.use_esplora {
+                let value: serde_json::Value = serde_json::from_str(&text)
+                    .with_context(|| format!("failing converting {text} to Value"))?;
+                let nextblockhash = value
+                    .get("next_best")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| BlockHash::from_str(s).ok());
+                vec![HeaderJson {
+                    hash,
+                    nextblockhash,
+                }]
+            } else {
+                serde_json::from_str(&text)
+                    .with_context(|| format!("failing converting {text} to Vec<HeaderJson>"))?
+            };
             let header = match header.pop() {
                 Some(header) => header,
                 None => {
@@ -632,6 +646,31 @@ mod test {
             .unwrap()
             .unwrap();
         assert_eq!(header_json.hash, genesis_hash);
-        assert_eq!(header_json.nextblockhash, None); // TODO in anoter test with blocks assert where it's Some
+        match network {
+            Network::Bitcoin => {
+                let block_1 = "00000000839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048";
+                assert_eq!(
+                    header_json.nextblockhash,
+                    Some(BlockHash::from_str(block_1).unwrap())
+                );
+            }
+            Network::Liquid => {
+                let block_1 = "afafbbdfc52a45e51a3b634f391f952f6bdfd14ef74b34925954b4e20d0ad639";
+                assert_eq!(
+                    header_json.nextblockhash,
+                    Some(BlockHash::from_str(block_1).unwrap())
+                );
+            }
+            Network::LiquidTestnet => {
+                let block_1 = "f1fedb4e9f09f0e30181432379aa33b60fa044165f951be58614e614b9f884ca";
+                assert_eq!(
+                    header_json.nextblockhash,
+                    Some(BlockHash::from_str(block_1).unwrap())
+                );
+            }
+            _ => {
+                assert_eq!(header_json.nextblockhash, None, "network:{network}");
+            }
+        }
     }
 }
