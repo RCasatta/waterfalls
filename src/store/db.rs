@@ -765,40 +765,6 @@ mod test {
     }
 
     #[test]
-    #[ignore = "cannot do anymore after varint, generate random valid txseen and do the roundtrip instead"]
-    fn test_vec_tx_seen_round_trip() {
-        use bitcoin::key::rand::Rng;
-
-        let mut rng = bitcoin::key::rand::thread_rng();
-        let max_tests = 500; // Sensible number of tests
-
-        for _ in 0..max_tests {
-            let random_length = rng.gen_range(0..1000);
-            // Generate random bytes
-            let mut random_bytes = vec![0u8; random_length];
-            random_bytes.fill_with(|| rng.gen());
-
-            // Try to parse the random bytes
-            match vec_tx_seen_from_be_bytes(&random_bytes) {
-                Ok(parsed_tx_seen) => {
-                    // If parsing succeeded, reserialize and verify round-trip
-                    let reserialized = vec_tx_seen_to_be_bytes(&parsed_tx_seen);
-                    assert_eq!(
-                        random_bytes,
-                        reserialized,
-                        "Round-trip serialization failed for {} TxSeen entries",
-                        parsed_tx_seen.len()
-                    );
-                }
-                Err(_) => {
-                    // Parsing failed, which is expected for random data
-                    // This is fine - we're testing that valid data round-trips correctly
-                }
-            }
-        }
-    }
-
-    #[test]
     fn test_static_txseen_round_trip() {
         let txseen = TxSeen::new(crate::be::Txid::all_zeros(), 0, V::Undefined);
         let txs = vec![txseen.clone()];
