@@ -16,6 +16,7 @@ pub enum AnyStore {
 impl AnyStore {
     pub(crate) fn stats(&self) -> Option<String> {
         match self {
+            #[cfg(feature = "db")]
             AnyStore::Db(dbstore) => dbstore.stats(),
             AnyStore::Mem(_) => None,
         }
