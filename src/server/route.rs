@@ -223,7 +223,27 @@ pub async fn route(
 
         _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),
     };
-    log::debug!("<--- {res:?}");
+
+    if log::log_enabled!(log::Level::Debug) {
+        match res.as_ref() {
+            Ok(res) => {
+                let headers = format!("{:?}", res.headers());
+                let contains_binary = headers.contains("application/octet-stream");
+                if contains_binary {
+                    log::debug!(
+                        "<--- status:{} headers:{} body: binary",
+                        res.status(),
+                        headers,
+                    );
+                } else {
+                    log::debug!("<--- {:?}", res);
+                };
+            }
+            Err(e) => {
+                log::debug!("<--- {e:?}");
+            }
+        }
+    }
     res
 }
 
