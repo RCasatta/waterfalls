@@ -538,7 +538,7 @@ async fn handle_waterfalls_req(
     let m = m.to_msg_sig_address(state.address());
 
     log::info!(
-        "{id:x} returning: {elements} elements, elapsed: {:.2?} (of which {:.2?} for derivations)",
+        "{id:x}: {elements} elements, elapsed: {:.2?} ({:.2?} derivations)",
         start.elapsed(),
         derivations_duration
     );
