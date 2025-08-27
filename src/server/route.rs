@@ -534,9 +534,9 @@ async fn handle_waterfalls_req(
     let m = m.to_msg_sig_address(state.address());
 
     log::info!(
-        "returning: {elements} elements, elapsed: {}ms (of which {}ms for derivations)",
-        start.elapsed().as_millis(),
-        derivations_duration.as_millis()
+        "returning: {elements} elements, elapsed: {:.2?} (of which {:.2?} for derivations)",
+        start.elapsed(),
+        derivations_duration
     );
     crate::WATERFALLS_COUNTER.inc();
     timer.observe_duration();
