@@ -17,6 +17,7 @@ use prometheus::Encoder;
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -418,6 +419,7 @@ async fn handle_waterfalls_req(
 
     let mut map = BTreeMap::new();
     let mut utxo_only_req = false;
+    let id;
 
     match inputs {
         WaterfallRequest::Descriptor(DescriptorRequest {
@@ -426,6 +428,7 @@ async fn handle_waterfalls_req(
             to_index,
             utxo_only,
         }) => {
+            id = string_hash(&descriptor.to_string());
             utxo_only_req = utxo_only;
             for desc in descriptor.into_single_descriptors().unwrap().iter() {
                 let desc_str = desc.to_string();
@@ -469,6 +472,7 @@ async fn handle_waterfalls_req(
             }
         }
         WaterfallRequest::Addresses(AddressesRequest { addresses, page: _ }) => {
+            id = string_hash(&format!("{:?}", addresses));
             let mut scripts = Vec::with_capacity(addresses.len());
             for addr in addresses.iter() {
                 scripts.push(db.hash(addr.script_pubkey().as_bytes()));
@@ -534,7 +538,7 @@ async fn handle_waterfalls_req(
     let m = m.to_msg_sig_address(state.address());
 
     log::info!(
-        "returning: {elements} elements, elapsed: {:.2?} (of which {:.2?} for derivations)",
+        "{id:x} returning: {elements} elements, elapsed: {:.2?} (of which {:.2?} for derivations)",
         start.elapsed(),
         derivations_duration
     );
@@ -644,6 +648,12 @@ pub async fn infallible_route(
     }
 
     Ok(response)
+}
+
+fn string_hash(s: &str) -> u64 {
+    let mut hasher = DefaultHasher::default();
+    s.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[cfg(test)]
