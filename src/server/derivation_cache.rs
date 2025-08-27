@@ -65,9 +65,3 @@ impl DerivationCache {
         hasher.finish()
     }
 }
-
-pub fn string_hash(s: &str) -> u64 {
-    let mut hasher = DefaultHasher::default();
-    s.hash(&mut hasher);
-    hasher.finish()
-}

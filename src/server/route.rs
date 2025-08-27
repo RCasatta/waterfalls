@@ -429,6 +429,9 @@ async fn handle_waterfalls_req(
             utxo_only,
         }) => {
             id = string_hash(&descriptor.to_string());
+            if page != 0 || to_index != 0 || utxo_only {
+                log::info!("{id:x}: page={page}, to_index={to_index}, utxo_only={utxo_only}");
+            }
             utxo_only_req = utxo_only;
             for desc in descriptor.into_single_descriptors().unwrap().iter() {
                 let desc_str = desc.to_string();
