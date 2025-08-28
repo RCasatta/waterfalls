@@ -113,6 +113,10 @@ pub struct Arguments {
     /// Enable RocksDB statistics collection for detailed metrics
     #[arg(env, long)]
     pub enable_db_statistics: bool,
+
+    /// Cache control duration in seconds for waterfalls endpoints. Set to 0 to disable cache control headers.
+    #[arg(env, long, default_value = "5")]
+    pub cache_control_seconds: u32,
 }
 
 impl Arguments {
@@ -285,6 +289,7 @@ pub async fn inner_main(
         key,
         wif_key,
         args.max_addresses,
+        args.cache_control_seconds,
         args.derivation_cache_capacity,
     )?);
 

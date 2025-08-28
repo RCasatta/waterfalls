@@ -27,6 +27,8 @@ pub struct State {
 
     pub max_addresses: usize,
 
+    pub cache_control_seconds: u32,
+
     pub derivation_cache: Mutex<DerivationCache>,
 }
 
@@ -36,6 +38,7 @@ impl State {
         key: Identity,
         wif_key: PrivateKey,
         max_addresses: usize,
+        cache_control_seconds: u32,
         derivation_cache_capacity: usize,
     ) -> Result<Self, Error> {
         Ok(State {
@@ -46,6 +49,7 @@ impl State {
             blocks_hash_ts: Mutex::new(Vec::new()),
             secp: bitcoin::key::Secp256k1::new(),
             max_addresses,
+            cache_control_seconds,
             derivation_cache: Mutex::new(DerivationCache::new(derivation_cache_capacity)),
         })
     }

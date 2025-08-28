@@ -163,7 +163,13 @@ pub async fn route(
             encoder
                 .encode(&metric_families, &mut buffer)
                 .map_err(|e| Error::String(format!("{e:?}")))?;
-            any_resp(buffer, StatusCode::OK, Some("text/plain"), Some(5), None)
+            any_resp(
+                buffer,
+                StatusCode::OK,
+                Some("text/plain"),
+                Some(state.cache_control_seconds),
+                None,
+            )
         }
         (&Method::GET, path, None) => {
             let mut s = path.split('/');
@@ -340,8 +346,13 @@ fn any_resp(
     if let Some(content) = content {
         builder = builder.header(CONTENT_TYPE, content)
     }
-    let cache = cache.unwrap_or(5);
-    builder = builder.header(CACHE_CONTROL, format!("public, max-age={cache}"));
+
+    // Only add cache control header if cache is Some and not 0
+    if let Some(cache_value) = cache {
+        if cache_value > 0 {
+            builder = builder.header(CACHE_CONTROL, format!("public, max-age={cache_value}"));
+        }
+    }
 
     if let Some(msg_sig_adr) = msg_sig_adr {
         builder = builder.header("X-Content-Signature", msg_sig_adr.signature.to_string());
@@ -416,7 +427,7 @@ async fn handle_single_address(
         result.into_bytes(),
         hyper::StatusCode::OK,
         Some("application/json"),
-        Some(5),
+        Some(state.cache_control_seconds),
         None,
     )
 }
@@ -572,7 +583,7 @@ async fn handle_waterfalls_req(
         result,
         hyper::StatusCode::OK,
         Some(content),
-        Some(5),
+        Some(state.cache_control_seconds),
         Some(m),
     )
 }
