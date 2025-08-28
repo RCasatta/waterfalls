@@ -73,6 +73,7 @@ async fn inner_launch_with_node(node: &BitcoinD, path: Option<PathBuf>, family: 
     let mut args = Arguments {
         node_url: Some(node.rpc_url()),
         derivation_cache_capacity: 10000,
+        cache_control_seconds: 0,
         ..Default::default()
     };
     let available_port = get_available_port().unwrap();
