@@ -6,6 +6,43 @@ It also has an UTXO-only mode to allow wallets to know their balance and being a
 
 ## Comparison
 
+### Protocol Architecture Difference
+
+The fundamental difference between Waterfalls and traditional electrum  or esplora protocol based projects lies in how they handle address derivation and data fetching:
+
+```mermaid
+sequenceDiagram
+    participant C1 as Electrum/Esplora Client
+    participant S1 as Electrum/Esplora Server
+    participant C2 as Waterfalls Client  
+    participant S2 as Waterfalls Server
+
+    Note over C1, S1: Traditional Electrum/Esplora Protocol
+    C1->>C1: Derive address 1 from descriptor
+    C1->>S1: Request history for address 1
+    S1->>C1: Return history for address 1
+    C1->>C1: Derive address 2 from descriptor
+    C1->>S1: Request history for address 2
+    S1->>C1: Return history for address 2
+    C1->>C1: Derive address 3 from descriptor
+    C1->>S1: Request history for address 3
+    S1->>C1: Return history for address 3
+    Note over C1, S1: ...continues for each address (N roundtrips)
+
+    Note over C2, S2: Waterfalls Protocol  
+    C2->>S2: Send descriptor + scan parameters
+    S2->>S2: Derive all addresses from descriptor<br/>Fetch history for all addresses
+    S2->>C2: Return complete wallet history<br/>(1 roundtrip)
+```
+
+**Electrum Protocol**: Client calculates addresses locally and makes individual requests for each address, resulting in many network roundtrips.
+
+**Waterfalls Protocol**: Client sends the descriptor to the server, which derives all needed addresses server-side and returns the complete wallet history in a single response.
+
+Note: in both cases wallet history refer to txids in both cases the client must ask for transactions if they aren't already cached.
+
+### Performance Comparison
+
 We are going to compare the waterfalls scan against the traditional scan using the Esplora API using LWK full_scan.
 The measures are calculated using a test in this repository:
 
