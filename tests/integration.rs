@@ -54,7 +54,7 @@ async fn integration_db_bitcoin() {
 }
 
 #[cfg(all(feature = "test_env", feature = "db"))]
-async fn launch_memory(family: Family) -> waterfalls::test_env::TestEnv<'static> {
+async fn launch_memory(family: Family) -> waterfalls::test_env::TestEnv {
     let exe = match family {
         Family::Bitcoin => std::env::var("BITCOIND_EXEC").unwrap(),
         Family::Elements => std::env::var("ELEMENTSD_EXEC").unwrap(),
@@ -99,7 +99,7 @@ fn send_to_address(
 }
 
 #[cfg(feature = "test_env")]
-async fn do_test(test_env: waterfalls::test_env::TestEnv<'_>) {
+async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     use bitcoin::sign_message::MessageSignature;
     use elements::{bitcoin::secp256k1, AddressParams};
     use elements_miniscript::{ConfidentialDescriptor, DescriptorPublicKey};
@@ -350,8 +350,7 @@ async fn test_no_rest() {
     conf.network = "liquidregtest";
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
     let elementsd = bitcoind::BitcoinD::with_conf(exe, &conf).unwrap();
-    let _test_env =
-        waterfalls::test_env::launch_with_node(&elementsd, None, Family::Elements).await;
+    let _test_env = waterfalls::test_env::launch_with_node(elementsd, None, Family::Elements).await;
 }
 
 #[cfg(feature = "examine_logs")]
@@ -376,7 +375,7 @@ async fn test_no_txindex() {
     conf.network = "liquidregtest";
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
     let elementsd = bitcoind::BitcoinD::with_conf(exe, &conf).unwrap();
-    let test_env = waterfalls::test_env::launch_with_node(&elementsd, None, Family::Elements).await;
+    let test_env = waterfalls::test_env::launch_with_node(elementsd, None, Family::Elements).await;
     let txid = crate::be::Txid::from_str(
         "0000000000000000000000000000000000000000000000000000000000000000",
     )

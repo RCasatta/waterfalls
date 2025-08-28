@@ -28,9 +28,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::oneshot::{self, Receiver, Sender};
 
-pub struct TestEnv<'a> {
+pub struct TestEnv {
     #[allow(dead_code)]
-    node: &'a BitcoinD,
+    node: BitcoinD,
     handle: tokio::task::JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>,
     tx: Sender<()>,
     client: WaterfallClient,
@@ -42,22 +42,18 @@ pub struct TestEnv<'a> {
 }
 
 #[cfg(feature = "db")]
-pub async fn launch<S: AsRef<OsStr>>(
-    exe: S,
-    path: Option<PathBuf>,
-    family: Family,
-) -> TestEnv<'static> {
+pub async fn launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>, family: Family) -> TestEnv {
     inner_launch(exe, path, family).await
 }
 
 #[cfg(not(feature = "db"))]
-pub async fn launch<S: AsRef<OsStr>>(exe: S, family: Family) -> TestEnv<'static> {
+pub async fn launch<S: AsRef<OsStr>>(exe: S, family: Family) -> TestEnv {
     inner_launch(exe, None, family).await
 }
 
 #[cfg(feature = "db")]
 pub async fn launch_with_node(
-    elementsd: &BitcoinD,
+    elementsd: BitcoinD,
     path: Option<PathBuf>,
     family: Family,
 ) -> TestEnv {
@@ -65,11 +61,11 @@ pub async fn launch_with_node(
 }
 
 #[cfg(not(feature = "db"))]
-pub async fn launch_with_node(elementsd: &BitcoinD, family: Family) -> TestEnv {
+pub async fn launch_with_node(elementsd: BitcoinD, family: Family) -> TestEnv {
     inner_launch_with_node(elementsd, None, family).await
 }
 
-async fn inner_launch_with_node(node: &BitcoinD, path: Option<PathBuf>, family: Family) -> TestEnv {
+async fn inner_launch_with_node(node: BitcoinD, path: Option<PathBuf>, family: Family) -> TestEnv {
     let mut args = Arguments {
         node_url: Some(node.rpc_url()),
         derivation_cache_capacity: 10000,
@@ -159,24 +155,19 @@ pub fn launch_elements<S: AsRef<OsStr>>(exe: S) -> BitcoinD {
     BitcoinD::with_conf(exe, &conf).unwrap()
 }
 
-async fn inner_launch<S: AsRef<OsStr>>(
-    exe: S,
-    path: Option<PathBuf>,
-    family: Family,
-) -> TestEnv<'static> {
+async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>, family: Family) -> TestEnv {
     let elementsd = match family {
         Family::Bitcoin => launch_bitcoin(exe),
         Family::Elements => launch_elements(exe),
     };
-    // Use Box::leak to create a static reference
-    let elementsd_ref = Box::leak(Box::new(elementsd));
-    inner_launch_with_node(elementsd_ref, path, family).await
+    inner_launch_with_node(elementsd, path, family).await
 }
 
-impl<'a> TestEnv<'a> {
+impl TestEnv {
     pub async fn shutdown(self) {
         self.tx.send(()).unwrap();
         let _ = self.handle.await.unwrap();
+        // BitcoinD will be automatically dropped here, calling its Drop implementation
     }
 
     pub fn network(&self) -> Network {
