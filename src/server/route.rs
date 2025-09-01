@@ -131,6 +131,18 @@ pub async fn route(
             };
             str_resp(s, StatusCode::OK)
         }
+        (&Method::GET, "/v1/build_info", None) => {
+            let build_info = get_build_info();
+            let json =
+                serde_json::to_string(&build_info).map_err(|e| Error::String(e.to_string()))?;
+            any_resp(
+                json.into_bytes(),
+                StatusCode::OK,
+                Some("application/json"),
+                Some(state.cache_control_seconds),
+                None,
+            )
+        }
         (&Method::GET, "/blocks/tip/hash", None) => {
             let block_hash = state.tip_hash().await;
             block_hash_resp(block_hash)
@@ -690,6 +702,19 @@ fn string_hash(s: &str) -> u64 {
     hasher.finish()
 }
 
+#[derive(Serialize)]
+struct BuildInfo {
+    version: &'static str,
+    git_commit: &'static str,
+}
+
+fn get_build_info() -> BuildInfo {
+    BuildInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        git_commit: env!("GIT_COMMIT_HASH"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -852,5 +877,30 @@ mod tests {
             serializer.append_pair("page", &page.to_string());
         }
         serializer.finish()
+    }
+
+    #[test]
+    fn test_get_build_info() {
+        let build_info = get_build_info();
+
+        // Test that the build info contains expected fields
+        assert!(!build_info.version.is_empty());
+        assert!(!build_info.git_commit.is_empty());
+
+        // Test that git_commit looks like a hash (40 hex characters, known values, or hash with -dirty suffix)
+        assert!(
+            build_info.git_commit == "unknown"
+                || build_info.git_commit == "nix-build"
+                || (build_info.git_commit.len() == 40
+                    && build_info.git_commit.chars().all(|c| c.is_ascii_hexdigit()))
+                || (build_info.git_commit.ends_with("-dirty")
+                    && build_info.git_commit.len() == 46  // 40 + "-dirty"
+                    && build_info.git_commit[..40].chars().all(|c| c.is_ascii_hexdigit()))
+        );
+
+        // Test JSON serialization
+        let json = serde_json::to_string(&build_info).unwrap();
+        assert!(json.contains("version"));
+        assert!(json.contains("git_commit"));
     }
 }

@@ -86,6 +86,20 @@ Returns the time elapsed since the last block and a freshness indicator.
 
 **Response:** Plain text describing time elapsed and status (e.g., "120 seconds since last block, less than 10 minutes")
 
+#### Build Information
+```
+GET /v1/build_info
+```
+Returns build and version information including git commit ID.
+
+**Response (JSON):**
+```json
+{
+  "version": "0.9.4",
+  "git_commit": "a1b2c3d4e5f6789..."
+}
+```
+
 
 
 ## Blockchain Data Endpoints

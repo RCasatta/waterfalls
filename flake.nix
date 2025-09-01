@@ -50,6 +50,12 @@
             ELEMENTSD_EXEC = "${pkgs.elementsd}/bin/elementsd";
             BITCOIND_EXEC = "${pkgs.bitcoind}/bin/bitcoind";
 
+            # Provide git information for build script
+            GIT_COMMIT_HASH =
+              if (self ? rev) then self.rev
+              else if (self ? dirtyRev) then self.dirtyRev
+              else "nix-build-unknown";
+
           };
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
           bin = craneLib.buildPackage (commonArgs // {
