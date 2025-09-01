@@ -3,7 +3,7 @@ use env_logger::Env;
 use std::io::Write;
 use waterfalls::server::{inner_main, Arguments};
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 async fn main() {
     init_logging();
 
