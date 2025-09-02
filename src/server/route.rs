@@ -59,7 +59,7 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, false, false).await
+            handle_waterfalls_req(state, inputs, WithTip::No, false).await
         }
         (&Method::GET, "/v2/waterfalls", Some(query)) => {
             let inputs = parse_query(
@@ -69,7 +69,7 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, true, false).await
+            handle_waterfalls_req(state, inputs, WithTip::Hash, false).await
         }
         (&Method::GET, "/v3/waterfalls", Some(_)) => {
             str_resp("v3 endpoint removed".to_string(), StatusCode::NOT_FOUND)
@@ -82,7 +82,7 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, false, true).await
+            handle_waterfalls_req(state, inputs, WithTip::No, true).await
         }
         (&Method::GET, "/v2/waterfalls.cbor", Some(query)) => {
             let inputs = parse_query(
@@ -92,10 +92,30 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, true, true).await
+            handle_waterfalls_req(state, inputs, WithTip::Hash, true).await
         }
         (&Method::GET, "/v3/waterfalls.cbor", Some(_)) => {
             str_resp("v3 endpoint removed".to_string(), StatusCode::NOT_FOUND)
+        }
+        (&Method::GET, "/v4/waterfalls", Some(query)) => {
+            let inputs = parse_query(
+                query,
+                &state.key,
+                is_testnet_or_regtest,
+                state.max_addresses,
+                network,
+            )?;
+            handle_waterfalls_req(state, inputs, WithTip::All, false).await
+        }
+        (&Method::GET, "/v4/waterfalls.cbor", Some(query)) => {
+            let inputs = parse_query(
+                query,
+                &state.key,
+                is_testnet_or_regtest,
+                state.max_addresses,
+                network,
+            )?;
+            handle_waterfalls_req(state, inputs, WithTip::All, true).await
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {
             // this method return the seconds since last block
@@ -444,10 +464,16 @@ async fn handle_single_address(
     )
 }
 
+enum WithTip {
+    No,
+    Hash,
+    All,
+}
+
 async fn handle_waterfalls_req(
     state: &Arc<State>,
     inputs: WaterfallRequest,
-    with_tip: bool,
+    with_tip: WithTip,
     cbor: bool,
 ) -> Result<Response<Full<Bytes>>, Error> {
     let db = &state.store;
@@ -553,16 +579,21 @@ async fn handle_waterfalls_req(
     }
 
     let elements: usize = map.values().map(|v| v.len()).sum();
-    let tip = if with_tip {
-        state.tip_hash().await
-    } else {
-        None
+
+    let (tip_hash, tip_meta) = match with_tip {
+        WithTip::No => (None, None),
+        WithTip::Hash => (state.tip_hash().await, None),
+        WithTip::All => match state.tip().await {
+            Some(tip) => (None, Some(tip)),
+            None => (None, None),
+        },
     };
 
     let waterfall_response = WaterfallResponse {
         txs_seen: map,
         page,
-        tip,
+        tip: tip_hash,
+        tip_meta: tip_meta,
     };
     let content = if cbor {
         "application/cbor"

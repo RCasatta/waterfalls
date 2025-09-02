@@ -85,6 +85,10 @@ pub struct WaterfallResponse {
     #[cbor(n(2), with = "cbor_opt_block_hash")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tip: Option<BlockHash>,
+
+    #[cbor(n(3))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip_meta: Option<BlockMeta>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Ord, PartialOrd, Encode, Decode)]

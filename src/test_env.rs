@@ -412,6 +412,13 @@ impl WaterfallClient {
         Ok((serde_json::from_str(&body)?, headers))
     }
 
+    pub async fn waterfalls_v4(
+        &self,
+        desc: &str,
+    ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
+        self.waterfalls_version(desc, 4, None, None, false).await
+    }
+
     pub async fn waterfalls_v2(
         &self,
         desc: &str,

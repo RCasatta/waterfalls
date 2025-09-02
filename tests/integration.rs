@@ -123,8 +123,15 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert_eq!(result.txs_seen.len(), 2);
     assert!(result.is_empty());
     assert!(result.tip.is_some());
+    assert!(result.tip_meta.is_none());
+    let mut result_v4 = client.waterfalls_v4(&bitcoin_desc).await.unwrap().0;
+    assert!(result_v4.tip_meta.is_some());
+    result_v4.tip = result_v4.tip_meta.map(|e| e.b);
+    result_v4.tip_meta = None;
+    assert_eq!(result, result_v4);
     let result = client.waterfalls_v1(&bitcoin_desc).await.unwrap().0;
     assert!(result.tip.is_none());
+    assert!(result.tip_meta.is_none());
 
     let addr = match test_env.family {
         Family::Bitcoin => {

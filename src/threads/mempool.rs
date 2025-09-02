@@ -29,7 +29,7 @@ async fn sync_mempool_once(
     match client.mempool(support_verbose).await {
         Ok(current) => {
             let db = &state.store;
-            let tip = state.tip().await;
+            let tip = state.tip_height().await;
             let new: Vec<_> = current.difference(&mempool_txids).collect();
             let removed: Vec<_> = mempool_txids.difference(&current).cloned().collect();
             if !new.is_empty() {

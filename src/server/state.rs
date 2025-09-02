@@ -56,8 +56,22 @@ impl State {
 
     /// The tip of the blockchain, in other words the block with highest height
     /// It must be granted if returned tip is `Some(x)`, `self.block_hash_ts.get(x)` is some.
-    pub async fn tip(&self) -> Option<u32> {
+    pub async fn tip_height(&self) -> Option<u32> {
         (self.blocks_hash_ts.lock().await.len() as u32).checked_sub(1)
+    }
+
+    pub async fn tip(&self) -> Option<crate::BlockMeta> {
+        let blocks_hash_ts = self.blocks_hash_ts.lock().await;
+        let height = (blocks_hash_ts.len() as u32).checked_sub(1);
+        let hash_timestamp = blocks_hash_ts.last();
+        match (hash_timestamp, height) {
+            (Some((hash, timestamp)), Some(height)) => Some(crate::BlockMeta {
+                h: height,
+                b: *hash,
+                t: *timestamp,
+            }),
+            _ => None,
+        }
     }
 
     pub async fn tip_hash(&self) -> Option<BlockHash> {
