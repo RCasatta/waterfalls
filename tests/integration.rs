@@ -6,6 +6,7 @@
 
 use std::time::{Duration, Instant};
 
+use elements::AddressParams;
 use tokio::time::sleep;
 use waterfalls::Family;
 #[cfg(feature = "test_env")]
@@ -851,5 +852,42 @@ async fn test_waterfalls_vs_esplora_performance() {
 
     for result in all_results {
         println!("{}", result.md_row());
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires internet"]
+async fn test_waterfalls_descriptor_vs_addresses() {
+    let url = "https://waterfalls.liquidwebwallet.org/liquidtestnet/api";
+    let client = waterfalls::test_env::WaterfallClient::new(url.to_string(), Family::Elements);
+    let descriptors = [
+        "elsh(wpkh([75ea4a43/49'/1'/0']tpubDDRMQzj8FGnDXxAhr8zgM22VT7BT2H2cPUdCRDSi3ima15TRUZEkT32zExr1feVReMYvBEm21drG1qKryjHf3cD6iD4j1nkPkbPDuQxCJG4/0/*))",
+        "elsh(wpkh([75ea4a43/49'/1'/0']tpubDDRMQzj8FGnDXxAhr8zgM22VT7BT2H2cPUdCRDSi3ima15TRUZEkT32zExr1feVReMYvBEm21drG1qKryjHf3cD6iD4j1nkPkbPDuQxCJG4/1/*))"
+    ];
+    for descriptor_str in descriptors {
+        let descriptor = be::Descriptor::from_str(descriptor_str, Network::LiquidTestnet).unwrap();
+        let descriptor = descriptor.elements().unwrap();
+
+        let (resp, _) = client.waterfalls(&descriptor_str).await.unwrap();
+        println!("resp: {:?}", resp);
+        let len = resp.txs_seen.get(&descriptor.to_string()).unwrap().len();
+
+        let mut addresses = vec![];
+        for i in 0..len as u32 {
+            addresses.push(waterfalls::be::Address::Elements(
+                descriptor
+                    .at_derivation_index(i)
+                    .unwrap()
+                    .address(&AddressParams::LIQUID_TESTNET)
+                    .unwrap(),
+            ));
+        }
+        let (resp2, _) = client.waterfalls_addresses(&addresses).await.unwrap();
+        assert_eq!(resp2.txs_seen.get("addresses").unwrap().len(), len);
+
+        assert_eq!(
+            resp.txs_seen.get(&descriptor.to_string()).unwrap(),
+            resp2.txs_seen.get("addresses").unwrap(),
+        );
     }
 }
