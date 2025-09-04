@@ -4,7 +4,7 @@ use crate::{
     server::{Error, State},
     store::Store,
 };
-use std::{collections::HashSet, future::Future, sync::Arc};
+use std::{collections::HashSet, future::Future, sync::Arc, time::Instant};
 use tokio::time::{sleep, timeout};
 
 pub(crate) async fn mempool_sync_infallible(
@@ -28,7 +28,7 @@ async fn sync_mempool_once(
 ) {
     match client.mempool(support_verbose).await {
         Ok(current) => {
-            let _timer = crate::MEMPOOL_LOOP_DURATION.start_timer();
+            let start = Instant::now();
             crate::MEMPOOL_TXS_COUNT.set(current.len() as i64);
 
             let db = &state.store;
@@ -67,6 +67,7 @@ async fn sync_mempool_once(
                 mempool_txids.clear();
                 mempool_txids.extend(m.txids_iter());
             }
+            crate::MEMPOOL_LOOP_DURATION.set(start.elapsed().as_millis() as i64);
         }
         Err(e) => {
             log::warn!("mempool sync error, is the node running and has rest=1 ?\n{e:?}")

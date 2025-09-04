@@ -301,13 +301,13 @@ lazy_static! {
     .unwrap();
     pub(crate) static ref BLOCKCHAIN_TIP: IntGauge =
         register_int_gauge!(opts!("blockchain_tip", "Blockchain tip height.")).unwrap();
-    static ref MEMPOOL_LOOP_DURATION: Histogram = register_histogram!(
-        "mempool_loop_duration_seconds",
-        "The duration of each loop iteration in seconds.",
+    static ref MEMPOOL_LOOP_DURATION: IntGauge = register_int_gauge!(
+        "waterfalls_mempool_loop_duration_milliseconds",
+        "The duration of each loop iteration computing the mempool in milliseconds.",
     )
     .unwrap();
     static ref MEMPOOL_TXS_COUNT: IntGauge = register_int_gauge!(opts!(
-        "mempool_txs_count",
+        "waterfalls_mempool_txs_count",
         "The number of transactions in the mempool."
     ))
     .unwrap();
