@@ -306,6 +306,11 @@ lazy_static! {
         "The duration of each loop iteration in seconds.",
     )
     .unwrap();
+    static ref MEMPOOL_TXS_COUNT: IntGauge = register_int_gauge!(opts!(
+        "mempool_txs_count",
+        "The number of transactions in the mempool."
+    ))
+    .unwrap();
     pub(crate) static ref WATERFALLS_HISTOGRAM: HistogramVec = register_histogram_vec!(
         "waterfalls_request_duration_seconds",
         "The waterfalls request latencies in seconds.",

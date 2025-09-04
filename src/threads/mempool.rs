@@ -29,6 +29,7 @@ async fn sync_mempool_once(
     match client.mempool(support_verbose).await {
         Ok(current) => {
             let _timer = crate::MEMPOOL_LOOP_DURATION.start_timer();
+            crate::MEMPOOL_TXS_COUNT.set(current.len() as i64);
 
             let db = &state.store;
             let tip = state.tip_height().await;
