@@ -28,6 +28,8 @@ async fn sync_mempool_once(
 ) {
     match client.mempool(support_verbose).await {
         Ok(current) => {
+            let _timer = crate::MEMPOOL_LOOP_DURATION.start_timer();
+
             let db = &state.store;
             let tip = state.tip_height().await;
             let new: Vec<_> = current.difference(&mempool_txids).collect();
