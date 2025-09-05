@@ -6,9 +6,8 @@ use elements::{BlockHash, OutPoint};
 use lazy_static::lazy_static;
 use minicbor::{Decode, Encode};
 use prometheus::{
-    labels, opts, register_counter, register_histogram, register_histogram_vec,
-    register_int_counter_vec, register_int_gauge, Counter, Histogram, HistogramVec, IntCounterVec,
-    IntGauge,
+    labels, opts, register_counter, register_histogram_vec, register_int_counter_vec,
+    register_int_gauge, Counter, HistogramVec, IntCounterVec, IntGauge,
 };
 use serde::{Deserialize, Serialize};
 
