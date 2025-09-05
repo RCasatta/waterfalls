@@ -164,6 +164,10 @@ async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>, family: Fa
 }
 
 impl TestEnv {
+    pub fn node(&self) -> &BitcoinD {
+        &self.node
+    }
+
     pub async fn shutdown(self) {
         self.tx.send(()).unwrap();
         let _ = self.handle.await.unwrap();
