@@ -6,6 +6,7 @@
 
 use std::time::{Duration, Instant};
 
+use age::x25519;
 use elements::AddressParams;
 use tokio::time::sleep;
 use waterfalls::Family;
@@ -195,6 +196,13 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let encrypted_desc = encrypt(&bitcoin_desc, recipient).unwrap();
     let result_from_encrypted = client.waterfalls_v2(&encrypted_desc).await.unwrap().0;
     assert_eq!(result, result_from_encrypted);
+
+    // Try with wrong recipient to see what error is returned
+    let wrong_identity = x25519::Identity::generate();
+    let wrong_recipient = wrong_identity.to_public();
+    let encrypted_desc_wrong = encrypt(&bitcoin_desc, wrong_recipient).unwrap();
+    let wrong_result = client.waterfalls_v2(&encrypted_desc_wrong).await;
+    assert!(wrong_result.is_err());
 
     // Test broadcast is working
     let unspent = test_env.list_unspent();
