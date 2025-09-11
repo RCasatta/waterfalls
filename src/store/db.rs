@@ -684,18 +684,38 @@ fn concat_merge(
 #[cfg(test)]
 mod test {
     use elements::{hashes::Hash, BlockHash, OutPoint, Txid};
-    use std::collections::BTreeMap;
+    use rocksdb::DB;
+    use std::{
+        collections::BTreeMap,
+        sync::{atomic::AtomicBool, Mutex},
+    };
 
     use crate::store::{
         db::{
             estimate_history_size, get_or_init_salt, serialize_outpoint, vec_tx_seen_from_be_bytes,
-            vec_tx_seen_to_be_bytes, TxSeen,
+            vec_tx_seen_to_be_bytes, ReorgData, TxSeen,
         },
         Store,
     };
     use crate::V;
 
     use super::DBStore;
+
+    #[test]
+    fn test_db_hash_compatibility() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let mut opts = rocksdb::Options::default();
+        opts.create_if_missing(true);
+        // creating explicitly to set the salt to a fixed value
+        let db = DBStore {
+            db: DB::open(&opts, tempdir.path()).unwrap(),
+            salt: 0,
+            reorg_data: Mutex::new(ReorgData::default()),
+            ibd: AtomicBool::new(true),
+        };
+        let hash = db.hash(b"test");
+        assert_eq!(hash, 2879782050633127044);
+    }
 
     #[test]
     fn test_db() {
