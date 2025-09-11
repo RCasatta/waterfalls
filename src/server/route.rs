@@ -6,6 +6,7 @@ use crate::{
     AddressesRequest, DescriptorRequest, Family, TxSeen, WaterfallRequest, WaterfallResponse, V,
 };
 use age::x25519::Identity;
+use base64::prelude::{Engine, BASE64_STANDARD_NO_PAD};
 use elements::BlockHash;
 use http_body_util::{BodyExt, Full};
 use hyper::{
@@ -25,6 +26,18 @@ use std::{
 use tokio::sync::Mutex;
 
 use super::{encryption, sign::MsgSigAddress, Network};
+
+/// Check if a string looks like it might be an age-encrypted payload
+pub fn is_likely_age_encrypted(s: &str) -> bool {
+    // Age-encrypted files start with "age-encryption.org/v1" after base64 decoding
+    if let Ok(decoded) = BASE64_STANDARD_NO_PAD.decode(s) {
+        let age_header = b"age-encryption.org/v1";
+        if decoded.len() >= age_header.len() {
+            return decoded.starts_with(age_header);
+        }
+    }
+    false
+}
 
 const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 50;
@@ -325,7 +338,11 @@ fn parse_query(
     match (descriptor, addresses) {
         (Some(_), Some(_)) => Err(Error::CannotSpecifyBothDescriptorAndAddresses),
         (Some(desc_str), None) => {
-            let desc_str = encryption::decrypt(&desc_str, key).unwrap_or(desc_str);
+            let desc_str = if is_likely_age_encrypted(&desc_str) {
+                encryption::decrypt(&desc_str, key)?
+            } else {
+                desc_str
+            };
 
             let descriptor = be::Descriptor::from_str(&desc_str, network)?;
 

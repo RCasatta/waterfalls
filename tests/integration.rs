@@ -202,7 +202,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let wrong_recipient = wrong_identity.to_public();
     let encrypted_desc_wrong = encrypt(&bitcoin_desc, wrong_recipient).unwrap();
     let wrong_result = client.waterfalls_v2(&encrypted_desc_wrong).await;
-    assert!(wrong_result.is_err());
+    assert!(format!("{:?}", wrong_result).contains("CannotDecrypt"));
 
     // Test broadcast is working
     let unspent = test_env.list_unspent();
