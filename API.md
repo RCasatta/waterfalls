@@ -198,6 +198,7 @@ The API returns appropriate HTTP status codes:
 - `200 OK`: Successful request
 - `400 Bad Request`: Invalid parameters or transaction broadcast failure
 - `404 Not Found`: Resource not found (block, transaction, endpoint)
+- `422 Unprocessable Entity`: Decryption failure (wrong identity used for encrypted descriptor)
 - `500 Internal Server Error`: Server error
 
 Common error conditions:
