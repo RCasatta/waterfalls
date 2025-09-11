@@ -721,10 +721,19 @@ pub async fn infallible_route(
 ) -> Result<Response<Full<Bytes>>, hyper::Error> {
     let mut response = match route(state, client, req, network).await {
         Ok(r) => r,
-        Err(e) => Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(Full::new(e.to_string().into()))
-            .unwrap(),
+        Err(e) => {
+            if matches!(e, Error::CannotDecrypt) {
+                Response::builder()
+                    .status(StatusCode::UNPROCESSABLE_ENTITY)
+                    .body(Full::new(e.to_string().into()))
+                    .unwrap()
+            } else {
+                Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Full::new(e.to_string().into()))
+                    .unwrap()
+            }
+        }
     };
 
     // Add CORS headers if enabled
