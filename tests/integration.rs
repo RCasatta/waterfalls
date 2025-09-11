@@ -201,8 +201,14 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let wrong_identity = x25519::Identity::generate();
     let wrong_recipient = wrong_identity.to_public();
     let encrypted_desc_wrong = encrypt(&bitcoin_desc, wrong_recipient).unwrap();
-    let wrong_result = client.waterfalls_v2(&encrypted_desc_wrong).await;
-    assert!(format!("{:?}", wrong_result).contains("CannotDecrypt"));
+    let wrong_result = client
+        .waterfalls_v2(&encrypted_desc_wrong)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        format!("{wrong_result:?}"),
+        "waterfalls response is not 200 but: 422 body is: CannotDecrypt"
+    );
 
     // Test broadcast is working
     let unspent = test_env.list_unspent();
