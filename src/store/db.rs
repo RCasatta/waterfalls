@@ -5,10 +5,10 @@ use elements::{
     secp256k1_zkp::rand::{thread_rng, Rng},
     BlockHash, OutPoint,
 };
+use fxhash::FxHasher;
 use rocksdb::{
     BlockBasedOptions, BoundColumnFamily, Cache, DBCompressionType, MergeOperands, Options, DB,
 };
-use rustc_hash::FxHasher;
 
 use crate::V;
 

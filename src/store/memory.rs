@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, hash::Hasher, sync::Mutex};
 
 use elements::OutPoint;
-use rustc_hash::FxHasher;
+use fxhash::FxHasher;
 
 use crate::{error_panic, ScriptHash};
 

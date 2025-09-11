@@ -33,7 +33,7 @@ rocksdb = { version = "0.24.0", features = [
     "multi-threaded-cf",
     "zstd",
 ], optional = true }
-rustc-hash = "2.1"
+fxhash = "0.2.1"
 elements-miniscript = "0.4.0"
 miniscript = "12.3"
 serde = { version = "1.0.202", features = ["derive"] }
