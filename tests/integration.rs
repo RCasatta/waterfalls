@@ -593,7 +593,7 @@ async fn test_lwk_wollet() {
             .build()
             .unwrap();
 
-    do_lwk_scan(network, &descriptor, waterfalls_url, initial_amount).await;
+    do_lwk_scan(network, &descriptor, waterfalls_url, Some(initial_amount)).await;
 
     wollet_scan(&mut wollet, &mut lwk_client).await;
 
@@ -621,7 +621,7 @@ async fn test_lwk_wollet() {
         lwk_wollet::ElementsNetwork::default_regtest(),
         &descriptor,
         test_env.base_url(),
-        final_balance,
+        Some(final_balance),
     )
     .await;
 
@@ -672,7 +672,7 @@ async fn test_lwk_wollet_mainnet() {
         lwk_wollet::ElementsNetwork::Liquid,
         "ct(slip77(2411e278affa5c47010eab6d313c1ec66628ec0dd03b6fc98d1a05a0618719e6),elwpkh([a8874235/84'/1776'/0']xpub6DLHCiTPg67KE9ksCjNVpVHTRDHzhCSmoBTKzp2K4FxLQwQvvdNzuqxhK2f9gFVCN6Dori7j2JMLeDoB4VqswG7Et9tjqauAvbDmzF8NEPH/<0;1>/*))#upsg7h8m",
         "https://waterfalls.liquidwebwallet.org/liquid/api/",
-        2899, // note this may change with funding/spending
+        None, 
     )
     .await;
 }
@@ -700,7 +700,7 @@ async fn test_lwk_wollet_small_testnet() {
         lwk_wollet::ElementsNetwork::LiquidTestnet,
         "ct(slip77(ac53739ddde9fdf6bba3dbc51e989b09aa8c9cdce7b7d7eddd49cec86ddf71f7),elwpkh([93970d14/84'/1'/0']tpubDC3BrFCCjXq4jAceV8k6UACxDDJCFb1eb7R7BiKYUGZdNagEhNfJoYtUrRdci9JFs1meiGGModvmNm8PrqkrEjJ6mpt6gA1DRNU8vu7GqXH/<0;1>/*))#u0y4axgs",
         "https://waterfalls.liquidwebwallet.org/liquidtestnet/api/",
-        1070521,
+        None,
     )
     .await;
 }
@@ -709,7 +709,7 @@ async fn do_lwk_scan(
     network: lwk_wollet::ElementsNetwork,
     descriptor: &str,
     url: &str,
-    expected_satoshi_balance: u64,
+    expected_satoshi_balance: Option<u64>,
 ) {
     for waterfalls_active in [true, false] {
         for utxo_only in [true, false] {
@@ -736,11 +736,13 @@ async fn do_lwk_scan(
                 "Scan completed in {:?} - waterfalls_active: {}, utxo_only: {} txs: {} balance: {}",
                 duration, waterfalls_active, utxo_only, txs, policy_balance
             );
-            assert_eq!(
-                policy_balance, &expected_satoshi_balance,
-                "waterfalls_active: {} utxo_only: {}",
-                waterfalls_active, utxo_only
-            );
+            if let Some(expected_satoshi_balance) = expected_satoshi_balance {
+                assert_eq!(
+                    policy_balance, &expected_satoshi_balance,
+                    "waterfalls_active: {} utxo_only: {}",
+                    waterfalls_active, utxo_only
+                );
+            }
         }
 
         // TODO add UTXO scan test once ready
