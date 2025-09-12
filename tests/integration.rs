@@ -722,6 +722,7 @@ async fn do_lwk_scan(
     expected_satoshi_balance: Option<u64>,
     expected_txs_full: Option<usize>,
 ) {
+    let mut previous_balance = None;
     for waterfalls_active in [true, false] {
         for utxo_only in [true, false] {
             if !waterfalls_active && utxo_only {
@@ -742,6 +743,15 @@ async fn do_lwk_scan(
             let txs = lwk_wollet.transactions().unwrap().len();
 
             let balance = lwk_wollet.balance().unwrap();
+            if let Some(previous_balance) = previous_balance.as_ref() {
+                assert_eq!(
+                    &balance, previous_balance,
+                    "waterfalls_active: {} utxo_only: {}",
+                    waterfalls_active, utxo_only
+                );
+            } else {
+                previous_balance = Some(balance.clone());
+            }
             let policy_balance = balance.get(&network.policy_asset()).unwrap();
             println!(
                 "Scan completed in {:?} - waterfalls_active: {}, utxo_only: {} txs: {} balance: {}",
