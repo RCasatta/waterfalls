@@ -268,7 +268,7 @@ pub async fn route(
                         None,
                     )
                 }
-                (Some(""), Some("unspent"), Some(outpoint), None, None) => {
+                (Some(""), Some("v1"), Some("unspent"), Some(outpoint), None) => {
                     // note this method only considers confirmed utxos
                     // outpoint is of the form txid:vout
                     // manual outpoint parsing because elements::OutPoint has [elements] prefix

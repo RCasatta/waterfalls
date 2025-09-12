@@ -598,7 +598,7 @@ impl WaterfallClient {
     }
 
     pub async fn unspent(&self, outpoint: &str) -> anyhow::Result<bool> {
-        let url = format!("{}/unspent/{}", self.base_url, outpoint);
+        let url = format!("{}/v1/unspent/{}", self.base_url, outpoint);
         let response = self.client.get(&url).send().await?;
         let status_code = response.status().as_u16();
         let text = response.text().await?;
