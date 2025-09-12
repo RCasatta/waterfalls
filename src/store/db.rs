@@ -244,9 +244,9 @@ impl DBStore {
         let mut key_buf: Vec<u8> = vec![0u8; 36];
 
         for outpoint in outpoints {
+            key_buf.clear();
             outpoint.consensus_encode(&mut key_buf)?;
             batch.delete_cf(&cf, &key_buf);
-            key_buf.clear();
         }
 
         self.write(batch)?;
