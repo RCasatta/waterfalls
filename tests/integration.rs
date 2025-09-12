@@ -353,6 +353,9 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     });
     assert_eq!(result1, result2); // we didn't spend anything from the wallet, thus after zeroing v they are the same
 
+    let is_unspent = client.unspent(&outpoint_for_unspent_check).await.unwrap();
+    assert!(!is_unspent, "UTXO should be spent");
+
     test_env.shutdown().await;
     assert!(true);
 }
