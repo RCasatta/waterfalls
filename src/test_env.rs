@@ -596,4 +596,29 @@ impl WaterfallClient {
         }
         Ok(text)
     }
+
+    pub async fn unspent(&self, outpoint: &str) -> anyhow::Result<bool> {
+        let url = format!("{}/unspent/{}", self.base_url, outpoint);
+        let response = self.client.get(&url).send().await?;
+        let status_code = response.status().as_u16();
+        let text = response.text().await?;
+
+        match status_code {
+            200 => {
+                if text == "true" {
+                    Ok(true)
+                } else if text == "false" {
+                    Ok(false)
+                } else {
+                    bail!("unexpected response: {}", text);
+                }
+            }
+            404 => Ok(false),
+            _ => bail!(
+                "unspent response is not 200 or 404 but: {} text: {}",
+                status_code,
+                text
+            ),
+        }
+    }
 }

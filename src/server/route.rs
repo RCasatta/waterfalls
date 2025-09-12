@@ -269,6 +269,8 @@ pub async fn route(
                     )
                 }
                 (Some(""), Some("unspent"), Some(outpoint), None, None) => {
+                    // note this method only considers confirmed utxos
+                    // outpoint is of the form txid:vout
                     // manual outpoint parsing because elements::OutPoint has [elements] prefix
                     let mut parts = outpoint.split(":");
                     let txid = parts.next().ok_or(Error::InvalidOutpoint)?;

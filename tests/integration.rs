@@ -232,6 +232,14 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
         "{err:?}"
     );
 
+    // Test unspent endpoint before spending UTXOs
+    let unspent_list = test_env.list_unspent();
+    assert!(!unspent_list.is_empty(), "Should have at least one UTXO");
+    let utxo = &unspent_list[0];
+    let outpoint_for_unspent_check = format!("{}:{}", utxo.txid, utxo.vout);
+    let is_unspent = client.unspent(&outpoint_for_unspent_check).await.unwrap();
+    assert!(is_unspent, "UTXO should be unspent");
+
     let tx_sign = test_env.sign_raw_transanction_with_wallet(&tx_blind);
     let txid = client.broadcast(&tx_sign).await.unwrap();
 
