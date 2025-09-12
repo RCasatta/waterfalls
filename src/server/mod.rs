@@ -212,6 +212,7 @@ pub enum Error {
     CannotDecrypt,
     CannotEncrypt,
     InvalidTx,
+    InvalidOutpoint,
     String(String),
     InvalidAddress(String),
     CannotSpecifyBothDescriptorAndAddresses,

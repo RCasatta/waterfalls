@@ -268,6 +268,28 @@ pub async fn route(
                         None,
                     )
                 }
+                (Some(""), Some("unspent"), Some(outpoint), None, None) => {
+                    // manual outpoint parsing because elements::OutPoint has [elements] prefix
+                    let mut parts = outpoint.split(":");
+                    let txid = parts.next().ok_or(Error::InvalidOutpoint)?;
+                    let vout = parts.next().ok_or(Error::InvalidOutpoint)?;
+                    if parts.next().is_some() {
+                        return Err(Error::InvalidOutpoint);
+                    }
+                    let txid = elements::Txid::from_str(txid).map_err(|_| Error::InvalidTxid)?;
+                    let vout = vout.parse::<u32>().map_err(|_| Error::InvalidOutpoint)?;
+                    let outpoint = elements::OutPoint::new(txid, vout);
+                    let state = state
+                        .store
+                        .get_utxos(&[outpoint])
+                        .map_err(|e| Error::String(e.to_string()))?;
+                    if state[0].is_some() {
+                        str_resp("true".to_string(), StatusCode::OK)
+                    } else {
+                        str_resp("false".to_string(), StatusCode::NOT_FOUND)
+                    }
+                }
+
                 _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),
             }
         }
