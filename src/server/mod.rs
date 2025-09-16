@@ -117,6 +117,10 @@ pub struct Arguments {
     /// Cache control duration in seconds for waterfalls endpoints. Set to 0 to disable cache control headers.
     #[arg(env, long, default_value = "5")]
     pub cache_control_seconds: u32,
+
+    /// Timeout in seconds for connect and for HTTP requests to the node or esplora
+    #[arg(env, long, default_value = "30")]
+    pub request_timeout_seconds: u64,
 }
 
 impl Arguments {
@@ -307,7 +311,7 @@ pub async fn inner_main(
 
     let h1 = {
         let state = state.clone();
-        let client: Client = Client::new(&args);
+        let client: Client = Client::new(&args)?;
         let shutdown_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
             let shutdown_future = async {
@@ -328,7 +332,7 @@ pub async fn inner_main(
 
     let h2 = {
         let state = state.clone();
-        let client = Client::new(&args);
+        let client = Client::new(&args)?;
         let shutdown_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
             let shutdown_future = async {
@@ -353,7 +357,7 @@ pub async fn inner_main(
     log::info!("Starting on http://{addr}");
 
     let listener = TcpListener::bind(addr).await?;
-    let client = Client::new(&args);
+    let client = Client::new(&args)?;
     let client = Arc::new(Mutex::new(client));
     let mut signal = std::pin::pin!(shutdown_signal);
 
