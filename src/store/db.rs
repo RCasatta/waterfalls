@@ -113,7 +113,9 @@ impl DBStore {
                     block_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
 
                     if name == HISTORY_CF {
-                        // bloom filter are useful only for gets with a key miss, which happens a lot for history and never for utxo
+                        // bloom filter are useful only for gets with a key miss,
+                        // which happens a lot for history and never for utxo.
+                        // TODO actually not true for utxo_only query
                         block_opts.set_bloom_filter(10.0, true);
                     }
 
