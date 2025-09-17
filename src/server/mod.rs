@@ -118,7 +118,7 @@ pub struct Arguments {
     #[arg(env, long, default_value = "5")]
     pub cache_control_seconds: u32,
 
-    /// Timeout in seconds for connect and for HTTP requests to the node or esplora
+    /// Timeout in seconds for connect and for reques HTTP requests and  to the node or esplora
     #[arg(env, long, default_value = "30")]
     pub request_timeout_seconds: u64,
 }
@@ -128,6 +128,10 @@ impl Arguments {
         if !self.use_esplora && self.rpc_user_password.is_none() {
             Err(Error::String(
                 "When using the node you must specify --rpc-user-password".to_string(),
+            ))
+        } else if self.request_timeout_seconds == 0 {
+            Err(Error::String(
+                "Request timeout must be greater than 0".to_string(),
             ))
         } else {
             Ok(())
