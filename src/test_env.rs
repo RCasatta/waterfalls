@@ -70,6 +70,7 @@ async fn inner_launch_with_node(node: BitcoinD, path: Option<PathBuf>, family: F
         node_url: Some(node.rpc_url()),
         derivation_cache_capacity: 10000,
         cache_control_seconds: 0,
+        request_timeout_seconds: 10,
         ..Default::default()
     };
     let available_port = get_available_port().unwrap();
