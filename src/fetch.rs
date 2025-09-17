@@ -58,6 +58,7 @@ const LOCAL: &str = "http://127.0.0.1";
 
 impl Client {
     pub fn new(args: &Arguments) -> Result<Client> {
+        args.is_valid()?;
         let esplora_url = match args.network {
             Network::Liquid => args
                 .esplora_url
