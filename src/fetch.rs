@@ -495,6 +495,7 @@ mod test {
         let _ = env_logger::try_init();
         let mut args = Arguments::default();
         args.use_esplora = true;
+        args.request_timeout_seconds = 30;
         for network in [Network::Bitcoin, Network::Liquid, Network::LiquidTestnet] {
             args.network = network;
             let client = Client::new(&args).unwrap();
