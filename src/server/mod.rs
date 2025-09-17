@@ -117,6 +117,10 @@ pub struct Arguments {
     /// Cache control duration in seconds for waterfalls endpoints. Set to 0 to disable cache control headers.
     #[arg(env, long, default_value = "5")]
     pub cache_control_seconds: u32,
+
+    /// Timeout in seconds for connect and for reques HTTP requests and  to the node or esplora
+    #[arg(env, long, default_value = "30")]
+    pub request_timeout_seconds: u64,
 }
 
 impl Arguments {
@@ -124,6 +128,10 @@ impl Arguments {
         if !self.use_esplora && self.rpc_user_password.is_none() {
             Err(Error::String(
                 "When using the node you must specify --rpc-user-password".to_string(),
+            ))
+        } else if self.request_timeout_seconds == 0 {
+            Err(Error::String(
+                "Request timeout must be greater than 0".to_string(),
             ))
         } else {
             Ok(())
@@ -264,7 +272,6 @@ pub async fn inner_main(
     shutdown_signal: impl Future<Output = ()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log::info!("starting waterfalls");
-    args.is_valid()?;
 
     let store = get_store(&args)?;
 
@@ -307,7 +314,8 @@ pub async fn inner_main(
 
     let h1 = {
         let state = state.clone();
-        let client: Client = Client::new(&args);
+        let client: Client =
+            Client::new(&args).unwrap_or_else(|e| error_panic!("Failed to create client: {e}"));
         let shutdown_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
             let shutdown_future = async {
@@ -328,7 +336,8 @@ pub async fn inner_main(
 
     let h2 = {
         let state = state.clone();
-        let client = Client::new(&args);
+        let client =
+            Client::new(&args).unwrap_or_else(|e| error_panic!("Failed to create client: {e}"));
         let shutdown_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
             let shutdown_future = async {
@@ -353,7 +362,7 @@ pub async fn inner_main(
     log::info!("Starting on http://{addr}");
 
     let listener = TcpListener::bind(addr).await?;
-    let client = Client::new(&args);
+    let client = Client::new(&args)?;
     let client = Arc::new(Mutex::new(client));
     let mut signal = std::pin::pin!(shutdown_signal);
 

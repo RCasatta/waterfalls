@@ -57,7 +57,8 @@ const BS: &str = "https://blockstream.info";
 const LOCAL: &str = "http://127.0.0.1";
 
 impl Client {
-    pub fn new(args: &Arguments) -> Client {
+    pub fn new(args: &Arguments) -> Result<Client> {
+        args.is_valid()?;
         let esplora_url = match args.network {
             Network::Liquid => args
                 .esplora_url
@@ -89,13 +90,19 @@ impl Client {
             node_url.unwrap_or(format!("{LOCAL}:{port}"))
         };
         log::info!("connecting to {base_url}");
-        Client {
-            client: reqwest::Client::new(),
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(args.request_timeout_seconds))
+            .connect_timeout(Duration::from_secs(args.request_timeout_seconds)) // Connection establishment timeout
+            .build()
+            .with_context(|| "Failed to create HTTP client with timeout")?;
+
+        Ok(Client {
+            client,
             use_esplora,
             base_url,
             esplora_url,
             rpc_user_password: args.rpc_user_password.clone(),
-        }
+        })
     }
 
     // `curl http://127.0.0.1:7041/rest/blockhashbyheight/0.hex`
@@ -488,9 +495,10 @@ mod test {
         let _ = env_logger::try_init();
         let mut args = Arguments::default();
         args.use_esplora = true;
+        args.request_timeout_seconds = 30;
         for network in [Network::Bitcoin, Network::Liquid, Network::LiquidTestnet] {
             args.network = network;
-            let client = Client::new(&args);
+            let client = Client::new(&args).unwrap();
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             test(client, network).await;
         }
@@ -505,7 +513,9 @@ mod test {
         args.use_esplora = false;
         args.network = Network::ElementsRegtest;
         args.node_url = Some(elementsd.rpc_url());
-        let client = Client::new(&args);
+        args.request_timeout_seconds = 10;
+        args.rpc_user_password = Some(elementsd.params.cookie_file.to_string_lossy().to_string());
+        let client = Client::new(&args).unwrap();
         test(client, args.network).await;
     }
 
@@ -535,7 +545,7 @@ mod test {
         let mut args = Arguments::default();
         args.use_esplora = false;
         args.network = network;
-        Client::new(&args)
+        Client::new(&args).unwrap()
     }
 
     #[tokio::test]
@@ -548,7 +558,9 @@ mod test {
         args.use_esplora = false;
         args.network = Network::BitcoinRegtest;
         args.node_url = Some(bitcoind.rpc_url());
-        let client = Client::new(&args);
+        args.request_timeout_seconds = 10;
+        args.rpc_user_password = Some(bitcoind.params.cookie_file.to_string_lossy().to_string());
+        let client = Client::new(&args).unwrap();
         test(client, args.network).await;
     }
 

@@ -47,9 +47,7 @@ async fn get_next_block_to_index(
     match last_indexed.as_ref() {
         Some(last) => {
             match client.get_next(&last, family).await {
-                Ok(ChainStatus::NewBlock(next)) => {
-                    return Some(next);
-                }
+                Ok(ChainStatus::NewBlock(next)) => Some(next),
                 Ok(ChainStatus::Reorg) => {
                     log::warn!("reorg happened! {last:?} removed from the chain");
                     let previous_height = last.height - 1;
@@ -64,7 +62,7 @@ async fn get_next_block_to_index(
                         BlockMeta::new(previous_height, blocks_hash_ts.0, blocks_hash_ts.1);
                     *last_indexed = Some(previous_block_meta);
                     state.store.reorg();
-                    return None;
+                    None
                 }
                 Ok(ChainStatus::Tip) => {
                     // Signal initial sync completion the first time we hit the tip
@@ -73,23 +71,33 @@ async fn get_next_block_to_index(
                         log::info!("Initial block download completed, signaling mempool thread");
                     }
                     sleep(Duration::from_secs(1)).await;
-                    return None;
+                    None
                 }
                 Err(e) => {
                     log::warn!("error getting next block {e}, sleeping for 1 second and retrying");
                     sleep(Duration::from_secs(1)).await;
-                    return None;
+                    None
                 }
             }
         }
         None => {
-            if let Ok(Some(next)) = client.block_hash(0).await {
-                return Some(BlockMeta::new(0, next, 0)); // TODO timestamp
+            match client.block_hash(0).await {
+                Ok(Some(next)) => {
+                    Some(BlockMeta::new(0, next, 0)) // TODO timestamp
+                }
+                Ok(None) => {
+                    log::info!("block hash 0 is not found");
+                    sleep(Duration::from_secs(1)).await;
+                    None
+                }
+                Err(e) => {
+                    log::warn!("error getting next block {e}, sleeping for 1 second and retrying");
+                    sleep(Duration::from_secs(1)).await;
+                    None
+                }
             }
         }
     }
-    sleep(Duration::from_secs(1)).await;
-    None
 }
 
 pub async fn index(
