@@ -272,7 +272,6 @@ pub async fn inner_main(
     shutdown_signal: impl Future<Output = ()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log::info!("starting waterfalls");
-    args.is_valid()?;
 
     let store = get_store(&args)?;
 
@@ -315,7 +314,8 @@ pub async fn inner_main(
 
     let h1 = {
         let state = state.clone();
-        let client: Client = Client::new(&args)?;
+        let client: Client =
+            Client::new(&args).unwrap_or_else(|e| error_panic!("Failed to create client: {e}"));
         let shutdown_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
             let shutdown_future = async {
@@ -336,7 +336,8 @@ pub async fn inner_main(
 
     let h2 = {
         let state = state.clone();
-        let client = Client::new(&args)?;
+        let client =
+            Client::new(&args).unwrap_or_else(|e| error_panic!("Failed to create client: {e}"));
         let shutdown_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
             let shutdown_future = async {
