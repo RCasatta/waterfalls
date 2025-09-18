@@ -106,6 +106,7 @@ pub struct Arguments {
     #[arg(env, long)]
     pub do_compaction: bool,
 
+    // TODO make rocksdb parameter conditional on feature db
     /// RocksDB point lookup cache size in MB for UTXO and HISTORY column families
     #[arg(env, long, default_value = "64")]
     pub shared_db_cache_mb: u64,
