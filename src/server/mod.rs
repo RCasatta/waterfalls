@@ -316,6 +316,10 @@ pub async fn inner_main(
         let state = state.clone();
         let client: Client =
             Client::new(&args).unwrap_or_else(|e| error_panic!("Failed to create client: {e}"));
+        log::info!(
+            "Client for blocks task created, chain info: {:?}",
+            client.chain_info().await
+        );
         let shutdown_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
             let shutdown_future = async {
@@ -338,6 +342,10 @@ pub async fn inner_main(
         let state = state.clone();
         let client =
             Client::new(&args).unwrap_or_else(|e| error_panic!("Failed to create client: {e}"));
+        log::info!(
+            "Client for mempool task created, chain info: {:?}",
+            client.chain_info().await
+        );
         let shutdown_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
             let shutdown_future = async {
@@ -363,6 +371,10 @@ pub async fn inner_main(
 
     let listener = TcpListener::bind(addr).await?;
     let client = Client::new(&args)?;
+    log::info!(
+        "Client for server tasks created, chain info: {:?}",
+        client.chain_info().await
+    );
     let client = Arc::new(Mutex::new(client));
     let mut signal = std::pin::pin!(shutdown_signal);
 
