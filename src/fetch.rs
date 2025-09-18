@@ -137,6 +137,37 @@ impl Client {
         }
     }
 
+    /// GET /rest/chaininfo.json
+    /// Returns chain information when connecting to a bitcoin node, None for esplora
+    pub async fn chain_info(&self) -> Result<Option<ChainInfo>> {
+        if self.use_esplora {
+            return Ok(None);
+        }
+
+        let base = &self.base_url;
+        let url = format!("{base}/rest/chaininfo.json");
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("failing for {url}"))?;
+
+        let status = response.status();
+        if status == 200 {
+            let text = response
+                .text()
+                .await
+                .with_context(|| format!("failing converting body to text for {url}"))?;
+            let chain_info: ChainInfo = serde_json::from_str(&text)
+                .with_context(|| format!("failing converting {text} to ChainInfo"))?;
+            Ok(Some(chain_info))
+        } else {
+            return Err(Error::UnexpectedStatus(url, status).into());
+        }
+    }
+
     /// GET /rest/block/<BLOCK-HASH>.<bin|hex|json>
     /// GET /block/:hash/raw
     pub async fn block(&self, hash: BlockHash, family: Family) -> Result<be::Block> {
@@ -474,6 +505,14 @@ pub struct Empty {}
 pub struct HeaderJson {
     pub hash: BlockHash,
     pub nextblockhash: Option<BlockHash>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct ChainInfo {
+    pub chain: String,
+    pub blocks: u32,
+    pub headers: u32,
+    pub bestblockhash: BlockHash,
 }
 
 #[cfg(test)]
