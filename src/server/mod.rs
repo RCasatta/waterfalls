@@ -126,13 +126,13 @@ pub struct Arguments {
 // We can't automatically derive Debug for Arguments because the server_key and wif_key are sensitive data
 impl std::fmt::Debug for Arguments {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Arguments")
+        let mut d = f.debug_struct("Arguments");
+        let mut d = d
             .field("network", &self.network)
             .field("use_esplora", &self.use_esplora)
             .field("esplora_url", &self.esplora_url)
             .field("node_url", &self.node_url)
             .field("listen", &self.listen)
-            .field("db_dir", &self.db_dir)
             .field(
                 "server_key",
                 &self.server_key.as_ref().map(|_| "<redacted>"),
@@ -147,8 +147,14 @@ impl std::fmt::Debug for Arguments {
             .field("shared_db_cache_mb", &self.shared_db_cache_mb)
             .field("enable_db_statistics", &self.enable_db_statistics)
             .field("cache_control_seconds", &self.cache_control_seconds)
-            .field("request_timeout_seconds", &self.request_timeout_seconds)
-            .finish()
+            .field("request_timeout_seconds", &self.request_timeout_seconds);
+
+        #[cfg(feature = "db")]
+        {
+            d = d.field("db_dir", &self.db_dir);
+        }
+
+        d.finish()
     }
 }
 
