@@ -123,6 +123,35 @@ pub struct Arguments {
     pub request_timeout_seconds: u64,
 }
 
+// We can't automatically derive Debug for Arguments because the server_key and wif_key are sensitive data
+impl std::fmt::Debug for Arguments {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Arguments")
+            .field("network", &self.network)
+            .field("use_esplora", &self.use_esplora)
+            .field("esplora_url", &self.esplora_url)
+            .field("node_url", &self.node_url)
+            .field("listen", &self.listen)
+            .field("db_dir", &self.db_dir)
+            .field(
+                "server_key",
+                &self.server_key.as_ref().map(|_| "<redacted>"),
+            ) // Show presence without revealing key
+            .field("wif_key", &self.wif_key.as_ref().map(|_| "<redacted>")) // Show presence without revealing key
+            .field("rpc_user_password", &self.rpc_user_password)
+            .field("max_addresses", &self.max_addresses)
+            .field("add_cors", &self.add_cors)
+            .field("derivation_cache_capacity", &self.derivation_cache_capacity)
+            .field("logs_rocksdb_stat_every", &self.logs_rocksdb_stat_every)
+            .field("do_compaction", &self.do_compaction)
+            .field("shared_db_cache_mb", &self.shared_db_cache_mb)
+            .field("enable_db_statistics", &self.enable_db_statistics)
+            .field("cache_control_seconds", &self.cache_control_seconds)
+            .field("request_timeout_seconds", &self.request_timeout_seconds)
+            .finish()
+    }
+}
+
 impl Arguments {
     pub fn is_valid(&self) -> Result<(), Error> {
         if !self.use_esplora && self.rpc_user_password.is_none() {
@@ -271,7 +300,7 @@ pub async fn inner_main(
     args: Arguments,
     shutdown_signal: impl Future<Output = ()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    log::info!("starting waterfalls");
+    log::info!("starting waterfalls with args: {:?}", args);
 
     let store = get_store(&args)?;
 
