@@ -136,10 +136,16 @@ impl std::fmt::Debug for Arguments {
             .field("listen", &self.listen)
             .field(
                 "server_key",
-                &self.server_key.as_ref().map(|_| "<redacted>"),
+                &self.server_key.as_ref().map(|_| "Some(<redacted>)"),
             ) // Show presence without revealing key
-            .field("wif_key", &self.wif_key.as_ref().map(|_| "<redacted>")) // Show presence without revealing key
-            .field("rpc_user_password", &self.rpc_user_password)
+            .field(
+                "wif_key",
+                &self.wif_key.as_ref().map(|_| "Some(<redacted>)"),
+            ) // Show presence without revealing key
+            .field(
+                "rpc_user_password",
+                &self.rpc_user_password.as_ref().map(|_| "Some(<redacted>)"),
+            )
             .field("max_addresses", &self.max_addresses)
             .field("add_cors", &self.add_cors)
             .field("derivation_cache_capacity", &self.derivation_cache_capacity)
