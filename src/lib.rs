@@ -72,6 +72,8 @@ pub struct AddressesRequest {
     /// Requested page, 0 if not specified
     /// The first returned index is equal to `page * 10000`
     page: u16,
+
+    utxo_only: bool,
 }
 
 /// Response from the waterfalls endpoint

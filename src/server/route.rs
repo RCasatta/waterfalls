@@ -399,6 +399,7 @@ fn parse_query(
             Ok(WaterfallRequest::Addresses(AddressesRequest {
                 addresses,
                 page,
+                utxo_only,
             }))
         }
         (None, None) => Err(Error::AtLeastOneFieldMandatory),
@@ -584,7 +585,11 @@ async fn handle_waterfalls_req(
                 map.insert(desc.to_string(), result);
             }
         }
-        WaterfallRequest::Addresses(AddressesRequest { addresses, page: _ }) => {
+        WaterfallRequest::Addresses(AddressesRequest {
+            addresses,
+            page: _,
+            utxo_only,
+        }) => {
             id = string_hash(&format!("{:?}", addresses));
             let mut scripts = Vec::with_capacity(addresses.len());
             for addr in addresses.iter() {
@@ -592,6 +597,9 @@ async fn handle_waterfalls_req(
             }
             let mut result = Vec::with_capacity(addresses.len());
             let _ = find_scripts(state, db, &mut result, scripts).await;
+            if utxo_only {
+                filter_utxo_only(&mut result, db)?;
+            }
             map.insert("addresses".to_string(), result);
         }
     };
