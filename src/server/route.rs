@@ -529,7 +529,7 @@ async fn handle_waterfalls_req(
         .start_timer();
 
     let mut map = BTreeMap::new();
-    let mut utxo_only_req = false;
+    let utxo_only_req;
     let id;
 
     match inputs {
@@ -591,6 +591,7 @@ async fn handle_waterfalls_req(
             utxo_only,
         }) => {
             id = string_hash(&format!("{:?}", addresses));
+            utxo_only_req = utxo_only;
             let mut scripts = Vec::with_capacity(addresses.len());
             for addr in addresses.iter() {
                 scripts.push(db.hash(addr.script_pubkey().as_bytes()));
@@ -618,7 +619,7 @@ async fn handle_waterfalls_req(
                         tx_seen.block_timestamp = Some(ts);
 
                         if !utxo_only_req {
-                            // setting v to 0 will avoid to serialize it since is not needed for full history scan
+                            // setting v to undefined avoids to serialize it since is not needed for full history scan
                             tx_seen.v = V::Undefined;
                         }
                     }
