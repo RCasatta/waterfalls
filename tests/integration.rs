@@ -699,6 +699,29 @@ async fn test_lwk_wollet() {
         "utxo_only should have fewer transactions than regular scan"
     );
 
+    // Test utxo_only on addresses endpoint with actual spending
+    // Test the address that received the initial funds - it should now have both incoming and outgoing transactions
+    let unconfidential_address = address.to_unconfidential().unwrap();
+    
+    // Test with utxo_only=false (full history)
+    let result_full_history = test_env.client()
+        .waterfalls_addresses(&vec![unconfidential_address.clone()])
+        .await
+        .unwrap()
+        .0;
+    
+    // Test with utxo_only=true (only transactions with unspent outputs)
+    let result_utxo_only = test_env.client()
+        .waterfalls_addresses_utxo_only(&vec![unconfidential_address.clone()], true)
+        .await
+        .unwrap()
+        .0;
+    
+    let full_history_txs = &result_full_history.txs_seen.get("addresses").unwrap()[0];
+    let utxo_only_txs = &result_utxo_only.txs_seen.get("addresses").unwrap()[0];
+    assert_eq!(full_history_txs.len(), 2);
+    assert_eq!(utxo_only_txs.len(), 0);
+
     test_env.shutdown().await;
     assert!(true);
 }
