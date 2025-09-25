@@ -353,6 +353,26 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     });
     assert_eq!(result1, result2); // we didn't spend anything from the wallet, thus after zeroing v they are the same
 
+    // Test utxo_only on addresses endpoint, we just test the results are different because of v since we are not spending in this test
+    test_env.node_generate(1).await;
+    let mut result_utxo_only = client
+        .waterfalls_addresses_utxo_only(&vec![addr.clone()], true)
+        .await
+        .unwrap()
+        .0;
+    let mut result_full_history = client
+        .waterfalls_addresses(&vec![addr.clone()])
+        .await
+        .unwrap()
+        .0;
+    let full_txs = result_full_history.txs_seen.remove("addresses").unwrap().pop().unwrap();
+    let mut utxo_only_txs = result_utxo_only.txs_seen.remove("addresses").unwrap().pop().unwrap();
+    assert_ne!(full_txs, utxo_only_txs);
+    utxo_only_txs.iter_mut().for_each(|a| {
+            a.v = V::Undefined;
+    });
+    assert_eq!(full_txs, utxo_only_txs);
+
     let is_unspent = client.unspent(&outpoint_for_unspent_check).await.unwrap();
     assert!(!is_unspent, "UTXO should be spent");
 
