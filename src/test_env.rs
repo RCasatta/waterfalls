@@ -396,6 +396,14 @@ impl WaterfallClient {
         &self,
         addressess: &[be::Address],
     ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
+        self.waterfalls_addresses_utxo_only(addressess, false).await
+    }
+
+    pub async fn waterfalls_addresses_utxo_only(
+        &self,
+        addressess: &[be::Address],
+        utxo_only: bool,
+    ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         // this code is duplicated from waterfalls_version but we need to use the v3 endpoint which return a different object
         let descriptor_url = format!("{}/v2/waterfalls", self.base_url);
 
@@ -404,10 +412,16 @@ impl WaterfallClient {
             .map(|a| a.to_string())
             .collect::<Vec<String>>()
             .join(",");
+
+        let mut query_params = vec![("addresses", addresses_str)];
+        if utxo_only {
+            query_params.push(("utxo_only", "true".to_string()));
+        }
+
         let response = self
             .client
             .get(&descriptor_url)
-            .query(&[("addresses", addresses_str)])
+            .query(&query_params)
             .send()
             .await?;
 
