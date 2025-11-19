@@ -141,7 +141,7 @@ docker push xenoky/waterfalls:latest
 
 `criterion` is used and nightly is not needed for benching, just do:
 
-```
+```bash
 cargo bench
 ```
 
@@ -149,19 +149,19 @@ cargo bench
 
 Try with curl
 
-```
+```bash
 curl -s "https://waterfalls.liquidwebwallet.org/liquid/api/v1/waterfalls?descriptor=$(urlencode 'elwpkh(xpub6BemYiVNp19a1eGXYz87DQAbhWRj1UFE3PMz5YJMcvcyneZdLz7a69zDfq4cVFjYs6dxKhsngEnuwo5mbhoMFA8iVTK45sKcmFNwzupPtVC/<0;1>/*)')" | jq
 ```
 
 With query string already urlencoded
 
-```
+```bash
 curl -s "https://waterfalls.liquidwebwallet.org/liquid/api/v1/waterfalls?descriptor=elwpkh(xpub6BemYiVNp19a1eGXYz87DQAbhWRj1UFE3PMz5YJMcvcyneZdLz7a69zDfq4cVFjYs6dxKhsngEnuwo5mbhoMFA8iVTK45sKcmFNwzupPtVC%2F%3C0%3B1%3E%2F*)" | jq
 ```
 
 Using encrypted descriptor (the server is able to decrypt but harder to be shown in logs)
 
-```
+```bash
 curl 'https://waterfalls.liquidwebwallet.org/liquid/api/v1/waterfalls?descriptor=YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0%2BIFgyNTUxOSBWQVFobnZlaWFreHp3NVNjd3V0dHVrVkFBTDBrT3RjQmg5WWp3MWxmaEdBCjhjVTVEVmlGTUxhVDBRZyt6TStDeUFrUThwSEZ0OWhCcjdGYlAzTU93WnMKLT4gNS1ncmVhc2UgSEYyJ3xOXCEgNysgdy1SNyB0NgpMSmpkbDBSbHpVRWVPa2NRK25ZSXFicWZtQUVlTXc0K2FQVDlrWS8vaW9xNzNyNm1JR1NwbHN2U3lrYURhMXNGCitTVk5hOEd3Ci0tLSBnd1Y4cWJXZmhHWmJMcHRkUjhiMmxuK0JBT3daSnhQOHZoOEY2em0rS2tnCrZd9P7B4qrMveFcDGAy%2B%2BXscw2QMpQ0c1auUwyjZCOnp3pJVZbsXsHISqatHGRfII6aY35Vn17KjNEbyW8HA8KhO2QL2sQYVQY3A1UMshk7vTbu1%2BrFNjHy0%2B4jXFSEU00sVumhrmdrq3cr9QmE2704DHnTq0cgmBcgOig3tf0XQpVgzxmEv0BsdIMhzjj%2FXkzjZiGpwf0iQ4U1LYLnQQ' | jq
 ```
 
