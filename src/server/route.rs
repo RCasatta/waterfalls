@@ -136,33 +136,36 @@ pub async fn route(
             // it consider 10 times the expected interval between blocks to be "strange"
 
             let ts = state.tip_timestamp().await;
-            let s = match ts {
+            let (code, s) = match ts {
                 Some(ts) => {
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .map_err(|e| Error::String(e.to_string()))?;
                     let delta = now.as_secs().saturating_sub(ts as u64);
-                    let more_or_less = match network.into() {
+                    let (code, more_or_less) = match network.into() {
                         Family::Elements => {
                             if delta > 600 {
-                                "more than 10 minutes"
+                                (StatusCode::SERVICE_UNAVAILABLE, "more than 10 minutes")
                             } else {
-                                "less than 10 minutes"
+                                (StatusCode::OK, "less than 10 minutes")
                             }
                         }
                         Family::Bitcoin => {
                             if delta > 6000 {
-                                "more than 100 minutes"
+                                (StatusCode::SERVICE_UNAVAILABLE, "more than 100 minutes")
                             } else {
-                                "less than 100 minutes"
+                                (StatusCode::OK, "less than 100 minutes")
                             }
                         }
                     };
-                    format!("{delta} seconds since last block, {more_or_less}")
+                    (
+                        code,
+                        format!("{delta} seconds since last block, {more_or_less}"),
+                    )
                 }
-                None => "unknown".to_string(),
+                None => (StatusCode::SERVICE_UNAVAILABLE, "unknown".to_string()),
             };
-            str_resp(s, StatusCode::OK)
+            str_resp(s, code)
         }
         (&Method::GET, "/v1/build_info", None) => {
             let build_info = get_build_info();
