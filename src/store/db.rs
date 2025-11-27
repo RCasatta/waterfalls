@@ -198,13 +198,12 @@ impl DBStore {
         hasher.write_u64(self.salt);
         hasher
     }
-    fn set_hash_ts(&self, meta: &BlockMeta) {
+    /// Add block hash and timestamp to an existing batch (does not write to DB).
+    fn set_hash_ts_batch(&self, batch: &mut rocksdb::WriteBatch, meta: &BlockMeta) {
         let mut buffer = Vec::with_capacity(36);
         buffer.extend(meta.hash().as_byte_array());
         buffer.extend(&meta.timestamp().to_be_bytes());
-        self.db
-            .put_cf(&self.hashes_cf(), meta.height().to_be_bytes(), buffer)
-            .unwrap();
+        batch.put_cf(&self.hashes_cf(), meta.height().to_be_bytes(), buffer);
     }
 
     fn insert_utxos<'a, I>(&self, batch: &mut rocksdb::WriteBatch, adds: I) -> Result<()>
@@ -225,7 +224,12 @@ impl DBStore {
         Ok(())
     }
 
-    fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<(OutPoint, ScriptHash)>> {
+    /// Look up UTXOs and return their script hashes, panicking if any UTXO doesn't exist.
+    /// This is a read-only operation.
+    fn get_utxos_for_spending(
+        &self,
+        outpoints: &[OutPoint],
+    ) -> Result<Vec<(OutPoint, ScriptHash)>> {
         let result: Vec<ScriptHash> = self
             .get_utxos(outpoints)?
             .iter()
@@ -239,9 +243,17 @@ impl DBStore {
                 })
             })
             .collect();
-        let result = Vec::from_iter(outpoints.iter().cloned().zip(result.iter().cloned()));
+        Ok(Vec::from_iter(
+            outpoints.iter().cloned().zip(result.iter().cloned()),
+        ))
+    }
 
-        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(outpoints.len() * 36);
+    /// Add UTXO deletions to an existing batch (does not write to DB).
+    fn delete_utxos_batch(
+        &self,
+        batch: &mut rocksdb::WriteBatch,
+        outpoints: &[OutPoint],
+    ) -> Result<()> {
         let cf = self.utxo_cf();
         let mut key_buf: Vec<u8> = vec![0u8; 36];
 
@@ -250,7 +262,16 @@ impl DBStore {
             outpoint.consensus_encode(&mut key_buf)?;
             batch.delete_cf(&cf, &key_buf);
         }
+        Ok(())
+    }
 
+    /// Remove UTXOs from the database and return their script hashes.
+    /// This writes immediately to the database (non-atomic with other operations).
+    fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<(OutPoint, ScriptHash)>> {
+        let result = self.get_utxos_for_spending(outpoints)?;
+
+        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(outpoints.len() * 36);
+        self.delete_utxos_batch(&mut batch, outpoints)?;
         self.write(batch)?;
 
         Ok(result)
@@ -530,27 +551,39 @@ impl Store for DBStore {
         utxo_created: BTreeMap<OutPoint, ScriptHash>,
     ) -> Result<()> {
         let mut history_map = history_map;
-        // TODO should be a db tx
+
+        // First, read the script hashes for spent UTXOs (read-only operation)
         let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.1).collect();
-        let outpoint_script_hashes = self.remove_utxos(&only_outpoints)?;
+        let outpoint_script_hashes = self.get_utxos_for_spending(&only_outpoints)?;
+
+        // Build the history entries for spending transactions
         let script_hashes = outpoint_script_hashes.iter().map(|e| e.1);
         for (script_hash, (vin, _, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
             el.push(TxSeen::new(txid, block_meta.height(), V::Vin(vin)));
         }
 
-        self.set_hash_ts(block_meta);
-
-        // Create a single batch with capacity for both operations
+        // Create a single batch for ALL writes (atomic operation)
+        // This ensures that either all data is written or none, preventing
+        // inconsistent state if the process is killed mid-update.
         let history_size = estimate_history_size(&history_map);
-        let utxo_size = utxo_created.len() * 44; // 44 bytes per UTXO entry
-        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(history_size + utxo_size);
+        let utxo_delete_size = only_outpoints.len() * 36;
+        let utxo_create_size = utxo_created.len() * 44;
+        let hash_ts_size = 40; // 4 bytes key + 36 bytes value
+        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(
+            history_size + utxo_delete_size + utxo_create_size + hash_ts_size,
+        );
 
+        // Add all operations to the batch
+        self.delete_utxos_batch(&mut batch, &only_outpoints)
+            .with_context(|| format!("failed to delete spent utxos for block {block_meta:?}"))?;
+        self.set_hash_ts_batch(&mut batch, block_meta);
         self.update_history(&mut batch, &history_map)
             .with_context(|| format!("failed to update history for block {block_meta:?}"))?;
         self.insert_utxos(&mut batch, &utxo_created)
             .with_context(|| format!("failed to insert utxos for block {block_meta:?}"))?;
 
+        // Single atomic write
         self.write(batch)?;
 
         // Store reorg data for potential blockchain reorganization correction
