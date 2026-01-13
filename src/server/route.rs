@@ -583,37 +583,17 @@ async fn handle_waterfalls_req(
             }
             utxo_only_req = utxo_only;
             for desc in descriptor.into_single_descriptors().unwrap().iter() {
-                let desc_str = desc.to_string();
                 let is_single_address = !desc.has_wildcard();
                 let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
                 for batch in 0..MAX_BATCH {
-                    let mut scripts = Vec::with_capacity(GAP_LIMIT as usize);
-
-                    let start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
-                    let mut derivation_cache = state.derivation_cache.lock().await;
-                    for index in start..start + GAP_LIMIT {
-                        let der_ind_hash = DerivationCache::hash(&desc_str, index);
-                        let script_hash = match derivation_cache.get(der_ind_hash) {
-                            Some(script_hash) => script_hash,
-                            None => {
-                                let (script_pubkey, duration) =
-                                    calculate_script_pubkey_with_timing(desc, index).unwrap();
-                                derivations_duration += duration;
-                                let script_hash = db.hash(&script_pubkey);
-                                derivation_cache.add(der_ind_hash, script_hash);
-                                script_hash
-                            }
-                        };
-
-                        scripts.push(script_hash);
-                        if is_single_address {
-                            break;
-                        }
-                    }
+                    let batch_start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
+                    let (scripts, batch_derivations_duration) =
+                        derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
+                    derivations_duration += batch_derivations_duration;
 
                     let is_last = find_scripts(state, db, &mut result, scripts).await;
 
-                    if (is_last && start + GAP_LIMIT >= to_index) || is_single_address {
+                    if (is_last && batch_start + GAP_LIMIT >= to_index) || is_single_address {
                         break;
                     }
                 }
@@ -739,38 +719,17 @@ async fn handle_last_used_index(
     let mut internal_last_used: Option<u32> = None;
 
     for desc in descriptor.into_single_descriptors().unwrap().iter() {
-        let desc_str = desc.to_string();
         let is_single_address = !desc.has_wildcard();
 
         // Determine if this is external (0/*) or internal (1/*) chain
-        let is_internal = desc_str.contains("/1/*");
+        let is_internal = desc.to_string().contains("/1/*");
 
         let mut last_used_for_chain: Option<u32> = None;
 
         for batch in 0..MAX_BATCH {
-            let mut scripts = Vec::with_capacity(GAP_LIMIT as usize);
             let batch_start = batch * GAP_LIMIT;
-
-            let mut derivation_cache = state.derivation_cache.lock().await;
-            for index in batch_start..batch_start + GAP_LIMIT {
-                let der_ind_hash = DerivationCache::hash(&desc_str, index);
-                let script_hash = match derivation_cache.get(der_ind_hash) {
-                    Some(script_hash) => script_hash,
-                    None => {
-                        let (script_pubkey, _duration) =
-                            calculate_script_pubkey_with_timing(desc, index).unwrap();
-                        let script_hash = db.hash(&script_pubkey);
-                        derivation_cache.add(der_ind_hash, script_hash);
-                        script_hash
-                    }
-                };
-
-                scripts.push(script_hash);
-                if is_single_address {
-                    break;
-                }
-            }
-            drop(derivation_cache);
+            let (scripts, _) =
+                derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
 
             // Check which scripts have history (either confirmed or mempool)
             let seen_blockchain = db.get_history(&scripts).unwrap();
@@ -888,6 +847,48 @@ fn calculate_script_pubkey_with_timing(
     let script_pubkey = desc.script_pubkey_at_derivation_index(index)?;
     let duration = start.elapsed();
     Ok((script_pubkey, duration))
+}
+
+/// Derive script hashes for a batch of indices from a descriptor.
+///
+/// Returns a tuple of (script_hashes, derivation_duration).
+/// The derivation_duration is the total time spent computing script pubkeys
+/// (not including cache hits).
+async fn derive_script_hashes_batch(
+    state: &Arc<State>,
+    desc: &be::Descriptor,
+    start_index: u32,
+    count: u32,
+) -> (Vec<u64>, Duration) {
+    let db = &state.store;
+    let desc_str = desc.to_string();
+    let is_single_address = !desc.has_wildcard();
+
+    let mut scripts = Vec::with_capacity(count as usize);
+    let mut derivations_duration = Duration::from_secs(0);
+
+    let mut derivation_cache = state.derivation_cache.lock().await;
+    for index in start_index..start_index + count {
+        let der_ind_hash = DerivationCache::hash(&desc_str, index);
+        let script_hash = match derivation_cache.get(der_ind_hash) {
+            Some(script_hash) => script_hash,
+            None => {
+                let (script_pubkey, duration) =
+                    calculate_script_pubkey_with_timing(desc, index).unwrap();
+                derivations_duration += duration;
+                let script_hash = db.hash(&script_pubkey);
+                derivation_cache.add(der_ind_hash, script_hash);
+                script_hash
+            }
+        };
+
+        scripts.push(script_hash);
+        if is_single_address {
+            break;
+        }
+    }
+
+    (scripts, derivations_duration)
 }
 
 /// This function is used to wrap the route function so that it never returns an error but always a response
