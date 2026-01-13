@@ -132,7 +132,8 @@ pub async fn route(
             handle_waterfalls_req(state, inputs, WithTip::All, true).await
         }
         (&Method::GET, "/v1/last_used_index", Some(query)) => {
-            let descriptor = parse_descriptor_query(query, &state.key, is_testnet_or_regtest, network)?;
+            let descriptor =
+                parse_descriptor_query(query, &state.key, is_testnet_or_regtest, network)?;
             handle_last_used_index(state, descriptor).await
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {

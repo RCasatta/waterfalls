@@ -365,11 +365,21 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
         .await
         .unwrap()
         .0;
-    let full_txs = result_full_history.txs_seen.remove("addresses").unwrap().pop().unwrap();
-    let mut utxo_only_txs = result_utxo_only.txs_seen.remove("addresses").unwrap().pop().unwrap();
+    let full_txs = result_full_history
+        .txs_seen
+        .remove("addresses")
+        .unwrap()
+        .pop()
+        .unwrap();
+    let mut utxo_only_txs = result_utxo_only
+        .txs_seen
+        .remove("addresses")
+        .unwrap()
+        .pop()
+        .unwrap();
     assert_ne!(full_txs, utxo_only_txs);
     utxo_only_txs.iter_mut().for_each(|a| {
-            a.v = V::Undefined;
+        a.v = V::Undefined;
     });
     assert_eq!(full_txs, utxo_only_txs);
 
@@ -419,8 +429,14 @@ async fn do_test_last_used_index(test_env: waterfalls::test_env::TestEnv) {
 
     // Initially, no addresses should be used
     let result = client.last_used_index(&bitcoin_desc).await.unwrap();
-    assert_eq!(result.external, None, "No external addresses should be used initially");
-    assert_eq!(result.internal, None, "No internal addresses should be used initially");
+    assert_eq!(
+        result.external, None,
+        "No external addresses should be used initially"
+    );
+    assert_eq!(
+        result.internal, None,
+        "No internal addresses should be used initially"
+    );
     assert!(result.tip.is_some(), "Tip should be present");
 
     // Generate address at index 0 and send to it
@@ -452,12 +468,22 @@ async fn do_test_last_used_index(test_env: waterfalls::test_env::TestEnv) {
     test_env.node_generate(1).await;
 
     // Wait for the transaction to be indexed
-    client.wait_waterfalls_non_empty(&bitcoin_desc).await.unwrap();
+    client
+        .wait_waterfalls_non_empty(&bitcoin_desc)
+        .await
+        .unwrap();
 
     // Now external index 0 should be used
     let result = client.last_used_index(&bitcoin_desc).await.unwrap();
-    assert_eq!(result.external, Some(0), "External index 0 should be used after first transaction");
-    assert_eq!(result.internal, None, "Internal should still be None (no change outputs on our descriptor)");
+    assert_eq!(
+        result.external,
+        Some(0),
+        "External index 0 should be used after first transaction"
+    );
+    assert_eq!(
+        result.internal, None,
+        "Internal should still be None (no change outputs on our descriptor)"
+    );
 
     // Send to address at index 5 (skipping some addresses)
     let addr_5 = match test_env.family {
@@ -490,16 +516,29 @@ async fn do_test_last_used_index(test_env: waterfalls::test_env::TestEnv) {
 
     // Now external index 5 should be the last used
     let result = client.last_used_index(&bitcoin_desc).await.unwrap();
-    assert_eq!(result.external, Some(5), "External index 5 should be the last used");
+    assert_eq!(
+        result.external,
+        Some(5),
+        "External index 5 should be the last used"
+    );
 
     // Test with encrypted descriptor
     let recipient = client.server_recipient().await.unwrap();
     let encrypted_desc = waterfalls::server::encryption::encrypt(&bitcoin_desc, recipient).unwrap();
     let result_encrypted = client.last_used_index(&encrypted_desc).await.unwrap();
-    assert_eq!(result.external, result_encrypted.external, "Encrypted and plain descriptor should return same result");
-    assert_eq!(result.internal, result_encrypted.internal, "Encrypted and plain descriptor should return same result");
+    assert_eq!(
+        result.external, result_encrypted.external,
+        "Encrypted and plain descriptor should return same result"
+    );
+    assert_eq!(
+        result.internal, result_encrypted.internal,
+        "Encrypted and plain descriptor should return same result"
+    );
 
-    println!("last_used_index test completed successfully for {:?}", test_env.family);
+    println!(
+        "last_used_index test completed successfully for {:?}",
+        test_env.family
+    );
     println!("✓ Initial state: no addresses used");
     println!("✓ After sending to index 0: external=0");
     println!("✓ After sending to index 5: external=5");
@@ -830,21 +869,23 @@ async fn test_lwk_wollet() {
     // Test utxo_only on addresses endpoint with actual spending
     // Test the address that received the initial funds - it should now have both incoming and outgoing transactions
     let unconfidential_address = address.to_unconfidential().unwrap();
-    
+
     // Test with utxo_only=false (full history)
-    let result_full_history = test_env.client()
+    let result_full_history = test_env
+        .client()
         .waterfalls_addresses(&vec![unconfidential_address.clone()])
         .await
         .unwrap()
         .0;
-    
+
     // Test with utxo_only=true (only transactions with unspent outputs)
-    let result_utxo_only = test_env.client()
+    let result_utxo_only = test_env
+        .client()
         .waterfalls_addresses_utxo_only(&vec![unconfidential_address.clone()], true)
         .await
         .unwrap()
         .0;
-    
+
     let full_history_txs = &result_full_history.txs_seen.get("addresses").unwrap()[0];
     let utxo_only_txs = &result_utxo_only.txs_seen.get("addresses").unwrap()[0];
     assert_eq!(full_history_txs.len(), 2);
@@ -862,7 +903,7 @@ async fn test_lwk_wollet_mainnet() {
         lwk_wollet::ElementsNetwork::Liquid,
         "ct(slip77(2411e278affa5c47010eab6d313c1ec66628ec0dd03b6fc98d1a05a0618719e6),elwpkh([a8874235/84'/1776'/0']xpub6DLHCiTPg67KE9ksCjNVpVHTRDHzhCSmoBTKzp2K4FxLQwQvvdNzuqxhK2f9gFVCN6Dori7j2JMLeDoB4VqswG7Et9tjqauAvbDmzF8NEPH/<0;1>/*))#upsg7h8m",
         "https://waterfalls.liquidwebwallet.org/liquid/api/",
-        None, 
+        None,
         Some(17),
     )
     .await;
