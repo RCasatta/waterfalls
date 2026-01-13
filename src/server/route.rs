@@ -379,7 +379,7 @@ fn parse_query(
 
             let descriptor = be::Descriptor::from_str(&desc_str, network)?;
 
-            if is_testnet_or_regtest == desc_str.contains("xpub") {
+            if is_testnet_or_regtest == descriptor.is_mainnet() {
                 return Err(Error::WrongNetwork);
             }
             Ok(WaterfallRequest::Descriptor(DescriptorRequest {
@@ -438,7 +438,7 @@ fn parse_descriptor_query(
 
     let descriptor = be::Descriptor::from_str(&desc_str, network)?;
 
-    if is_testnet_or_regtest == desc_str.contains("xpub") {
+    if is_testnet_or_regtest == descriptor.is_mainnet() {
         return Err(Error::WrongNetwork);
     }
 

@@ -1,4 +1,5 @@
 use crate::server::{Error, Network};
+use miniscript::ForEachKey;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Descriptor {
@@ -80,6 +81,31 @@ impl Descriptor {
         match self {
             Descriptor::Bitcoin(desc) => desc.has_wildcard(),
             Descriptor::Elements(desc) => desc.has_wildcard(),
+        }
+    }
+
+    /// Returns true if all the xpubs in the descriptor are for mainnet.
+    /// Returns true if there are no xpubs (e.g., only single keys).
+    pub fn is_mainnet(&self) -> bool {
+        match self {
+            Descriptor::Bitcoin(desc) => desc.for_each_key(|k| match k {
+                miniscript::DescriptorPublicKey::XPub(x) => {
+                    x.xkey.network == bitcoin::NetworkKind::Main
+                }
+                miniscript::DescriptorPublicKey::MultiXPub(x) => {
+                    x.xkey.network == bitcoin::NetworkKind::Main
+                }
+                miniscript::DescriptorPublicKey::Single(_) => true,
+            }),
+            Descriptor::Elements(desc) => desc.for_each_key(|k| match k {
+                elements_miniscript::DescriptorPublicKey::XPub(x) => {
+                    x.xkey.network == bitcoin::NetworkKind::Main
+                }
+                elements_miniscript::DescriptorPublicKey::MultiXPub(x) => {
+                    x.xkey.network == bitcoin::NetworkKind::Main
+                }
+                elements_miniscript::DescriptorPublicKey::Single(_) => true,
+            }),
         }
     }
 }
@@ -231,5 +257,23 @@ mod tests {
         let desc_str = "elwpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#20ufqv7z";
         let desc = Descriptor::from_str(desc_str, Network::Liquid).unwrap();
         assert_eq!(format!("{}", desc), desc_str);
+    }
+
+    #[test]
+    fn test_is_mainnet() {
+        // Elements descriptor with xpub (mainnet)
+        let desc_str = "elwpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#20ufqv7z";
+        let desc = Descriptor::from_str(desc_str, Network::Liquid).unwrap();
+        assert!(desc.is_mainnet());
+
+        // Elements descriptor with tpub (testnet)
+        let desc_str = "elwpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)#v7pu3vak";
+        let desc = Descriptor::from_str(desc_str, Network::LiquidTestnet).unwrap();
+        assert!(!desc.is_mainnet());
+
+        // Descriptor with single key (no xpub) should return true
+        let desc_str = "wpkh(02e18f242c8b0b589bfffeac30e1baa80a60933a649c7fb0f1103e78fbf58aa0ed)";
+        let desc = Descriptor::from_str(desc_str, Network::Bitcoin).unwrap();
+        assert!(desc.is_mainnet());
     }
 }

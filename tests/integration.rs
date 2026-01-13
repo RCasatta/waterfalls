@@ -1051,8 +1051,11 @@ impl TestResult {
 async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> Vec<TestResult> {
     use lwk_wollet::{clients, ElementsNetwork, Wollet, WolletDescriptor};
     use std::str::FromStr;
+    use waterfalls::{be, server::Network};
 
-    let network = if desc.contains("xpub") {
+    // Parse as Liquid to check network - parsing works the same for Liquid/LiquidTestnet
+    let parsed = be::Descriptor::from_str(desc, Network::Liquid).unwrap();
+    let network = if parsed.is_mainnet() {
         ElementsNetwork::Liquid
     } else {
         ElementsNetwork::LiquidTestnet
