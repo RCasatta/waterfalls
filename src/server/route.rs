@@ -438,6 +438,10 @@ fn parse_descriptor_query(
 
     let descriptor = be::Descriptor::from_str(&desc_str, network)?;
 
+    if !descriptor.has_wildcard() {
+        return Err(Error::DescriptorMustHaveWildcard);
+    }
+
     if is_testnet_or_regtest == descriptor.is_mainnet() {
         return Err(Error::WrongNetwork);
     }
@@ -720,10 +724,10 @@ async fn handle_last_used_index(
     let mut internal_last_used: Option<u32> = None;
 
     for desc in descriptor.into_single_descriptors().unwrap().iter() {
-        let is_single_address = !desc.has_wildcard();
-
         // Determine if this is external (0/*) or internal (1/*) chain
         let is_internal = desc.to_string().contains("/1/*");
+
+        // we don't need to check for no wildcard, since parse_descriptor_query guarantees we have wildcard
 
         let mut last_used_for_chain: Option<u32> = None;
 
@@ -746,7 +750,7 @@ async fn handle_last_used_index(
             }
 
             // If no activity in this batch and we've checked at least GAP_LIMIT addresses, stop
-            if !batch_has_activity || is_single_address {
+            if !batch_has_activity {
                 break;
             }
         }
@@ -909,7 +913,13 @@ pub async fn infallible_route(
                     .status(StatusCode::UNPROCESSABLE_ENTITY)
                     .body(Full::new(e.to_string().into()))
                     .unwrap()
+            } else if matches!(e, Error::DescriptorMustHaveWildcard) {
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Full::new(e.to_string().into()))
+                    .unwrap()
             } else {
+                // TODO map many errors to specific status codes
                 Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                     .body(Full::new(e.to_string().into()))

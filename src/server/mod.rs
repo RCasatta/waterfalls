@@ -270,6 +270,7 @@ pub enum Error {
     NotYetImplemented,
     AddressCannotBeBlinded,
     TooManyAddresses,
+    DescriptorMustHaveWildcard,
 }
 
 impl std::fmt::Display for Error {

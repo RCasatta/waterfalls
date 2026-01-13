@@ -552,29 +552,12 @@ async fn do_test_last_used_index(test_env: waterfalls::test_env::TestEnv) {
     );
 
     // Test descriptor without wildcard (single address at index 0)
-    // This should not cause infinite loops and should return external=0 since that address was used
+    // This must error
     let no_wildcard_desc = format!("{prefix}wpkh({tpub}/0/0)");
-    let result_no_wildcard = client.last_used_index(&no_wildcard_desc).await.unwrap();
+    let result_no_wildcard = client.last_used_index(&no_wildcard_desc).await.unwrap_err();
     assert_eq!(
-        result_no_wildcard.external,
-        Some(0),
-        "Descriptor without wildcard (index 0) should find activity"
-    );
-    assert_eq!(
-        result_no_wildcard.internal, None,
-        "Descriptor without wildcard has no internal chain"
-    );
-
-    // Test descriptor without wildcard at an unused index (index 1)
-    // This should return None for external since no tx at index 1
-    let no_wildcard_unused_desc = format!("{prefix}wpkh({tpub}/0/1)");
-    let result_no_wildcard_unused = client
-        .last_used_index(&no_wildcard_unused_desc)
-        .await
-        .unwrap();
-    assert_eq!(
-        result_no_wildcard_unused.external, None,
-        "Descriptor without wildcard at unused index should return None"
+        result_no_wildcard.to_string(),
+        "last_used_index response is not 200 but: 400 body is: DescriptorMustHaveWildcard"
     );
 
     println!(
