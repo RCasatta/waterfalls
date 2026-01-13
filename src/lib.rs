@@ -339,6 +339,24 @@ pub(crate) fn cache_counter(cache_name: &str, hit_miss: bool) {
         .inc();
 }
 
+/// Response from the last_used_index endpoint
+///
+/// Returns the highest derivation index that has been used (has transaction history)
+/// for both external and internal chains. This is useful for quickly determining
+/// the next unused address without downloading full transaction history.
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct LastUsedIndexResponse {
+    /// Last used index on the external (receive) chain, or None if no addresses have been used
+    pub external: Option<u32>,
+
+    /// Last used index on the internal (change) chain, or None if no addresses have been used
+    pub internal: Option<u32>,
+
+    /// Current blockchain tip hash for reference
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<BlockHash>,
+}
+
 #[cfg(test)]
 mod tests {
 

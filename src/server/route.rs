@@ -3,7 +3,8 @@ use crate::{
     fetch::Client,
     server::{derivation_cache::DerivationCache, sign::sign_response, Error, State},
     store::Store,
-    AddressesRequest, DescriptorRequest, Family, TxSeen, WaterfallRequest, WaterfallResponse, V,
+    AddressesRequest, DescriptorRequest, Family, LastUsedIndexResponse, TxSeen, WaterfallRequest,
+    WaterfallResponse, V,
 };
 use age::x25519::Identity;
 use base64::prelude::{Engine, BASE64_STANDARD_NO_PAD};
@@ -129,6 +130,10 @@ pub async fn route(
                 network,
             )?;
             handle_waterfalls_req(state, inputs, WithTip::All, true).await
+        }
+        (&Method::GET, "/v1/last_used_index", Some(query)) => {
+            let descriptor = parse_descriptor_query(query, &state.key, is_testnet_or_regtest, network)?;
+            handle_last_used_index(state, descriptor).await
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {
             // this method return the seconds since last block
@@ -409,6 +414,36 @@ fn parse_query(
     }
 }
 
+/// Parse query parameters for the last_used_index endpoint (descriptor only)
+fn parse_descriptor_query(
+    query: &str,
+    key: &Identity,
+    is_testnet_or_regtest: bool,
+    network: Network,
+) -> Result<be::Descriptor, Error> {
+    let params = form_urlencoded::parse(query.as_bytes())
+        .into_owned()
+        .collect::<HashMap<String, String>>();
+
+    let desc_str = params
+        .get("descriptor")
+        .ok_or(Error::AtLeastOneFieldMandatory)?;
+
+    let desc_str = if is_likely_age_encrypted(desc_str) {
+        encryption::decrypt(desc_str, key)?
+    } else {
+        desc_str.clone()
+    };
+
+    let descriptor = be::Descriptor::from_str(&desc_str, network)?;
+
+    if is_testnet_or_regtest == desc_str.contains("xpub") {
+        return Err(Error::WrongNetwork);
+    }
+
+    Ok(descriptor)
+}
+
 fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {
     any_resp(s.into_bytes(), status, Some("text/plain"), None, None)
 }
@@ -681,6 +716,115 @@ async fn handle_waterfalls_req(
         Some(content),
         Some(state.cache_control_seconds),
         Some(m),
+    )
+}
+
+/// Handle the last_used_index endpoint request
+///
+/// This endpoint efficiently finds the highest derivation index that has been used
+/// for both external and internal chains, without returning transaction data.
+async fn handle_last_used_index(
+    state: &Arc<State>,
+    descriptor: be::Descriptor,
+) -> Result<Response<Full<Bytes>>, Error> {
+    let db = &state.store;
+    let start = Instant::now();
+    let id = string_hash(&descriptor.to_string());
+
+    let timer = crate::WATERFALLS_HISTOGRAM
+        .with_label_values(&["last_used_index"])
+        .start_timer();
+
+    let mut external_last_used: Option<u32> = None;
+    let mut internal_last_used: Option<u32> = None;
+
+    for desc in descriptor.into_single_descriptors().unwrap().iter() {
+        let desc_str = desc.to_string();
+        let is_single_address = !desc.has_wildcard();
+
+        // Determine if this is external (0/*) or internal (1/*) chain
+        let is_internal = desc_str.contains("/1/*");
+
+        let mut last_used_for_chain: Option<u32> = None;
+
+        for batch in 0..MAX_BATCH {
+            let mut scripts = Vec::with_capacity(GAP_LIMIT as usize);
+            let batch_start = batch * GAP_LIMIT;
+
+            let mut derivation_cache = state.derivation_cache.lock().await;
+            for index in batch_start..batch_start + GAP_LIMIT {
+                let der_ind_hash = DerivationCache::hash(&desc_str, index);
+                let script_hash = match derivation_cache.get(der_ind_hash) {
+                    Some(script_hash) => script_hash,
+                    None => {
+                        let (script_pubkey, _duration) =
+                            calculate_script_pubkey_with_timing(desc, index).unwrap();
+                        let script_hash = db.hash(&script_pubkey);
+                        derivation_cache.add(der_ind_hash, script_hash);
+                        script_hash
+                    }
+                };
+
+                scripts.push(script_hash);
+                if is_single_address {
+                    break;
+                }
+            }
+            drop(derivation_cache);
+
+            // Check which scripts have history (either confirmed or mempool)
+            let seen_blockchain = db.get_history(&scripts).unwrap();
+            let seen_mempool = state.mempool.lock().await.seen(&scripts);
+
+            // Find the max index with activity in this batch
+            let mut batch_has_activity = false;
+            for (i, (conf, unconf)) in seen_blockchain.iter().zip(seen_mempool.iter()).enumerate() {
+                if !conf.is_empty() || !unconf.is_empty() {
+                    last_used_for_chain = Some(batch_start + i as u32);
+                    batch_has_activity = true;
+                }
+            }
+
+            // If no activity in this batch and we've checked at least GAP_LIMIT addresses, stop
+            if !batch_has_activity || is_single_address {
+                break;
+            }
+        }
+
+        if is_internal {
+            internal_last_used = last_used_for_chain;
+        } else {
+            external_last_used = last_used_for_chain;
+        }
+    }
+
+    let tip_hash = state.tip_hash().await;
+
+    let response = LastUsedIndexResponse {
+        external: external_last_used,
+        internal: internal_last_used,
+        tip: tip_hash,
+    };
+
+    let result = serde_json::to_string(&response)
+        .expect("serialization cannot fail")
+        .into_bytes();
+
+    log::info!(
+        "{id:x}: last_used_index external={:?} internal={:?}, elapsed: {:.2?}",
+        external_last_used,
+        internal_last_used,
+        start.elapsed()
+    );
+    crate::WATERFALLS_COUNTER.inc();
+    timer.observe_duration();
+
+    any_resp(
+        result,
+        hyper::StatusCode::OK,
+        Some("application/json"),
+        Some(state.cache_control_seconds),
+        None,
     )
 }
 
