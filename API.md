@@ -58,6 +58,42 @@ GET /v2/waterfalls.cbor?<query_params>
 **Differences between v1 and v2:**
 - v2 includes `tip` field in response
 
+### Last Used Index
+```
+GET /v1/last_used_index?descriptor=<descriptor>
+```
+
+Returns the highest derivation index that has been used (has transaction history) for both external and internal chains. This is useful for quickly determining the next unused address without downloading full transaction history.
+
+**Query Parameters:**
+
+- `descriptor` (string, required): Bitcoin/Elements descriptor (plain text or encrypted with server key)
+  - Supports encryption using age encryption with server's public key
+  - Network validation: mainnet descriptors (xpub) cannot be used on testnet/regtest
+
+**Response Format (JSON):**
+```json
+{
+  "external": 42,
+  "internal": 15,
+  "tip": "current_tip_hash"
+}
+```
+
+**Response Fields:**
+
+- `external` (integer or null): Last used index on the external (receive) chain, or null if no addresses have been used
+- `internal` (integer or null): Last used index on the internal (change) chain, or null if no addresses have been used  
+- `tip` (string, optional): Current blockchain tip hash for reference
+
+**Use Case:**
+
+This endpoint is optimized for applications that only need to know the next unused address index (e.g., Point of Sale systems) without the overhead of downloading full transaction history or computing balances.
+
+**Example:**
+
+To get the next unused external address, use index `external + 1` (or index `0` if `external` is null).
+
 ## Base Endpoints
 
 ### Server Information
