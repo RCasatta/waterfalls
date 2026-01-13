@@ -114,7 +114,8 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
         Family::Bitcoin => "",
         Family::Elements => "el",
     };
-    let bitcoin_desc = format!("{prefix}wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)");
+    let tpub = "tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M";
+    let bitcoin_desc = format!("{prefix}wpkh({tpub}/<0;1>/*)");
     let single_bitcoin_desc = bitcoin_desc.replace("<0;1>", "0");
     let blinding = "slip77(9c8e4f05c7711a98c838be228bcb84924d4570ca53f35fa1c793e58841d47023)";
     let desc_str = format!("ct({blinding},{single_bitcoin_desc})"); // we use a non-multipath to generate addresses
@@ -325,7 +326,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert!(result.tip.is_some());
 
     // Test descriptor without wildcard
-    let desc_str = format!("{prefix}wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/0/0)");
+    let desc_str = format!("{prefix}wpkh({tpub}/0/0)");
     let result = client.waterfalls_v2(&desc_str).await.unwrap().0;
     let first_script_result = &result.txs_seen.iter().next().unwrap().1[0];
     assert_eq!(result.page, 0);
@@ -420,9 +421,10 @@ async fn do_test_last_used_index(test_env: waterfalls::test_env::TestEnv) {
         Family::Bitcoin => "",
         Family::Elements => "el",
     };
+    let tpub = "tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M";
 
     // Test descriptor with multipath
-    let bitcoin_desc = format!("{prefix}wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)");
+    let bitcoin_desc = format!("{prefix}wpkh({tpub}/<0;1>/*)");
     let single_bitcoin_desc = bitcoin_desc.replace("<0;1>", "0");
     let blinding = "slip77(9c8e4f05c7711a98c838be228bcb84924d4570ca53f35fa1c793e58841d47023)";
     let desc_str = format!("ct({blinding},{single_bitcoin_desc})");
@@ -535,6 +537,46 @@ async fn do_test_last_used_index(test_env: waterfalls::test_env::TestEnv) {
         "Encrypted and plain descriptor should return same result"
     );
 
+    // Test descriptor without multipath (single chain, external only)
+    // This should not cause infinite loops and should return the same external result
+    let no_multipath_desc = format!("{prefix}wpkh({tpub}/0/*)");
+    let result_no_multipath = client.last_used_index(&no_multipath_desc).await.unwrap();
+    assert_eq!(
+        result_no_multipath.external,
+        Some(5),
+        "Descriptor without multipath should find last used at index 5"
+    );
+    assert_eq!(
+        result_no_multipath.internal, None,
+        "Descriptor without multipath has no internal chain"
+    );
+
+    // Test descriptor without wildcard (single address at index 0)
+    // This should not cause infinite loops and should return external=0 since that address was used
+    let no_wildcard_desc = format!("{prefix}wpkh({tpub}/0/0)");
+    let result_no_wildcard = client.last_used_index(&no_wildcard_desc).await.unwrap();
+    assert_eq!(
+        result_no_wildcard.external,
+        Some(0),
+        "Descriptor without wildcard (index 0) should find activity"
+    );
+    assert_eq!(
+        result_no_wildcard.internal, None,
+        "Descriptor without wildcard has no internal chain"
+    );
+
+    // Test descriptor without wildcard at an unused index (index 1)
+    // This should return None for external since no tx at index 1
+    let no_wildcard_unused_desc = format!("{prefix}wpkh({tpub}/0/1)");
+    let result_no_wildcard_unused = client
+        .last_used_index(&no_wildcard_unused_desc)
+        .await
+        .unwrap();
+    assert_eq!(
+        result_no_wildcard_unused.external, None,
+        "Descriptor without wildcard at unused index should return None"
+    );
+
     println!(
         "last_used_index test completed successfully for {:?}",
         test_env.family
@@ -543,6 +585,8 @@ async fn do_test_last_used_index(test_env: waterfalls::test_env::TestEnv) {
     println!("✓ After sending to index 0: external=0");
     println!("✓ After sending to index 5: external=5");
     println!("✓ Encrypted descriptor works correctly");
+    println!("✓ Descriptor without multipath works correctly");
+    println!("✓ Descriptor without wildcard works correctly");
 
     test_env.shutdown().await;
 }
