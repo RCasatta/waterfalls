@@ -380,6 +380,134 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert!(true);
 }
 
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn test_last_used_index_elements() {
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory(Family::Elements).await;
+    do_test_last_used_index(test_env).await;
+}
+
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn test_last_used_index_bitcoin() {
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory(Family::Bitcoin).await;
+    do_test_last_used_index(test_env).await;
+}
+
+#[cfg(feature = "test_env")]
+async fn do_test_last_used_index(test_env: waterfalls::test_env::TestEnv) {
+    use elements_miniscript::{ConfidentialDescriptor, DescriptorPublicKey};
+    use std::str::FromStr;
+    use waterfalls::be;
+
+    let client = test_env.client();
+
+    let prefix = match test_env.family {
+        Family::Bitcoin => "",
+        Family::Elements => "el",
+    };
+
+    // Test descriptor with multipath
+    let bitcoin_desc = format!("{prefix}wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)");
+    let single_bitcoin_desc = bitcoin_desc.replace("<0;1>", "0");
+    let blinding = "slip77(9c8e4f05c7711a98c838be228bcb84924d4570ca53f35fa1c793e58841d47023)";
+    let desc_str = format!("ct({blinding},{single_bitcoin_desc})");
+
+    // Initially, no addresses should be used
+    let result = client.last_used_index(&bitcoin_desc).await.unwrap();
+    assert_eq!(result.external, None, "No external addresses should be used initially");
+    assert_eq!(result.internal, None, "No internal addresses should be used initially");
+    assert!(result.tip.is_some(), "Tip should be present");
+
+    // Generate address at index 0 and send to it
+    let secp = elements::bitcoin::secp256k1::Secp256k1::new();
+    let addr = match test_env.family {
+        Family::Bitcoin => {
+            let desc = be::bitcoin_descriptor(&single_bitcoin_desc).unwrap();
+            let desc = desc.bitcoin().unwrap();
+            let addr = desc
+                .at_derivation_index(0)
+                .unwrap()
+                .address(bitcoin::Network::Regtest)
+                .unwrap();
+            be::Address::Bitcoin(addr)
+        }
+        Family::Elements => {
+            let desc = ConfidentialDescriptor::<DescriptorPublicKey>::from_str(&desc_str).unwrap();
+            let addr = desc
+                .at_derivation_index(0)
+                .unwrap()
+                .address(&secp, &AddressParams::ELEMENTS)
+                .unwrap();
+            be::Address::Elements(addr)
+        }
+    };
+
+    // Send to address at index 0
+    test_env.send_to(&addr, 10_000);
+    test_env.node_generate(1).await;
+
+    // Wait for the transaction to be indexed
+    client.wait_waterfalls_non_empty(&bitcoin_desc).await.unwrap();
+
+    // Now external index 0 should be used
+    let result = client.last_used_index(&bitcoin_desc).await.unwrap();
+    assert_eq!(result.external, Some(0), "External index 0 should be used after first transaction");
+    assert_eq!(result.internal, None, "Internal should still be None (no change outputs on our descriptor)");
+
+    // Send to address at index 5 (skipping some addresses)
+    let addr_5 = match test_env.family {
+        Family::Bitcoin => {
+            let desc = be::bitcoin_descriptor(&single_bitcoin_desc).unwrap();
+            let desc = desc.bitcoin().unwrap();
+            let addr = desc
+                .at_derivation_index(5)
+                .unwrap()
+                .address(bitcoin::Network::Regtest)
+                .unwrap();
+            be::Address::Bitcoin(addr)
+        }
+        Family::Elements => {
+            let desc = ConfidentialDescriptor::<DescriptorPublicKey>::from_str(&desc_str).unwrap();
+            let addr = desc
+                .at_derivation_index(5)
+                .unwrap()
+                .address(&secp, &AddressParams::ELEMENTS)
+                .unwrap();
+            be::Address::Elements(addr)
+        }
+    };
+
+    test_env.send_to(&addr_5, 20_000);
+    test_env.node_generate(1).await;
+
+    // Give the server time to index
+    sleep(Duration::from_millis(500)).await;
+
+    // Now external index 5 should be the last used
+    let result = client.last_used_index(&bitcoin_desc).await.unwrap();
+    assert_eq!(result.external, Some(5), "External index 5 should be the last used");
+
+    // Test with encrypted descriptor
+    let recipient = client.server_recipient().await.unwrap();
+    let encrypted_desc = waterfalls::server::encryption::encrypt(&bitcoin_desc, recipient).unwrap();
+    let result_encrypted = client.last_used_index(&encrypted_desc).await.unwrap();
+    assert_eq!(result.external, result_encrypted.external, "Encrypted and plain descriptor should return same result");
+    assert_eq!(result.internal, result_encrypted.internal, "Encrypted and plain descriptor should return same result");
+
+    println!("last_used_index test completed successfully for {:?}", test_env.family);
+    println!("✓ Initial state: no addresses used");
+    println!("✓ After sending to index 0: external=0");
+    println!("✓ After sending to index 5: external=5");
+    println!("✓ Encrypted descriptor works correctly");
+
+    test_env.shutdown().await;
+}
+
 #[cfg(feature = "examine_logs")]
 #[tokio::test]
 async fn test_no_rest() {

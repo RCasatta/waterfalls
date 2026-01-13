@@ -1,7 +1,7 @@
 use crate::{
     be::{self, Family},
     server::{inner_main, sign::p2pkh, Arguments, Network},
-    WaterfallResponse,
+    LastUsedIndexResponse, WaterfallResponse,
 };
 use std::{
     error::Error,
@@ -497,6 +497,30 @@ impl WaterfallClient {
                 .with_context(|| format!("failing parsing json for {desc} body:{body}"))?,
             headers,
         ))
+    }
+
+    /// Get the last used index for a descriptor
+    ///
+    /// Returns the highest derivation index that has been used for both external
+    /// and internal chains.
+    pub async fn last_used_index(&self, desc: &str) -> anyhow::Result<LastUsedIndexResponse> {
+        let url = format!("{}/v1/last_used_index", self.base_url);
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&[("descriptor", desc)])
+            .send()
+            .await?;
+
+        let status = response.status().as_u16();
+        let body = response.text().await?;
+
+        if status != 200 {
+            bail!("last_used_index response is not 200 but: {status} body is: {body}");
+        }
+
+        Ok(serde_json::from_str(&body)?)
     }
 
     pub async fn wait_waterfalls_non_empty(
