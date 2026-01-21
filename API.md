@@ -58,6 +58,45 @@ GET /v2/waterfalls.cbor?<query_params>
 **Differences between v1 and v2:**
 - v2 includes `tip` field in response
 
+### Waterfalls Data with Full Tip Metadata (v4)
+
+```
+GET /v4/waterfalls?<query_params>
+GET /v4/waterfalls.cbor?<query_params>
+```
+
+The v4 endpoints accept the same query parameters as v2 but return extended tip metadata including block height. This is particularly useful for Bitcoin, where the block height cannot be derived from the header alone.
+
+**Response Format (JSON):**
+```json
+{
+  "txs_seen": {
+    "descriptor_or_addresses": [
+      {
+        "txid": "transaction_id",
+        "height": 12345,
+        "block_hash": "block_hash",
+        "block_timestamp": 1234567890,
+        "v": 1
+      }
+    ]
+  },
+  "page": 0,
+  "tip_meta": {
+    "b": "current_tip_block_hash",
+    "t": 1234567890,
+    "h": 876543
+  }
+}
+```
+
+**Differences between v2 and v4:**
+- v4 returns `tip_meta` object instead of `tip` hash string
+- `tip_meta` contains:
+  - `b` (string): Block hash of the current tip
+  - `t` (integer): Block timestamp (Unix epoch seconds)
+  - `h` (integer): Block height
+
 ### Last Used Index
 ```
 GET /v1/last_used_index?descriptor=<descriptor>
