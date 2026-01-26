@@ -35,7 +35,7 @@ sequenceDiagram
     S2->>C2: Return complete wallet history<br/>(1 roundtrip)
 ```
 
-**Electrum Protocol**: Client calculates addresses locally and makes individual requests for each address, resulting in many network roundtrips.
+**Electrum Protocol**: Client calculates addresses locally and makes individual requests for each address, resulting in many network roundtrips. Note that the electrum protocol supports batching multiple requests, reducing the number of roundtrips, though browser wallets need electrum-rpc over websockets to leverage this capability.
 
 **Waterfalls Protocol**: Client sends the descriptor to the server, which derives all needed addresses server-side and returns the complete wallet history in a single response.
 
@@ -52,9 +52,9 @@ cargo test --release test_waterfalls_vs_esplora_performance -- --ignored --nocap
 
 ### Esplora
 
-Due to browser limitations the web wallet must use HTTP esplora API. 
+Due to browser limitations the web wallet must use HTTP esplora API (unless using electrum-rpc over websockets which allows batching requests like the native electrum client).
 
-With this API we cannot batch requests like it's done in the electrum client, and we cannot make requests concurrently because rate limitation is enforced in the server, this result in very poor scan performance.
+With the HTTP API we cannot batch requests like it's done in the electrum client, and we cannot make requests concurrently because rate limitation is enforced in the server, this result in very poor scan performance.
 
 Since we are persisting wallet data in the browser (encrypted), the scan following the first are faster.
 
