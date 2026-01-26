@@ -9,7 +9,7 @@ use crate::{
 use age::x25519::Identity;
 use base64::prelude::{Engine, BASE64_STANDARD_NO_PAD};
 use elements::BlockHash;
-use http_body_util::{BodyExt, Full};
+use http_body_util::{BodyExt, Full, Limited};
 use hyper::{
     body::{Bytes, Incoming},
     header::{self, CACHE_CONTROL, CONTENT_TYPE},
@@ -44,6 +44,7 @@ const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 50;
 const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
 const MAX_ADDRESS_LENGTH: usize = 100; // max characters for an address (excessive to be conservative)
+const MAX_TX_BODY_SIZE: usize = 1024 * 1024; // 1MB limit for transaction broadcast body
 
 // needed endpoint to make this self-contained for testing, in prod they should probably be never hit cause proxied by nginx
 // https://waterfalls.liquidwebwallet.org/liquidtestnet/api/blocks/tip/hash
@@ -190,10 +191,11 @@ pub async fn route(
             block_hash_resp(block_hash)
         }
         (&Method::POST, "/tx", None) => {
-            let whole_body = req
+            let limited_body = Limited::new(req.into_body(), MAX_TX_BODY_SIZE);
+            let whole_body = limited_body
                 .collect()
                 .await
-                .map_err(|e| Error::String(e.to_string()))?
+                .map_err(|_| Error::BodyTooLarge)?
                 .to_bytes();
             let result = std::str::from_utf8(&whole_body)
                 .map_err(|e| Error::String(e.to_string()))?
@@ -916,6 +918,11 @@ pub async fn infallible_route(
             } else if matches!(e, Error::DescriptorMustHaveWildcard) {
                 Response::builder()
                     .status(StatusCode::BAD_REQUEST)
+                    .body(Full::new(e.to_string().into()))
+                    .unwrap()
+            } else if matches!(e, Error::BodyTooLarge) {
+                Response::builder()
+                    .status(StatusCode::PAYLOAD_TOO_LARGE)
                     .body(Full::new(e.to_string().into()))
                     .unwrap()
             } else {

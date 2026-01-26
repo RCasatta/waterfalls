@@ -271,6 +271,7 @@ pub enum Error {
     AddressCannotBeBlinded,
     TooManyAddresses,
     DescriptorMustHaveWildcard,
+    BodyTooLarge,
 }
 
 impl std::fmt::Display for Error {
