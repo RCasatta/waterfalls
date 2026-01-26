@@ -17,8 +17,6 @@
           overlays = [
             (import rust-overlay)
             (import ./rocksdb-overlay.nix)
-            (import ./elementsd-overlay.nix)
-
           ];
           pkgs = import nixpkgs {
             inherit system overlays;
