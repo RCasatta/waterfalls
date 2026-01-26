@@ -3,6 +3,7 @@
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::fetch::Client;
 use crate::server::preload::headers;
@@ -14,7 +15,7 @@ use age::x25519::Identity;
 use bitcoin::{NetworkKind, PrivateKey};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use route::infallible_route;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -122,6 +123,10 @@ pub struct Arguments {
     /// Timeout in seconds for connect and for reques HTTP requests and  to the node or esplora
     #[arg(env, long, default_value = "30")]
     pub request_timeout_seconds: u64,
+
+    /// Timeout in seconds for reading incoming HTTP request headers (protects against slowloris attacks)
+    #[arg(env, long, default_value = "10")]
+    pub header_read_timeout_seconds: u64,
 }
 
 // We can't automatically derive Debug for Arguments because the server_key and wif_key are sensitive data
@@ -154,7 +159,8 @@ impl std::fmt::Debug for Arguments {
             .field("shared_db_cache_mb", &self.shared_db_cache_mb)
             .field("enable_db_statistics", &self.enable_db_statistics)
             .field("cache_control_seconds", &self.cache_control_seconds)
-            .field("request_timeout_seconds", &self.request_timeout_seconds);
+            .field("request_timeout_seconds", &self.request_timeout_seconds)
+            .field("header_read_timeout_seconds", &self.header_read_timeout_seconds);
 
         #[cfg(feature = "db")]
         {
@@ -433,11 +439,18 @@ pub async fn inner_main(
                     let state = &state;
                     let network = args.network;
                     let add_cors = args.add_cors;
+                    let header_read_timeout = args.header_read_timeout_seconds;
                     let client = &client;
 
                     let service = service_fn(move |req| infallible_route(state, client, req, network, add_cors));
 
-                    if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
+                    let result = http1::Builder::new()
+                        .timer(TokioTimer::new())
+                        .header_read_timeout(Duration::from_secs(header_read_timeout))
+                        .serve_connection(io, service)
+                        .await;
+
+                    if let Err(err) = result {
                         log::error!("Error serving connection: {:?}", err);
                     }
                 });
