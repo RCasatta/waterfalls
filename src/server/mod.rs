@@ -278,6 +278,7 @@ pub enum Error {
     TooManyAddresses,
     DescriptorMustHaveWildcard,
     BodyTooLarge,
+    BodyReadTimeout,
 }
 
 impl std::fmt::Display for Error {

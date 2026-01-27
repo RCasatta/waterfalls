@@ -45,6 +45,7 @@ const MAX_BATCH: u32 = 50;
 const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
 const MAX_ADDRESS_LENGTH: usize = 100; // max characters for an address (excessive to be conservative)
 const MAX_TX_BODY_SIZE: usize = 1024 * 1024; // 1MB limit for transaction broadcast body
+const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30); // timeout for reading request body
 
 // needed endpoint to make this self-contained for testing, in prod they should probably be never hit cause proxied by nginx
 // https://waterfalls.liquidwebwallet.org/liquidtestnet/api/blocks/tip/hash
@@ -191,12 +192,14 @@ pub async fn route(
             block_hash_resp(block_hash)
         }
         (&Method::POST, "/tx", None) => {
-            let limited_body = Limited::new(req.into_body(), MAX_TX_BODY_SIZE);
-            let whole_body = limited_body
-                .collect()
-                .await
-                .map_err(|_| Error::BodyTooLarge)?
-                .to_bytes();
+            let whole_body = tokio::time::timeout(
+                BODY_READ_TIMEOUT,
+                Limited::new(req.into_body(), MAX_TX_BODY_SIZE).collect(),
+            )
+            .await
+            .map_err(|_| Error::BodyReadTimeout)?
+            .map_err(|_| Error::BodyTooLarge)?
+            .to_bytes();
             let result = std::str::from_utf8(&whole_body)
                 .map_err(|e| Error::String(e.to_string()))?
                 .to_string();
@@ -923,6 +926,11 @@ pub async fn infallible_route(
             } else if matches!(e, Error::BodyTooLarge) {
                 Response::builder()
                     .status(StatusCode::PAYLOAD_TOO_LARGE)
+                    .body(Full::new(e.to_string().into()))
+                    .unwrap()
+            } else if matches!(e, Error::BodyReadTimeout) {
+                Response::builder()
+                    .status(StatusCode::REQUEST_TIMEOUT)
                     .body(Full::new(e.to_string().into()))
                     .unwrap()
             } else {
