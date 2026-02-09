@@ -268,6 +268,7 @@ impl DBStore {
 
     /// Remove UTXOs from the database and return their script hashes.
     /// This writes immediately to the database (non-atomic with other operations).
+    #[cfg(test)]
     fn remove_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<(OutPoint, ScriptHash)>> {
         let result = self.get_utxos_for_spending(outpoints)?;
 
