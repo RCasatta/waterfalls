@@ -302,7 +302,11 @@ impl DBStore {
         Ok(())
     }
 
-    fn remove_history_entries(&self, to_remove: &BTreeMap<ScriptHash, Vec<TxSeen>>) -> Result<()> {
+    fn remove_history_entries_batch(
+        &self,
+        batch: &mut rocksdb::WriteBatch,
+        to_remove: &BTreeMap<ScriptHash, Vec<TxSeen>>,
+    ) -> Result<()> {
         if to_remove.is_empty() {
             return Ok(());
         }
@@ -315,8 +319,6 @@ impl DBStore {
         // Read current history for these script hashes
         let current_history = self.get_history(&script_hashes)?;
 
-        let estimate_size = estimate_history_size(to_remove);
-        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(estimate_size);
         let cf = self.history_cf();
 
         for (i, script_hash) in script_hashes.iter().enumerate() {
@@ -345,7 +347,6 @@ impl DBStore {
                 );
             }
         }
-        self.write(batch)?;
         Ok(())
     }
 
@@ -469,9 +470,7 @@ impl DBStore {
             .lock()
             .map_err(|e| anyhow::anyhow!("reorg_data lock poisoned: {e}"))?;
 
-        // Estimate batch size for UTXO restoration
-        let utxo_restore_size = reorg_data.spent.len() * 44; // 44 bytes per UTXO entry
-        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(utxo_restore_size);
+        let mut batch = rocksdb::WriteBatch::default();
 
         // Restore UTXOs that were spent in the reorged block
         self.insert_utxos(
@@ -482,19 +481,19 @@ impl DBStore {
                 .map(|(outpoint, script_hash)| (outpoint, script_hash)),
         )?;
 
-        self.write(batch)?;
-
         // Remove UTXOs that were created in the reorged block
         if !reorg_data.utxos_created.is_empty() {
             let outpoints_to_remove: Vec<OutPoint> =
                 reorg_data.utxos_created.keys().cloned().collect();
-            self.remove_utxos(&outpoints_to_remove)?;
+            self.delete_utxos_batch(&mut batch, &outpoints_to_remove)?;
         }
 
         // Remove history entries that were added in the reorged block
         if !reorg_data.history.is_empty() {
-            self.remove_history_entries(&reorg_data.history)?;
+            self.remove_history_entries_batch(&mut batch, &reorg_data.history)?;
         }
+
+        self.write(batch)?;
 
         Ok(())
     }
