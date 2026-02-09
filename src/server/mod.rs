@@ -160,7 +160,10 @@ impl std::fmt::Debug for Arguments {
             .field("enable_db_statistics", &self.enable_db_statistics)
             .field("cache_control_seconds", &self.cache_control_seconds)
             .field("request_timeout_seconds", &self.request_timeout_seconds)
-            .field("header_read_timeout_seconds", &self.header_read_timeout_seconds);
+            .field(
+                "header_read_timeout_seconds",
+                &self.header_read_timeout_seconds,
+            );
 
         #[cfg(feature = "db")]
         {
