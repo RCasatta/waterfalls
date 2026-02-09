@@ -24,6 +24,7 @@ use std::{
 };
 
 use crate::{
+    error_panic,
     store::{BlockMeta, Store, TxSeen},
     Height, ScriptHash,
 };
@@ -461,6 +462,42 @@ impl DBStore {
         };
         Ok(())
     }
+
+    fn _reorg(&self) -> Result<()> {
+        let reorg_data = self
+            .reorg_data
+            .lock()
+            .map_err(|e| anyhow::anyhow!("reorg_data lock poisoned: {e}"))?;
+
+        // Estimate batch size for UTXO restoration
+        let utxo_restore_size = reorg_data.spent.len() * 44; // 44 bytes per UTXO entry
+        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(utxo_restore_size);
+
+        // Restore UTXOs that were spent in the reorged block
+        self.insert_utxos(
+            &mut batch,
+            reorg_data
+                .spent
+                .iter()
+                .map(|(outpoint, script_hash)| (outpoint, script_hash)),
+        )?;
+
+        self.write(batch)?;
+
+        // Remove UTXOs that were created in the reorged block
+        if !reorg_data.utxos_created.is_empty() {
+            let outpoints_to_remove: Vec<OutPoint> =
+                reorg_data.utxos_created.keys().cloned().collect();
+            self.remove_utxos(&outpoints_to_remove)?;
+        }
+
+        // Remove history entries that were added in the reorged block
+        if !reorg_data.history.is_empty() {
+            self.remove_history_entries(&reorg_data.history)?;
+        }
+
+        Ok(())
+    }
 }
 
 fn estimate_history_size(add: &BTreeMap<u64, Vec<TxSeen>>) -> usize {
@@ -599,34 +636,8 @@ impl Store for DBStore {
     }
 
     fn reorg(&self) {
-        let reorg_data = self.reorg_data.lock().unwrap();
-
-        // Estimate batch size for UTXO restoration
-        let utxo_restore_size = reorg_data.spent.len() * 44; // 44 bytes per UTXO entry
-        let mut batch = rocksdb::WriteBatch::with_capacity_bytes(utxo_restore_size);
-
-        // Restore UTXOs that were spent in the reorged block
-        self.insert_utxos(
-            &mut batch,
-            reorg_data
-                .spent
-                .iter()
-                .map(|(outpoint, script_hash)| (outpoint, script_hash)),
-        )
-        .unwrap(); // TODO handle unwrap;
-
-        self.write(batch).unwrap(); // TODO handle unwrap;
-
-        // Remove UTXOs that were created in the reorged block
-        if !reorg_data.utxos_created.is_empty() {
-            let outpoints_to_remove: Vec<OutPoint> =
-                reorg_data.utxos_created.keys().cloned().collect();
-            self.remove_utxos(&outpoints_to_remove).unwrap(); // TODO handle unwrap;
-        }
-
-        // Remove history entries that were added in the reorged block
-        if !reorg_data.history.is_empty() {
-            self.remove_history_entries(&reorg_data.history).unwrap(); // TODO handle unwrap;
+        if let Err(e) = self._reorg() {
+            error_panic!("reorg failed: {e}");
         }
     }
 
