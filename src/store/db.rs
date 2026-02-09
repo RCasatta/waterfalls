@@ -454,11 +454,12 @@ impl DBStore {
     }
 
     fn write(&self, batch: rocksdb::WriteBatch) -> Result<()> {
-        Ok(if self.ibd.load(Ordering::Relaxed) {
+        if self.ibd.load(Ordering::Relaxed) {
             self.db.write_without_wal(batch)?
         } else {
             self.db.write(batch)?
-        })
+        };
+        Ok(())
     }
 }
 

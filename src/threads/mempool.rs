@@ -33,7 +33,7 @@ async fn sync_mempool_once(
 
             let db = &state.store;
             let tip = state.tip_height().await;
-            let new: Vec<_> = current.difference(&mempool_txids).collect();
+            let new: Vec<_> = current.difference(mempool_txids).collect();
             let removed: Vec<_> = mempool_txids.difference(&current).cloned().collect();
             if !new.is_empty() {
                 log::debug!("new txs in mempool {:?}, tip: {tip:?}", new);

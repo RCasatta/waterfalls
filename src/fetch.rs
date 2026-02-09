@@ -164,7 +164,7 @@ impl Client {
                 .with_context(|| format!("failing converting {text} to ChainInfo"))?;
             Ok(Some(chain_info))
         } else {
-            return Err(Error::UnexpectedStatus(url, status).into());
+            Err(Error::UnexpectedStatus(url, status).into())
         }
     }
 
@@ -374,18 +374,16 @@ impl Client {
             let content: HashSet<crate::be::Txid> = serde_json::from_slice(&body_bytes)
                 .with_context(|| format!("failure converting {url} body in HashSet<Txid>"))?;
             content
+        } else if support_verbose {
+            serde_json::from_slice(&body_bytes)
+                .with_context(|| format!("failure converting {url} body in HashSet<Txid> "))?
         } else {
-            if support_verbose {
-                serde_json::from_slice(&body_bytes)
-                    .with_context(|| format!("failure converting {url} body in HashSet<Txid> "))?
-            } else {
-                let content: HashMap<crate::be::Txid, Empty> = serde_json::from_slice(&body_bytes)
-                    .with_context(|| {
-                        format!("failure converting {url} body in HashMap<Txid, Empty> ")
-                    })?;
+            let content: HashMap<crate::be::Txid, Empty> = serde_json::from_slice(&body_bytes)
+                .with_context(|| {
+                    format!("failure converting {url} body in HashMap<Txid, Empty> ")
+                })?;
 
-                content.into_keys().collect()
-            }
+            content.into_keys().collect()
         })
     }
 
@@ -477,11 +475,11 @@ impl Client {
         if let Some(header) = self.block_header_json(last.hash, family).await? {
             if let Some(next) = header.nextblockhash {
                 let header = self.block_header(next, family).await?;
-                return Ok(ChainStatus::NewBlock(BlockMeta::new(
+                Ok(ChainStatus::NewBlock(BlockMeta::new(
                     last.height + 1,
                     next,
                     header.time(),
-                )));
+                )))
             } else {
                 Ok(ChainStatus::Tip)
             }

@@ -90,7 +90,7 @@ impl State {
     }
     pub async fn set_hash_ts(&self, meta: &BlockMeta) {
         let mut blocks_hash_ts = self.blocks_hash_ts.lock().await;
-        update_hash_ts(&mut *blocks_hash_ts, meta);
+        update_hash_ts(&mut blocks_hash_ts, meta);
     }
     pub fn address(&self) -> bitcoin::Address {
         p2pkh(&self.secp, &self.wif_key)

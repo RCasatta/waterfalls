@@ -96,7 +96,7 @@ impl Transaction {
     }
 }
 
-impl<'a> TransactionRef<'a> {
+impl TransactionRef<'_> {
     pub fn txid(&self) -> crate::be::Txid {
         match self {
             TransactionRef::Bitcoin(tx) => tx.compute_txid().into(),
@@ -160,7 +160,7 @@ impl<'a> Iterator for InputIterator<'a> {
     }
 }
 
-impl<'a> OutputRef<'a> {
+impl OutputRef<'_> {
     pub(crate) fn skip_utxo(&self) -> bool {
         match self {
             OutputRef::Bitcoin(output) => output.script_pubkey.is_op_return(),
@@ -201,7 +201,7 @@ impl<'a> OutputRef<'a> {
     }
 }
 
-impl<'a> InputRef<'a> {
+impl InputRef<'_> {
     pub(crate) fn skip_indexing(&self) -> bool {
         match self {
             InputRef::Bitcoin(_) => false,

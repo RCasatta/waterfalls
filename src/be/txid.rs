@@ -136,7 +136,7 @@ impl<'de> Deserialize<'de> for Txid {
         if deserializer.is_human_readable() {
             struct TxidVisitor;
 
-            impl<'de> Visitor<'de> for TxidVisitor {
+            impl Visitor<'_> for TxidVisitor {
                 type Value = Txid;
 
                 fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

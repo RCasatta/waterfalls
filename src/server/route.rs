@@ -671,7 +671,7 @@ async fn handle_waterfalls_req(
         txs_seen: map,
         page,
         tip: tip_hash,
-        tip_meta: tip_meta,
+        tip_meta,
     };
     let content = if cbor {
         "application/cbor"

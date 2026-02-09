@@ -46,7 +46,7 @@ async fn get_next_block_to_index(
 ) -> Option<BlockMeta> {
     match last_indexed.as_ref() {
         Some(last) => {
-            match client.get_next(&last, family).await {
+            match client.get_next(last, family).await {
                 Ok(ChainStatus::NewBlock(next)) => Some(next),
                 Ok(ChainStatus::Reorg) => {
                     log::warn!("reorg happened! {last:?} removed from the chain");
