@@ -630,7 +630,15 @@ impl Store for DBStore {
     }
 
     fn ibd_finished(&self) {
-        log::info!("Initial block download finished, setting ibd to false in the store");
+        log::info!("Initial block download finished, flushing memtables before enabling WAL...");
+        for cf_name in COLUMN_FAMILIES {
+            if let Some(cf) = self.db.cf_handle(cf_name) {
+                self.db
+                    .flush_cf(&cf)
+                    .unwrap_or_else(|e| log::error!("failed to flush CF {cf_name}: {e}"));
+            }
+        }
+        log::info!("Memtables flushed, setting ibd to false");
         self.ibd.store(false, Ordering::Relaxed);
     }
 }
