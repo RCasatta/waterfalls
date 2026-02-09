@@ -452,7 +452,12 @@ pub async fn inner_main(
                         .await;
 
                     if let Err(err) = result {
-                        log::error!("Error serving connection: {:?}", err);
+                        let msg = format!("{err:?}");
+                        if msg.contains("HeaderTimeout") {
+                            log::warn!("Header read timeout (possible scanner/slowloris): {msg}");
+                        } else {
+                            log::error!("Error serving connection: {msg}");
+                        }
                     }
                 });
             },
