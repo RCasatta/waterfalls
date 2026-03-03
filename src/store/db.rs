@@ -91,9 +91,12 @@ const VEC_TX_SEEN_MIN_SIZE: usize = 34; // 32 bytes (txid) + 1 byte (height) + 1
 
 impl DBStore {
     fn create_cf_descriptors(shared_db_cache_mb: u64) -> Vec<rocksdb::ColumnFamilyDescriptor> {
-        // Create a shared LRU cache for block-based tables
-        let cache_size = (shared_db_cache_mb * 1024 * 1024) as usize; // Convert MB to bytes
-        let shared_cache = Cache::new_lru_cache(cache_size);
+        let cache_size = (shared_db_cache_mb * 1024 * 1024) as usize;
+        // HyperClockCache is lock-free, reducing mutex contention under concurrent reads.
+        // estimated_entry_charge=0 uses the auto-growing variant, which dynamically sizes
+        // its internal table — safer than a fixed estimate when caching mixed-size entries
+        // (data blocks, index blocks, filter blocks).
+        let shared_cache = Cache::new_hyper_clock_cache(cache_size, 0);
 
         COLUMN_FAMILIES
             .iter()
