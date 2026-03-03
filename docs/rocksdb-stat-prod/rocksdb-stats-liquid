@@ -1,0 +1,90 @@
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: waterfalls::threads::blocks: RocksDB Stats:
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: === Column Family Stats ===
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: --- utxo ---
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: ** Compaction Stats [utxo] **
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Level    Files   Size     Score Read(GB)  Rn(GB) Rnp1(GB) Write(GB) WPreComp(GB) Wnew(GB) Moved(GB) W-Amp Rd(MB/s) Wr(MB/s) Comp(sec) CompMergeCPU(sec) Comp(cnt) Avg(sec) KeyIn KeyDrop Rblob(GB) Wblob(GB)
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]:   L0      1/0     17.37 MB   0.2      0.0     0.0      0.0       0.0       0.0      0.0       0.0   1.0      0.0     30.7      0.57              0.42         1    0.567   1001K      0       0.0       0.0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]:   L6      1/0     19.36 MB   0.0      0.0     0.0      0.0       0.0       0.0      0.0       0.0   0.6     41.5     16.6      1.17              0.82         1    1.168   1511K   910K       0.0       0.0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]:  Sum      2/0     36.74 MB   0.0      0.0     0.0      0.0       0.0       0.0      0.0       0.0   2.1     27.9     21.2      1.73              1.25         2    0.867   2512K   910K       0.0       0.0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]:  Int      0/0      0.00 KB   0.0      0.0     0.0      0.0       0.0       0.0      0.0       0.0   0.0      0.0      0.0      0.00              0.00         0    0.000       0      0       0.0       0.0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: ** Compaction Stats [utxo] **
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Priority    Files   Size     Score Read(GB)  Rn(GB) Rnp1(GB) Write(GB) WPreComp(GB) Wnew(GB) Moved(GB) W-Amp Rd(MB/s) Wr(MB/s) Comp(sec) CompMergeCPU(sec) Comp(cnt) Avg(sec) KeyIn KeyDrop Rblob(GB) Wblob(GB)
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]:  Low      0/0      0.00 KB   0.0      0.0     0.0      0.0       0.0       0.0      0.0       0.0   0.0     41.5     16.6      1.17              0.82         1    1.168   1511K   910K       0.0       0.0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: High      0/0      0.00 KB   0.0      0.0     0.0      0.0       0.0       0.0      0.0       0.0   0.0      0.0     30.7      0.57              0.42         1    0.567   1001K      0       0.0       0.0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Blob file count: 0, total size: 0.0 GB, garbage size: 0.0 GB, space amp: 0.0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Uptime(secs): 1873938.7 total, 2976.0 interval
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Flush(GB): cumulative 0.017, interval 0.000
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: AddFile(GB): cumulative 0.000, interval 0.000
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: AddFile(Total Files): cumulative 0, interval 0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: AddFile(L0 Files): cumulative 0, interval 0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: AddFile(Keys): cumulative 0, interval 0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Cumulative compaction: 0.04 GB write, 0.00 MB/s write, 0.05 GB read, 0.00 MB/s read, 1.7 seconds
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Interval compaction: 0.00 GB write, 0.00 MB/s write, 0.00 GB read, 0.00 MB/s read, 0.0 seconds
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Estimated pending compaction bytes: 0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Write Stall (count): cf-l0-file-count-limit-delays-with-ongoing-compaction: 0, cf-l0-file-count-limit-stops-with-ongoing-compaction: 0, l0-file-count-limit-delays: 0, l0-file-count-limit-stops: 0, memtable-limit-delays: 0, memtable-limit-stops: 0, pending-compaction-bytes-delays: 0, pending-compaction-bytes-stops: 0, total-delays: 0, total-stops: 0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Block cache LRUCache@0x559a1da0d340#7061 capacity: 64.00 MB seed: 233329554 usage: 63.25 MB table_size: 3664 occupancy: 3366 collections: 3123 last_copies: 1 last_secs: 0.000705 secs_since: 575
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Block cache entry stats(count,size,portion): DataBlock(3332,52.53 MB,82.0796%) FilterBlock(15,9.66 MB,15.0885%) IndexBlock(18,793.25 KB,1.2104%) Misc(1,0.00 KB,0%)
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: ** File Read Latency Histogram By Level [utxo] **
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: ** DB Stats **
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Uptime(secs): 1873938.7 total, 7256.3 interval
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Cumulative writes: 0 writes, 0 keys, 0 commit groups, 0.0 writes per commit group, ingest: 0.00 GB, 0.00 MB/s
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Cumulative WAL: 0 writes, 0 syncs, 0.00 writes per sync, written: 0.00 GB, 0.00 MB/s
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Cumulative stall: 00:00:0.000 H:M:S, 0.0 percent
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Interval writes: 0 writes, 0 keys, 0 commit groups, 0.0 writes per commit group, ingest: 0.00 MB, 0.00 MB/s
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Interval WAL: 0 writes, 0 syncs, 0.00 writes per sync, written: 0.00 GB, 0.00 MB/s
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Interval stall: 00:00:0.000 H:M:S, 0.0 percent
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Write Stall (count): write-buffer-manager-limit-stops: 0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: SST Files Size: 36.74 MB
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Live SST Size: 36.74 MB
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Memtable Size: 12.00 MB
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Estimated Keys: 212127
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: L0 Number of files: 1
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: L0 compression-ratio-at-level: 1.383758
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: L6 Number of files: 1
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: L6 compression-ratio-at-level: 1.537809
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: --- historyv2 ---
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: ** Compaction Stats [historyv2] **
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Level    Files   Size     Score Read(GB)  Rn(GB) Rnp1(GB) Write(GB) WPreComp(GB) Wnew(GB) Moved(GB) W-Amp Rd(MB/s) Wr(MB/s) Comp(sec) CompMergeCPU(sec) Comp(cnt) Avg(sec) KeyIn KeyDrop Rblob(GB) Wblob(GB)
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]:   L0      3/0     95.30 MB   0.8      0.0     0.0      0.0       0.0       0.0      0.0       0.0   1.0      0.0     60.2      0.78              0.55         1    0.779    744K      0       0.0       0.0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]:   L6     16/0    915.68 MB   0.0      0.0     0.0      0.0       0.0       0.0      0.0       0.0   0.0      0.0      0.0      0.00              0.00         0    0.000       0      0       0.0       0.0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]:  Sum     19/0   1010.98 MB   0.0      0.0     0.0      0.0       0.0       0.0      0.0       0.0   1.0      0.0     60.2      0.78              0.55         1    0.779    744K      0       0.0       0.0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]:  Int      0/0      0.00 KB   0.0      0.0     0.0      0.0       0.0       0.0      0.0       0.0   0.0      0.0      0.0      0.00              0.00         0    0.000       0      0       0.0       0.0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: ** Compaction Stats [historyv2] **
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Priority    Files   Size     Score Read(GB)  Rn(GB) Rnp1(GB) Write(GB) WPreComp(GB) Wnew(GB) Moved(GB) W-Amp Rd(MB/s) Wr(MB/s) Comp(sec) CompMergeCPU(sec) Comp(cnt) Avg(sec) KeyIn KeyDrop Rblob(GB) Wblob(GB)
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: High      0/0      0.00 KB   0.0      0.0     0.0      0.0       0.0       0.0      0.0       0.0   0.0      0.0     60.2      0.78              0.55         1    0.779    744K      0       0.0       0.0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Blob file count: 0, total size: 0.0 GB, garbage size: 0.0 GB, space amp: 0.0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Uptime(secs): 1873938.7 total, 4176.5 interval
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Flush(GB): cumulative 0.046, interval 0.000
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: AddFile(GB): cumulative 0.000, interval 0.000
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: AddFile(Total Files): cumulative 0, interval 0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: AddFile(L0 Files): cumulative 0, interval 0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: AddFile(Keys): cumulative 0, interval 0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Cumulative compaction: 0.05 GB write, 0.00 MB/s write, 0.00 GB read, 0.00 MB/s read, 0.8 seconds
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Interval compaction: 0.00 GB write, 0.00 MB/s write, 0.00 GB read, 0.00 MB/s read, 0.0 seconds
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Estimated pending compaction bytes: 0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Write Stall (count): cf-l0-file-count-limit-delays-with-ongoing-compaction: 0, cf-l0-file-count-limit-stops-with-ongoing-compaction: 0, l0-file-count-limit-delays: 0, l0-file-count-limit-stops: 0, memtable-limit-delays: 0, memtable-limit-stops: 0, pending-compaction-bytes-delays: 0, pending-compaction-bytes-stops: 0, total-delays: 0, total-stops: 0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Block cache LRUCache@0x559a1da0d340#7061 capacity: 64.00 MB seed: 233329554 usage: 63.25 MB table_size: 3664 occupancy: 3366 collections: 3123 last_copies: 1 last_secs: 0.000705 secs_since: 575
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Block cache entry stats(count,size,portion): DataBlock(3332,52.53 MB,82.0796%) FilterBlock(15,9.66 MB,15.0885%) IndexBlock(18,793.25 KB,1.2104%) Misc(1,0.00 KB,0%)
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: ** File Read Latency Histogram By Level [historyv2] **
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: ** DB Stats **
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Uptime(secs): 1873938.7 total, 7256.3 interval
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Cumulative writes: 0 writes, 0 keys, 0 commit groups, 0.0 writes per commit group, ingest: 0.00 GB, 0.00 MB/s
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Cumulative WAL: 0 writes, 0 syncs, 0.00 writes per sync, written: 0.00 GB, 0.00 MB/s
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Cumulative stall: 00:00:0.000 H:M:S, 0.0 percent
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Interval writes: 0 writes, 0 keys, 0 commit groups, 0.0 writes per commit group, ingest: 0.00 MB, 0.00 MB/s
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Interval WAL: 0 writes, 0 syncs, 0.00 writes per sync, written: 0.00 GB, 0.00 MB/s
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Interval stall: 00:00:0.000 H:M:S, 0.0 percent
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Write Stall (count): write-buffer-manager-limit-stops: 0
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: SST Files Size: 1010.98 MB
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Live SST Size: 1010.98 MB
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Memtable Size: 32.00 MB
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: Estimated Keys: 8868928
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: L0 Number of files: 3
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: L0 compression-ratio-at-level: 0.976556
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: L6 Number of files: 16
+Mar 03 11:08:12 unique waterfalls-mainnet-start[7061]: L6 compression-ratio-at-level: 0.978791
+

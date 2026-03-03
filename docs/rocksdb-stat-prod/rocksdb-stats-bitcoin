@@ -1,0 +1,104 @@
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: === Column Family Stats ===
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: --- utxo ---
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: ** Compaction Stats [utxo] **
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Level    Files   Size     Score Read(GB)  Rn(GB) Rnp1(GB) Write(GB) WPreComp(GB) Wnew(GB) Moved(GB) W-Amp Rd(MB/s) Wr(MB/s) Comp(sec) CompMergeCPU(sec) Comp(cnt) Avg(sec) KeyIn KeyDrop Rblob(GB) Wblob(GB)
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:   L0      0/0      0.00 KB   0.0      0.0     0.0      0.0       0.9       0.9      0.9       0.0   1.0      0.0     53.7     16.40             10.97        33    0.497     32M      0       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:   L4      5/0    200.37 MB   0.9      2.1     0.9      1.2       1.7       2.2      0.5       0.0   1.9     33.8     27.2     62.92             53.42         9    6.991     74M  5110K       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:   L5      4/0    274.96 MB   0.7      0.4     0.3      0.1       0.4       0.5      0.3       0.2   1.4     28.5     27.8     15.14             12.91         5    3.027     17M   299K       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:   L6     83/0      4.93 GB   0.0      5.5     0.3      5.2       5.1       7.1     -0.0       0.0  15.3     30.6     28.7    183.54            130.26        10   18.354    186M    14M       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:  Sum     92/0      5.39 GB   0.0      8.0     1.5      6.5       8.1      10.7      1.6       0.2   9.4     29.4     29.8    278.00            207.56        57    4.877    311M    20M       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:  Int      0/0      0.00 KB   0.0      0.0     0.0      0.0       0.0       0.0      0.0       0.0   0.0      0.0      0.0      0.00              0.00         0    0.000       0      0       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: ** Compaction Stats [utxo] **
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Priority    Files   Size     Score Read(GB)  Rn(GB) Rnp1(GB) Write(GB) WPreComp(GB) Wnew(GB) Moved(GB) W-Amp Rd(MB/s) Wr(MB/s) Comp(sec) CompMergeCPU(sec) Comp(cnt) Avg(sec) KeyIn KeyDrop Rblob(GB) Wblob(GB)
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:  Low      0/0      0.00 KB   0.0      8.0     1.5      6.5       7.2       9.8      0.8       0.0   0.0     31.3     28.3    261.60            196.59        24   10.900    279M    20M       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: High      0/0      0.00 KB   0.0      0.0     0.0      0.0       0.9       0.9      0.9       0.0   0.0      0.0     53.7     16.40             10.97        33    0.497     32M      0       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Blob file count: 0, total size: 0.0 GB, garbage size: 0.0 GB, space amp: 0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Uptime(secs): 1793049.8 total, 1309.0 interval
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Flush(GB): cumulative 0.859, interval 0.000
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: AddFile(GB): cumulative 0.000, interval 0.000
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: AddFile(Total Files): cumulative 0, interval 0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: AddFile(L0 Files): cumulative 0, interval 0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: AddFile(Keys): cumulative 0, interval 0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Cumulative compaction: 8.09 GB write, 0.00 MB/s write, 7.99 GB read, 0.00 MB/s read, 278.0 seconds
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Interval compaction: 0.00 GB write, 0.00 MB/s write, 0.00 GB read, 0.00 MB/s read, 0.0 seconds
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Estimated pending compaction bytes: 0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Write Stall (count): cf-l0-file-count-limit-delays-with-ongoing-compaction: 0, cf-l0-file-count-limit-stops-with-ongoing-compaction: 0, l0-file-count-limit-delays: 0, l0-file-count-limit-stops: 0, memtable-limit-delays: 0, memtable-limit-stops: 0, pending-compaction-bytes-delays: 0, pending-compaction-bytes-stops: 0, total-delays: 0, total-stops: 0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Block cache LRUCache@0x55ac48534010#832697 capacity: 200.00 MB seed: 233329554 usage: 199.14 MB table_size: 65536 occupancy: 10016 collections: 2989 last_copies: 1 last_secs: 0.003979 secs_since: 108
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Block cache entry stats(count,size,portion): DataBlock(9807,153.84 MB,76.9209%) FilterBlock(106,33.46 MB,16.729%) IndexBlock(102,11.00 MB,5.49924%) Misc(1,0.00 KB,0%)
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: ** File Read Latency Histogram By Level [utxo] **
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: ** DB Stats **
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Uptime(secs): 1793049.8 total, 7876.6 interval
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Cumulative writes: 0 writes, 0 keys, 0 commit groups, 0.0 writes per commit group, ingest: 0.00 GB, 0.00 MB/s
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Cumulative WAL: 0 writes, 0 syncs, 0.00 writes per sync, written: 0.00 GB, 0.00 MB/s
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Cumulative stall: 00:00:0.000 H:M:S, 0.0 percent
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Interval writes: 0 writes, 0 keys, 0 commit groups, 0.0 writes per commit group, ingest: 0.00 MB, 0.00 MB/s
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Interval WAL: 0 writes, 0 syncs, 0.00 writes per sync, written: 0.00 GB, 0.00 MB/s
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Interval stall: 00:00:0.000 H:M:S, 0.0 percent
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Write Stall (count): write-buffer-manager-limit-stops: 0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: SST Files Size: 5520.48 MB
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Live SST Size: 5520.48 MB
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Memtable Size: 54.00 MB
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Estimated Keys: 152698400
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L4 Number of files: 5
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L4 compression-ratio-at-level: 1.782353
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L5 Number of files: 4
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L5 compression-ratio-at-level: 1.794840
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L6 Number of files: 83
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L6 compression-ratio-at-level: 1.615701
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: --- historyv2 ---
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: ** Compaction Stats [historyv2] **
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Level    Files   Size     Score Read(GB)  Rn(GB) Rnp1(GB) Write(GB) WPreComp(GB) Wnew(GB) Moved(GB) W-Amp Rd(MB/s) Wr(MB/s) Comp(sec) CompMergeCPU(sec) Comp(cnt) Avg(sec) KeyIn KeyDrop Rblob(GB) Wblob(GB)
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:   L0      3/0    152.69 MB   0.8      0.0     0.0      0.0       1.7       1.7      1.7       0.0   1.0      0.0     59.0     29.98             17.48        35    0.856     22M      0       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:   L2      4/0    210.63 MB   0.8      0.6     0.4      0.2       0.6       0.6      0.4       0.0   1.4     60.7     59.1      9.93              4.86         2    4.964   4825K   895K       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:   L3      3/0    236.00 MB   0.9      2.9     1.3      1.6       2.9       2.9      1.3       0.2   2.2     52.4     51.4     56.87             21.61         7    8.124     18M  3028K       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:   L4    137/0    711.10 MB   0.3      4.8     1.4      3.4       4.7       4.7      1.3       0.1   3.5     58.5     58.0     83.27             27.22        21    3.965     20M  1361K       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:   L5      0/0      0.00 KB   0.0      0.5     0.5      0.0       0.5       0.5      0.5       2.3   1.0     34.9     34.9     15.88              2.97         5    3.176   2117K      0       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:   L6   4033/0    250.10 GB   0.0    253.8     2.9    250.9     252.6     252.6      1.6       0.0  87.9     61.5     61.2   4225.89           1184.38       185   22.843   1501M  2851K       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:  Sum   4180/0    251.38 GB   0.0    262.6     6.5    256.1     263.0     263.0      6.9       2.6 152.2     60.8     60.9   4421.82           1258.51       255   17.340   1569M  8136K       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:  Int      0/0      0.00 KB   0.0      0.0     0.0      0.0       0.0       0.0      0.0       0.0   0.0      0.0      0.0      0.00              0.00         0    0.000       0      0       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: ** Compaction Stats [historyv2] **
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Priority    Files   Size     Score Read(GB)  Rn(GB) Rnp1(GB) Write(GB) WPreComp(GB) Wnew(GB) Moved(GB) W-Amp Rd(MB/s) Wr(MB/s) Comp(sec) CompMergeCPU(sec) Comp(cnt) Avg(sec) KeyIn KeyDrop Rblob(GB) Wblob(GB)
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]:  Low      0/0      0.00 KB   0.0    262.6     6.5    256.1     261.2     261.2      5.1       0.0   0.0     61.2     60.9   4391.84           1241.03       220   19.963   1547M  8136K       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: High      0/0      0.00 KB   0.0      0.0     0.0      0.0       1.7       1.7      1.7       0.0   0.0      0.0     59.0     29.98             17.48        35    0.856     22M      0       0.0       0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Blob file count: 0, total size: 0.0 GB, garbage size: 0.0 GB, space amp: 0.0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Uptime(secs): 1793049.9 total, 1309.1 interval
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Flush(GB): cumulative 1.728, interval 0.000
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: AddFile(GB): cumulative 0.000, interval 0.000
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: AddFile(Total Files): cumulative 0, interval 0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: AddFile(L0 Files): cumulative 0, interval 0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: AddFile(Keys): cumulative 0, interval 0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Cumulative compaction: 262.98 GB write, 0.15 MB/s write, 262.59 GB read, 0.15 MB/s read, 4421.8 seconds
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Interval compaction: 0.00 GB write, 0.00 MB/s write, 0.00 GB read, 0.00 MB/s read, 0.0 seconds
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Estimated pending compaction bytes: 0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Write Stall (count): cf-l0-file-count-limit-delays-with-ongoing-compaction: 0, cf-l0-file-count-limit-stops-with-ongoing-compaction: 0, l0-file-count-limit-delays: 0, l0-file-count-limit-stops: 0, memtable-limit-delays: 0, memtable-limit-stops: 0, pending-compaction-bytes-delays: 0, pending-compaction-bytes-stops: 0, total-delays: 0, total-stops: 0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Block cache LRUCache@0x55ac48534010#832697 capacity: 200.00 MB seed: 233329554 usage: 199.14 MB table_size: 65536 occupancy: 10016 collections: 2989 last_copies: 1 last_secs: 0.003979 secs_since: 108
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Block cache entry stats(count,size,portion): DataBlock(9807,153.84 MB,76.9209%) FilterBlock(106,33.46 MB,16.729%) IndexBlock(102,11.00 MB,5.49924%) Misc(1,0.00 KB,0%)
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: ** File Read Latency Histogram By Level [historyv2] **
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: ** DB Stats **
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Uptime(secs): 1793049.9 total, 7876.7 interval
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Cumulative writes: 0 writes, 0 keys, 0 commit groups, 0.0 writes per commit group, ingest: 0.00 GB, 0.00 MB/s
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Cumulative WAL: 0 writes, 0 syncs, 0.00 writes per sync, written: 0.00 GB, 0.00 MB/s
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Cumulative stall: 00:00:0.000 H:M:S, 0.0 percent
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Interval writes: 0 writes, 0 keys, 0 commit groups, 0.0 writes per commit group, ingest: 0.00 MB, 0.00 MB/s
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Interval WAL: 0 writes, 0 syncs, 0.00 writes per sync, written: 0.00 GB, 0.00 MB/s
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Interval stall: 00:00:0.000 H:M:S, 0.0 percent
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Write Stall (count): write-buffer-manager-limit-stops: 0
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: SST Files Size: 257414.65 MB
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Live SST Size: 257414.65 MB
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Memtable Size: 38.00 MB
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: Estimated Keys: 1492760781
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L0 Number of files: 3
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L0 compression-ratio-at-level: 0.975746
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L2 Number of files: 4
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L2 compression-ratio-at-level: 0.981718
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L3 Number of files: 3
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L3 compression-ratio-at-level: 0.981912
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L4 Number of files: 137
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L4 compression-ratio-at-level: 0.985149
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L6 Number of files: 4033
+Mar 03 12:52:11 unique waterfalls-bitcoin-mainnet-start[832697]: L6 compression-ratio-at-level: 0.989558
+
