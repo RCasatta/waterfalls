@@ -107,7 +107,7 @@
             ELEMENTSD_EXEC = "${pkgs.elementsd}/bin/elementsd";
             BITCOIND_EXEC = "${pkgs.bitcoind}/bin/bitcoind";
 
-            buildInputs = with pkgs; [ heaptrack rocksdb.tools];
+            buildInputs = with pkgs; [ rocksdb.tools ];
           };
         }
       );
