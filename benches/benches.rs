@@ -10,7 +10,9 @@ use elements::secp256k1_zkp::rand::{thread_rng, RngCore};
 use elements::{OutPoint, Txid};
 use elements_miniscript::Descriptor;
 use elements_miniscript::DescriptorPublicKey;
-use rocksdb::{Options, WriteBatch, DB};
+use rocksdb::{
+    BlockBasedOptions, Cache, ColumnFamilyDescriptor, DBCompressionType, Options, WriteBatch, DB,
+};
 use tempfile;
 use waterfalls::WaterfallResponse;
 
@@ -21,7 +23,8 @@ criterion_group!(
     sign_verify,
     writebatch_sorting,
     hasher,
-    txid_from_hex
+    txid_from_hex,
+    block_cache
 );
 criterion_main!(benches);
 
@@ -368,4 +371,175 @@ pub fn txid_from_hex(c: &mut Criterion) {
                 });
             },
         );
+}
+
+fn open_cache_bench_db(dir: &std::path::Path, cache: &Cache) -> DB {
+    let cfs = ["utxo", "history"]
+        .iter()
+        .map(|&name| {
+            let mut cf_opts = Options::default();
+            cf_opts.set_compression_type(DBCompressionType::None);
+
+            let mut block_opts = BlockBasedOptions::default();
+            block_opts.set_block_cache(cache);
+            block_opts.set_block_size(16 * 1024);
+            block_opts.set_cache_index_and_filter_blocks(true);
+            block_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
+            if name == "history" {
+                block_opts.set_bloom_filter(10.0, true);
+            }
+            cf_opts.set_block_based_table_factory(&block_opts);
+
+            ColumnFamilyDescriptor::new(name, cf_opts)
+        })
+        .collect::<Vec<_>>();
+
+    let mut db_opts = Options::default();
+    db_opts.create_if_missing(true);
+    db_opts.create_missing_column_families(true);
+    DB::open_cf_descriptors(&db_opts, dir, cfs).unwrap()
+}
+
+fn populate_cache_bench_db(db: &DB, num_utxo_keys: u64, num_history_keys: u64) {
+    let cf = db.cf_handle("utxo").unwrap();
+    for start in (0..num_utxo_keys).step_by(10_000) {
+        let mut batch = WriteBatch::default();
+        for i in start..(start + 10_000).min(num_utxo_keys) {
+            let mut key = [0u8; 36];
+            key[..8].copy_from_slice(&i.to_be_bytes());
+            batch.put_cf(&cf, key, i.to_be_bytes());
+        }
+        db.write(batch).unwrap();
+    }
+
+    let cf = db.cf_handle("history").unwrap();
+    for start in (0..num_history_keys).step_by(10_000) {
+        let mut batch = WriteBatch::default();
+        for i in start..(start + 10_000).min(num_history_keys) {
+            batch.put_cf(&cf, i.to_be_bytes(), vec![0xABu8; 100 + (i as usize % 50)]);
+        }
+        db.write(batch).unwrap();
+    }
+
+    for name in ["utxo", "history"] {
+        let cf = db.cf_handle(name).unwrap();
+        db.flush_cf(&cf).unwrap();
+        db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
+    }
+}
+
+/// Compares LRUCache vs HyperClockCache for RocksDB block cache using
+/// `multi_get_cf` (the actual production access pattern) under varying
+/// concurrency levels.
+///
+/// Two scenarios model production data-to-cache ratios:
+/// - **liquid**: ~21 MB data, 2 MB cache (~9%) — matches Liquid mainnet (~6%)
+/// - **bitcoin**: ~76 MB data, 2 MB cache (~2.6%) — matches Bitcoin UTXO (~3.6%)
+///
+/// Each scenario tests 1, 4, and 16 concurrent reader threads.
+pub fn block_cache(c: &mut Criterion) {
+    const LOOKUPS_PER_ITER: usize = 100;
+
+    struct Scenario {
+        name: &'static str,
+        cache_size: usize,
+        num_utxo_keys: u64,
+        num_history_keys: u64,
+    }
+
+    let scenarios = [
+        Scenario {
+            name: "liquid",
+            cache_size: 2 * 1024 * 1024,
+            num_utxo_keys: 200_000,
+            num_history_keys: 100_000,
+        },
+        Scenario {
+            name: "bitcoin",
+            cache_size: 2 * 1024 * 1024,
+            num_utxo_keys: 300_000,
+            num_history_keys: 500_000,
+        },
+    ];
+
+    let thread_counts: &[usize] = &[1, 4, 16];
+
+    for scenario in &scenarios {
+        let mut rng = thread_rng();
+        let history_keys: Vec<[u8; 8]> = (0..LOOKUPS_PER_ITER)
+            .map(|_| (rng.next_u64() % (scenario.num_history_keys * 2)).to_be_bytes())
+            .collect();
+
+        let lru_dir = tempfile::TempDir::new().unwrap();
+        let lru_cache = Cache::new_lru_cache(scenario.cache_size);
+        let lru_db = open_cache_bench_db(lru_dir.path(), &lru_cache);
+        populate_cache_bench_db(&lru_db, scenario.num_utxo_keys, scenario.num_history_keys);
+
+        let hcc_dir = tempfile::TempDir::new().unwrap();
+        let hcc_cache = Cache::new_hyper_clock_cache(scenario.cache_size, 0);
+        let hcc_db = open_cache_bench_db(hcc_dir.path(), &hcc_cache);
+        populate_cache_bench_db(&hcc_db, scenario.num_utxo_keys, scenario.num_history_keys);
+
+        let mut group = c.benchmark_group(format!("block_cache/{}", scenario.name));
+
+        for &num_threads in thread_counts {
+            let label = format!("{}t", num_threads);
+
+            group.bench_function(format!("lru/{label}"), |b| {
+                if num_threads == 1 {
+                    let cf = lru_db.cf_handle("history").unwrap();
+                    b.iter(|| {
+                        let keys: Vec<_> = history_keys.iter().map(|k| (&cf, *k)).collect();
+                        black_box(lru_db.multi_get_cf(keys));
+                    });
+                } else {
+                    b.iter_custom(|iters| {
+                        let start = std::time::Instant::now();
+                        std::thread::scope(|s| {
+                            for _ in 0..num_threads {
+                                s.spawn(|| {
+                                    let cf = lru_db.cf_handle("history").unwrap();
+                                    for _ in 0..iters {
+                                        let keys: Vec<_> =
+                                            history_keys.iter().map(|k| (&cf, *k)).collect();
+                                        black_box(lru_db.multi_get_cf(keys));
+                                    }
+                                });
+                            }
+                        });
+                        start.elapsed()
+                    });
+                }
+            });
+
+            group.bench_function(format!("hyperclock/{label}"), |b| {
+                if num_threads == 1 {
+                    let cf = hcc_db.cf_handle("history").unwrap();
+                    b.iter(|| {
+                        let keys: Vec<_> = history_keys.iter().map(|k| (&cf, *k)).collect();
+                        black_box(hcc_db.multi_get_cf(keys));
+                    });
+                } else {
+                    b.iter_custom(|iters| {
+                        let start = std::time::Instant::now();
+                        std::thread::scope(|s| {
+                            for _ in 0..num_threads {
+                                s.spawn(|| {
+                                    let cf = hcc_db.cf_handle("history").unwrap();
+                                    for _ in 0..iters {
+                                        let keys: Vec<_> =
+                                            history_keys.iter().map(|k| (&cf, *k)).collect();
+                                        black_box(hcc_db.multi_get_cf(keys));
+                                    }
+                                });
+                            }
+                        });
+                        start.elapsed()
+                    });
+                }
+            });
+        }
+
+        group.finish();
+    }
 }
