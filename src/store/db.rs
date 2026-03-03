@@ -96,7 +96,9 @@ impl DBStore {
         // estimated_entry_charge=0 uses the auto-growing variant, which dynamically sizes
         // its internal table — safer than a fixed estimate when caching mixed-size entries
         // (data blocks, index blocks, filter blocks).
-        let shared_cache = Cache::new_hyper_clock_cache(cache_size, 0);
+        // NOTE: a zero cache size is used to mean "disabled". Building a HyperClockCache
+        // with zero bytes can crash in native RocksDB code.
+        let shared_cache = (cache_size > 0).then(|| Cache::new_hyper_clock_cache(cache_size, 0));
 
         COLUMN_FAMILIES
             .iter()
@@ -109,7 +111,9 @@ impl DBStore {
                 if name == UTXO_CF || name == HISTORY_CF {
                     // Use shared cache instead of optimize_for_point_lookup
                     let mut block_opts = BlockBasedOptions::default();
-                    block_opts.set_block_cache(&shared_cache);
+                    if let Some(cache) = shared_cache.as_ref() {
+                        block_opts.set_block_cache(cache);
+                    }
 
                     // Configure for point lookups similar to optimize_for_point_lookup
                     block_opts.set_block_size(16 * 1024); // 16KB blocks
