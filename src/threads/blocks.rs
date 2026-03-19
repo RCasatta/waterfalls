@@ -50,7 +50,8 @@ async fn get_next_block_to_index(
                 Ok(ChainStatus::NewBlock(next)) => Some(next),
                 Ok(ChainStatus::Reorg) => {
                     log::warn!("reorg happened! {last:?} removed from the chain");
-                    let previous_height = last.height - 1;
+                    let reorged_height = last.height;
+                    let previous_height = reorged_height - 1;
                     let blocks_hash_ts = state
                         .blocks_hash_ts
                         .lock()
@@ -60,8 +61,13 @@ async fn get_next_block_to_index(
                         .expect("can't get previous block_hash");
                     let previous_block_meta =
                         BlockMeta::new(previous_height, blocks_hash_ts.0, blocks_hash_ts.1);
+                    log::info!(
+                        "reorg: rolling back to previous block {:?}, calling store.reorg()",
+                        previous_block_meta
+                    );
                     *last_indexed = Some(previous_block_meta);
                     state.store.reorg();
+                    log::info!("reorg: store.reorg() completed, will re-fetch block at height {}", reorged_height);
                     None
                 }
                 Ok(ChainStatus::Tip) => {

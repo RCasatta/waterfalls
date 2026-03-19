@@ -478,6 +478,20 @@ impl DBStore {
             .lock()
             .map_err(|e| anyhow::anyhow!("reorg_data lock poisoned: {e}"))?;
 
+        log::info!(
+            "reorg: restoring {} spent UTXOs, removing {} created UTXOs, removing {} history entries",
+            reorg_data.spent.len(),
+            reorg_data.utxos_created.len(),
+            reorg_data.history.len()
+        );
+
+        if reorg_data.spent.is_empty()
+            && reorg_data.utxos_created.is_empty()
+            && reorg_data.history.is_empty()
+        {
+            log::warn!("reorg: reorg_data is empty! This likely means the server restarted after indexing a block that was later reorged. A reindex may be required.");
+        }
+
         let mut batch = rocksdb::WriteBatch::default();
 
         // Restore UTXOs that were spent in the reorged block
@@ -502,6 +516,8 @@ impl DBStore {
         }
 
         self.write(batch)?;
+
+        log::info!("reorg: database rollback completed successfully");
 
         Ok(())
     }
