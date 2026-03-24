@@ -127,6 +127,11 @@ pub struct Arguments {
     /// Timeout in seconds for reading incoming HTTP request headers (protects against slowloris attacks)
     #[arg(env, long, default_value = "10")]
     pub header_read_timeout_seconds: u64,
+
+    /// Number of recent block heights to keep reorg data for. Older reorg data is automatically deleted. Default is 6.
+    #[cfg(feature = "db")]
+    #[arg(env, long)]
+    pub reorg_data_keep_heights: Option<u32>,
 }
 
 // We can't automatically derive Debug for Arguments because the server_key and wif_key are sensitive data
@@ -167,7 +172,9 @@ impl std::fmt::Debug for Arguments {
 
         #[cfg(feature = "db")]
         {
-            d = d.field("db_dir", &self.db_dir);
+            d = d
+                .field("db_dir", &self.db_dir)
+                .field("reorg_data_keep_heights", &self.reorg_data_keep_heights);
         }
 
         d.finish()
@@ -304,9 +311,13 @@ fn get_store(args: &Arguments) -> Result<AnyStore, Error> {
             let mut path = p.clone();
             path.push("db");
             path.push(args.network.to_string());
-            let db_store =
-                store::db::DBStore::open(&path, args.shared_db_cache_mb, args.enable_db_statistics)
-                    .map_err(|e| Error::DBOpen(format!("{e:?}")))?;
+            let db_store = store::db::DBStore::open(
+                &path,
+                args.shared_db_cache_mb,
+                args.enable_db_statistics,
+                args.reorg_data_keep_heights.unwrap_or(6),
+            )
+            .map_err(|e| Error::DBOpen(format!("{e:?}")))?;
 
             // Perform manual compaction if requested
             if args.do_compaction {

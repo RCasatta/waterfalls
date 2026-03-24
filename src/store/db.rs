@@ -40,6 +40,9 @@ pub struct DBStore {
     /// Whether we are in Initial Block Download mode.
     /// during initial block download we do something different to speed up initial indexing, like writing disabling the wal.
     ibd: AtomicBool,
+
+    /// Number of recent block heights to keep reorg data for. Older reorg data is automatically deleted.
+    reorg_data_keep_heights: u32,
 }
 
 // Can txid be indexed by u32? At the time of writing (2025-02-06) there are about 1B txs on mainnet, so it's possible to have u32 -> txid (u32 is 4B).
@@ -138,7 +141,12 @@ impl DBStore {
             .collect()
     }
 
-    pub fn open(path: &Path, shared_db_cache_mb: u64, enable_statistics: bool) -> Result<Self> {
+    pub fn open(
+        path: &Path,
+        shared_db_cache_mb: u64,
+        enable_statistics: bool,
+        reorg_data_keep_heights: u32,
+    ) -> Result<Self> {
         let mut db_opts = Options::default();
 
         // Enable statistics collection for detailed metrics including bloom filter stats
@@ -167,6 +175,7 @@ impl DBStore {
             db,
             salt,
             ibd: AtomicBool::new(true),
+            reorg_data_keep_heights,
         };
         Ok(store)
     }
@@ -654,6 +663,13 @@ impl Store for DBStore {
         let reorg_cf = self.db.cf_handle(REORG_CF).expect("missing REORG_CF");
         batch.put_cf(&reorg_cf, block_meta.height().to_be_bytes(), reorg_bytes);
 
+        // Delete old reorg data that exceeds the retention period
+        let current_height = block_meta.height();
+        if current_height >= self.reorg_data_keep_heights {
+            let height_to_delete = current_height - self.reorg_data_keep_heights;
+            batch.delete_cf(&reorg_cf, height_to_delete.to_be_bytes());
+        }
+
         // Single atomic write (includes reorg data)
         self.write(batch)?;
 
@@ -788,6 +804,7 @@ mod test {
             db: DB::open(&opts, tempdir.path()).unwrap(),
             salt: 0,
             ibd: AtomicBool::new(true),
+            reorg_data_keep_heights: 6,
         };
         let hash = db.hash(b"test");
         assert_eq!(hash, 2879782050633127044);
@@ -796,7 +813,7 @@ mod test {
     #[test]
     fn test_db() {
         let tempdir = tempfile::TempDir::new().unwrap();
-        let db = DBStore::open(tempdir.path(), 64, true).unwrap();
+        let db = DBStore::open(tempdir.path(), 64, true, 6).unwrap();
 
         let salt = get_or_init_salt(&db.db).unwrap();
         assert_ne!(salt, 0);
