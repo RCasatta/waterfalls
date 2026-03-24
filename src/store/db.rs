@@ -20,7 +20,7 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
 };
 
@@ -36,9 +36,6 @@ use crate::{
 pub struct DBStore {
     db: DB,
     salt: u64,
-
-    /// Reorg data for handling blockchain reorganizations
-    reorg_data: Mutex<ReorgData>,
 
     /// Whether we are in Initial Block Download mode.
     /// during initial block download we do something different to speed up initial indexing, like writing disabling the wal.
@@ -62,7 +59,10 @@ const OTHER_CF: &str = "other";
 // when height exists, it also mean the indexing happened up to that height included
 const HASHES_CF: &str = "hashesv2"; // Height -> (BlockHash, Timestamp) // This is used on startup to load data into memory, not used on waterfall request
 
-const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF];
+// Reorg data for each block to enable rollback on chain reorganization
+const REORG_CF: &str = "reorg"; // Height -> ReorgData (serialized)
+
+const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF, REORG_CF];
 
 // height key for indexed blocks
 // const INDEXED_KEY: &[u8] = b"I";
@@ -166,7 +166,6 @@ impl DBStore {
         let store = DBStore {
             db,
             salt,
-            reorg_data: Mutex::new(ReorgData::default()),
             ibd: AtomicBool::new(true),
         };
         Ok(store)
@@ -455,11 +454,25 @@ impl DBStore {
         Ok(())
     }
 
-    fn _reorg(&self) -> Result<()> {
-        let reorg_data = self
-            .reorg_data
-            .lock()
-            .map_err(|e| anyhow::anyhow!("reorg_data lock poisoned: {e}"))?;
+    fn _reorg(&self, height: Height) -> Result<()> {
+        log::warn!("reorg: reading reorg data for height {}", height);
+
+        // Read reorg data from database
+        let reorg_cf = self.db.cf_handle(REORG_CF).expect("missing REORG_CF");
+        let reorg_bytes = self
+            .db
+            .get_cf(&reorg_cf, height.to_be_bytes())?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No reorg data found for height {}. This likely means the server restarted \
+                    after indexing a block that was later reorged. A reindex may be required.",
+                    height
+                )
+            })?;
+
+        // Deserialize reorg data
+        let reorg_data = ReorgData::from_bytes(&reorg_bytes)
+            .with_context(|| format!("failed to deserialize reorg data for height {}", height))?;
 
         log::info!(
             "reorg: restoring {} spent UTXOs, removing {} created UTXOs, removing {} history entries",
@@ -467,13 +480,6 @@ impl DBStore {
             reorg_data.utxos_created.len(),
             reorg_data.history.len()
         );
-
-        if reorg_data.spent.is_empty()
-            && reorg_data.utxos_created.is_empty()
-            && reorg_data.history.is_empty()
-        {
-            log::warn!("reorg: reorg_data is empty! This likely means the server restarted after indexing a block that was later reorged. A reindex may be required.");
-        }
 
         let mut batch = rocksdb::WriteBatch::default();
 
@@ -498,9 +504,15 @@ impl DBStore {
             self.remove_history_entries_batch(&mut batch, &reorg_data.history)?;
         }
 
+        // Delete the reorg data entry from the database since it's been applied
+        batch.delete_cf(&reorg_cf, height.to_be_bytes());
+
         self.write(batch)?;
 
-        log::info!("reorg: database rollback completed successfully");
+        log::info!(
+            "reorg: database rollback completed successfully for height {}",
+            height
+        );
 
         Ok(())
     }
@@ -627,22 +639,29 @@ impl Store for DBStore {
         self.insert_utxos(&mut batch, &utxo_created)
             .with_context(|| format!("failed to insert utxos for block {block_meta:?}"))?;
 
-        // Single atomic write
-        self.write(batch)?;
-
         // Store reorg data for potential blockchain reorganization correction
-        {
-            let mut reorg_data = self.reorg_data.lock().unwrap();
-            reorg_data.spent = outpoint_script_hashes;
-            reorg_data.history = history_map;
-            reorg_data.utxos_created = utxo_created;
-        }
+        // Create ReorgData and persist it to the database
+        let reorg_data = ReorgData {
+            spent: outpoint_script_hashes,
+            history: history_map,
+            utxos_created: utxo_created,
+        };
+
+        // Serialize and save reorg data
+        let reorg_bytes = reorg_data
+            .to_bytes()
+            .with_context(|| format!("failed to serialize reorg data for block {block_meta:?}"))?;
+        let reorg_cf = self.db.cf_handle(REORG_CF).expect("missing REORG_CF");
+        batch.put_cf(&reorg_cf, block_meta.height().to_be_bytes(), reorg_bytes);
+
+        // Single atomic write (includes reorg data)
+        self.write(batch)?;
 
         Ok(())
     }
 
-    fn reorg(&self) {
-        if let Err(e) = self._reorg() {
+    fn reorg(&self, height: Height) {
+        if let Err(e) = self._reorg(height) {
             error_panic!("reorg failed: {e}");
         }
     }
@@ -746,15 +765,12 @@ fn concat_merge(
 mod test {
     use elements::{hashes::Hash, BlockHash, OutPoint, Txid};
     use rocksdb::DB;
-    use std::{
-        collections::BTreeMap,
-        sync::{atomic::AtomicBool, Mutex},
-    };
+    use std::{collections::BTreeMap, sync::atomic::AtomicBool};
 
     use crate::store::{
         db::{
             estimate_history_size, get_or_init_salt, serialize_outpoint, vec_tx_seen_from_be_bytes,
-            vec_tx_seen_to_be_bytes, ReorgData, TxSeen,
+            vec_tx_seen_to_be_bytes, TxSeen,
         },
         Store,
     };
@@ -771,7 +787,6 @@ mod test {
         let db = DBStore {
             db: DB::open(&opts, tempdir.path()).unwrap(),
             salt: 0,
-            reorg_data: Mutex::new(ReorgData::default()),
             ibd: AtomicBool::new(true),
         };
         let hash = db.hash(b"test");

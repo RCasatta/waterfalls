@@ -89,7 +89,7 @@ impl Store for MemoryStore {
         Ok(())
     }
 
-    fn reorg(&self) {
+    fn reorg(&self, _height: crate::Height) {
         self.insert_utxos(&self.last_block.lock().unwrap());
     }
 

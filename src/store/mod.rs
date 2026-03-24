@@ -52,7 +52,8 @@ pub trait Store {
     ) -> Result<()>;
 
     /// Reorg, reinsert the last block unspent utxos
-    fn reorg(&self);
+    /// height: the height of the block that was reorged (needs to be rolled back)
+    fn reorg(&self, height: Height);
 
     /// Called when the initial block download is finished
     fn ibd_finished(&self);
@@ -105,11 +106,11 @@ impl Store for AnyStore {
         }
     }
 
-    fn reorg(&self) {
+    fn reorg(&self, height: Height) {
         match self {
             #[cfg(feature = "db")]
-            AnyStore::Db(d) => d.reorg(),
-            AnyStore::Mem(m) => m.reorg(),
+            AnyStore::Db(d) => d.reorg(height),
+            AnyStore::Mem(m) => m.reorg(height),
         }
     }
 

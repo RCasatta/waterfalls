@@ -77,7 +77,7 @@ async fn get_next_block_to_index(
                         previous_block_meta
                     );
                     *last_indexed = Some(previous_block_meta);
-                    state.store.reorg();
+                    state.store.reorg(reorged_height);
                     log::info!("reorg: store.reorg() completed, will re-fetch block at height {}", reorged_height);
                     None
                 }
