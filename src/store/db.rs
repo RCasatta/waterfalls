@@ -649,25 +649,29 @@ impl Store for DBStore {
             .with_context(|| format!("failed to insert utxos for block {block_meta:?}"))?;
 
         // Store reorg data for potential blockchain reorganization correction
-        // Create ReorgData and persist it to the database
-        let reorg_data = ReorgData {
-            spent: outpoint_script_hashes,
-            history: history_map,
-            utxos_created: utxo_created,
-        };
+        // Skip during IBD (Initial Block Download) as reorgs are extremely unlikely for old blocks
+        // and this saves significant write overhead during initial sync
+        if !self.ibd.load(Ordering::Relaxed) {
+            // Create ReorgData and persist it to the database
+            let reorg_data = ReorgData {
+                spent: outpoint_script_hashes,
+                history: history_map,
+                utxos_created: utxo_created,
+            };
 
-        // Serialize and save reorg data
-        let reorg_bytes = reorg_data
-            .to_bytes()
-            .with_context(|| format!("failed to serialize reorg data for block {block_meta:?}"))?;
-        let reorg_cf = self.db.cf_handle(REORG_CF).expect("missing REORG_CF");
-        batch.put_cf(&reorg_cf, block_meta.height().to_be_bytes(), reorg_bytes);
+            // Serialize and save reorg data
+            let reorg_bytes = reorg_data
+                .to_bytes()
+                .with_context(|| format!("failed to serialize reorg data for block {block_meta:?}"))?;
+            let reorg_cf = self.db.cf_handle(REORG_CF).expect("missing REORG_CF");
+            batch.put_cf(&reorg_cf, block_meta.height().to_be_bytes(), reorg_bytes);
 
-        // Delete old reorg data that exceeds the retention period
-        let current_height = block_meta.height();
-        if current_height >= self.reorg_data_keep_heights {
-            let height_to_delete = current_height - self.reorg_data_keep_heights;
-            batch.delete_cf(&reorg_cf, height_to_delete.to_be_bytes());
+            // Delete old reorg data that exceeds the retention period
+            let current_height = block_meta.height();
+            if current_height >= self.reorg_data_keep_heights {
+                let height_to_delete = current_height - self.reorg_data_keep_heights;
+                batch.delete_cf(&reorg_cf, height_to_delete.to_be_bytes());
+            }
         }
 
         // Single atomic write (includes reorg data)
