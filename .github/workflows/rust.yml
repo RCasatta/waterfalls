@@ -26,6 +26,8 @@ jobs:
       run: cargo test
     - name: Run ignored tests
       run: cargo test -- --ignored
+    - name: Run reorg crash test
+      run: cargo test --features "test_env,db,reorg_crash_test" test_bitcoin_reorg_data_not_persisted -- --exact
     env:
       BITCOIND_EXEC: ${{ github.workspace }}/bitcoin-28.0/bin/bitcoind
       ELEMENTSD_EXEC: ${{ github.workspace }}/elements-23.2.4/bin/elementsd
