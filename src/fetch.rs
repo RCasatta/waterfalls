@@ -444,7 +444,7 @@ impl Client {
             let url = self
                 .base_url
                 .replace("http://", &format!("http://{rpc_auth}@",));
-            log::info!("broadcasting to url {url}");
+            log::info!("broadcasting to url {}", self.base_url);
 
             let data = json!({
                 "jsonrpc":"1.0",
@@ -502,7 +502,7 @@ impl Client {
     pub async fn fee_estimates(&self) -> Result<HashMap<u16, f64>> {
         let result = if self.use_esplora {
             let url = format!("{}/fee-estimates", &self.esplora_url);
-            log::info!("broadcasting to {}", url);
+            log::info!("fetching fee estimates from {}", url);
 
             let response = self.client.get(&url).send().await?;
             let status = response.status();
@@ -520,7 +520,7 @@ impl Client {
             let url = self
                 .base_url
                 .replace("http://", &format!("http://{rpc_auth}@",));
-            log::info!("fetching fee estimates from {url}");
+            log::info!("fetching fee estimates from {}", self.base_url);
 
             let batch: Vec<serde_json::Value> = CONF_TARGETS
                 .iter()
