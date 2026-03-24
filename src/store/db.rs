@@ -47,6 +47,106 @@ struct ReorgData {
     utxos_created: BTreeMap<OutPoint, ScriptHash>,
 }
 
+impl ReorgData {
+    /// Serialize ReorgData to bytes using consensus encoding.
+    ///
+    /// Format:
+    /// - Version (u8): 1
+    /// - Spent count (u32)
+    /// - For each spent: OutPoint (36 bytes) + ScriptHash (8 bytes)
+    /// - History count (u32)
+    /// - For each history entry: ScriptHash (8 bytes) + Vec<TxSeen> length (u32) + serialized TxSeen data
+    /// - UTXOs created count (u32)
+    /// - For each utxo_created: OutPoint (36 bytes) + ScriptHash (8 bytes)
+    fn to_bytes(&self) -> Result<Vec<u8>> {
+        use elements::encode::Encodable;
+
+        let mut bytes = Vec::new();
+
+        // Version byte for future compatibility
+        bytes.push(1u8);
+
+        // Serialize spent
+        (self.spent.len() as u32).consensus_encode(&mut bytes)?;
+        for (outpoint, script_hash) in &self.spent {
+            outpoint.consensus_encode(&mut bytes)?;
+            script_hash.consensus_encode(&mut bytes)?;
+        }
+
+        // Serialize history
+        (self.history.len() as u32).consensus_encode(&mut bytes)?;
+        for (script_hash, tx_seen_vec) in &self.history {
+            script_hash.consensus_encode(&mut bytes)?;
+            let tx_seen_bytes = vec_tx_seen_to_be_bytes(tx_seen_vec);
+            (tx_seen_bytes.len() as u32).consensus_encode(&mut bytes)?;
+            bytes.extend_from_slice(&tx_seen_bytes);
+        }
+
+        // Serialize utxos_created
+        (self.utxos_created.len() as u32).consensus_encode(&mut bytes)?;
+        for (outpoint, script_hash) in &self.utxos_created {
+            outpoint.consensus_encode(&mut bytes)?;
+            script_hash.consensus_encode(&mut bytes)?;
+        }
+
+        Ok(bytes)
+    }
+
+    /// Deserialize ReorgData from bytes.
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        use elements::encode::Decodable;
+
+        if bytes.is_empty() {
+            return Ok(Self::default());
+        }
+
+        let mut cursor = std::io::Cursor::new(bytes);
+
+        // Read and verify version
+        let version = u8::consensus_decode(&mut cursor)?;
+        if version != 1 {
+            anyhow::bail!("Unknown ReorgData version: {}", version);
+        }
+
+        // Deserialize spent
+        let spent_count = u32::consensus_decode(&mut cursor)? as usize;
+        let mut spent = Vec::with_capacity(spent_count);
+        for _ in 0..spent_count {
+            let outpoint = OutPoint::consensus_decode(&mut cursor)?;
+            let script_hash = u64::consensus_decode(&mut cursor)?;
+            spent.push((outpoint, script_hash));
+        }
+
+        // Deserialize history
+        let history_count = u32::consensus_decode(&mut cursor)? as usize;
+        let mut history = BTreeMap::new();
+        for _ in 0..history_count {
+            let script_hash = u64::consensus_decode(&mut cursor)?;
+            let tx_seen_len = u32::consensus_decode(&mut cursor)? as usize;
+            let pos = cursor.position() as usize;
+            let tx_seen_bytes = &bytes[pos..pos + tx_seen_len];
+            let tx_seen_vec = vec_tx_seen_from_be_bytes(tx_seen_bytes)?;
+            cursor.set_position((pos + tx_seen_len) as u64);
+            history.insert(script_hash, tx_seen_vec);
+        }
+
+        // Deserialize utxos_created
+        let utxos_created_count = u32::consensus_decode(&mut cursor)? as usize;
+        let mut utxos_created = BTreeMap::new();
+        for _ in 0..utxos_created_count {
+            let outpoint = OutPoint::consensus_decode(&mut cursor)?;
+            let script_hash = u64::consensus_decode(&mut cursor)?;
+            utxos_created.insert(outpoint, script_hash);
+        }
+
+        Ok(Self {
+            spent,
+            history,
+            utxos_created,
+        })
+    }
+}
+
 /// RocksDB wrapper for index storage
 
 #[derive(Debug)]
