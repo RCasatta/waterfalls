@@ -6,6 +6,9 @@ use std::collections::BTreeMap;
 #[cfg(feature = "db")]
 pub mod db;
 
+#[cfg(feature = "db")]
+mod reorg_data;
+
 pub mod memory;
 
 pub enum AnyStore {
