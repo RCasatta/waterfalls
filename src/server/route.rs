@@ -310,7 +310,8 @@ pub async fn route(
                     {
                         let cached = state.cached_fee_estimates.read().await;
                         if let (ref cache, Some(cache_time)) = *cached {
-                            if cache_time.elapsed() < Duration::from_secs(FEE_ESTIMATES_TTL as u64) {
+                            if cache_time.elapsed() < Duration::from_secs(FEE_ESTIMATES_TTL as u64)
+                            {
                                 let result = serde_json::to_string(cache)
                                     .map_err(|e| Error::String(e.to_string()))?;
                                 return any_resp(
