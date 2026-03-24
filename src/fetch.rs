@@ -17,6 +17,13 @@ use crate::{
     store::BlockMeta,
 };
 
+/// Confirmation targets the same as Esplora exposes via /fee-estimates. It is used to batch query
+/// node using `estimatesmartfee`.
+const CONF_TARGETS: [u16; 28] = [
+    1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16, 13u16, 14u16, 15u16,
+    16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 24u16, 25u16, 144u16, 504u16, 1008u16,
+];
+
 #[derive(Debug)]
 pub enum Error {
     TxNotFound(String, crate::be::Txid),
@@ -486,6 +493,89 @@ impl Client {
         } else {
             Ok(ChainStatus::Reorg)
         }
+    }
+
+    /// GET /fee-estimates
+    ///
+    /// Estimating using node requires RPC (estimatesmartfee) to avoid multiple requests for
+    /// different targets with a single batch RPC request.
+    pub async fn fee_estimates(&self) -> Result<HashMap<u16, f64>> {
+        let result = if self.use_esplora {
+            let url = format!("{}/fee-estimates", &self.esplora_url);
+            log::info!("broadcasting to {}", url);
+
+            let response = self.client.get(&url).send().await?;
+            let status = response.status();
+            let text = response.text().await?;
+            if status != 200 {
+                anyhow::bail!("fee estimate fetch failed with status:{status}, body is {text}");
+            }
+
+            serde_json::from_str::<HashMap<u16, f64>>(&text)?
+        } else {
+            let rpc_auth = self
+                .rpc_user_password
+                .as_ref()
+                .expect("validated by Arguments");
+            let url = self
+                .base_url
+                .replace("http://", &format!("http://{rpc_auth}@",));
+            log::info!("fetching fee estimates from {url}");
+
+            let batch: Vec<serde_json::Value> = CONF_TARGETS
+                .iter()
+                .map(|t| {
+                    json!({
+                        "jsonrpc": "1.0",
+                        "id": t,
+                        "method": "estimatesmartfee",
+                        "params": [t, "ECONOMICAL"],
+                    })
+                })
+                .collect();
+            let data = serde_json::to_string(&batch)?;
+
+            let response = self.client.post(&url).body(data).send().await?;
+            let status = response.status();
+            let text = response.text().await?;
+            if status != 200 {
+                anyhow::bail!("fee estimate fetch failed with status:{status}, body is {text}");
+            }
+
+            let replies: Vec<serde_json::Value> = serde_json::from_str(&text)?;
+            replies
+                .iter()
+                .zip(CONF_TARGETS)
+                .filter_map(|(reply, target)| {
+                    if !reply["error"].is_null() {
+                        log::warn!(
+                            "failed estimating fee for target {}: {:?}",
+                            target,
+                            reply["error"]
+                        );
+                        return None;
+                    }
+                    let result = &reply["result"];
+                    if !result["errors"].is_null() {
+                        log::warn!(
+                            "failed estimating fee for target {}: {:?}",
+                            target,
+                            result["errors"]
+                        );
+                        return None;
+                    }
+                    let feerate = result["feerate"].as_f64()?;
+                    if feerate == -1f64 {
+                        log::warn!("not enough data to estimate fee for target {}", target);
+                        return None;
+                    }
+                    // Convert from BTC/kB to sat/vB
+                    Some((target, feerate * 100_000f64))
+                })
+                .collect()
+        };
+
+        Ok(result)
     }
 }
 

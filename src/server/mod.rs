@@ -282,6 +282,7 @@ pub enum Error {
     DescriptorMustHaveWildcard,
     BodyTooLarge,
     BodyReadTimeout,
+    CannotEstimateFee,
 }
 
 impl std::fmt::Display for Error {

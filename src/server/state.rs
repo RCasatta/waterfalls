@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, collections::HashMap, sync::RwLock, time::Instant};
 
 use crate::{
     server::{derivation_cache::DerivationCache, Mempool},
@@ -30,6 +30,8 @@ pub struct State {
     pub cache_control_seconds: u32,
 
     pub derivation_cache: Mutex<DerivationCache>,
+
+    pub cached_fee_estimates: RwLock<(HashMap<u16, f64>, Option<Instant>)>,
 }
 
 impl State {
@@ -51,6 +53,7 @@ impl State {
             max_addresses,
             cache_control_seconds,
             derivation_cache: Mutex::new(DerivationCache::new(derivation_cache_capacity)),
+            cached_fee_estimates: RwLock::new((HashMap::new(), None)),
         })
     }
 
