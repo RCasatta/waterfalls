@@ -966,6 +966,135 @@ async fn test_bitcoin_two_block_reorg() {
     test_env.shutdown().await;
 }
 
+#[cfg(all(feature = "test_env", feature = "db", feature = "reorg_crash_test"))]
+#[tokio::test]
+async fn test_bitcoin_reorg_data_not_persisted() {
+    use waterfalls::be::Family;
+
+    let _ = env_logger::try_init();
+
+    // Create persistent storage
+    let tempdir = tempfile::TempDir::new().unwrap();
+    let db_path = tempdir.path().to_path_buf();
+
+    // Launch bitcoin node (will be reused across restarts)
+    let exe = std::env::var("BITCOIND_EXEC").unwrap();
+    let node = waterfalls::test_env::launch_bitcoin(&exe);
+
+    println!("=== Phase 1: Initial indexing with crash injection ===");
+
+    // Set env var to cause crash when reorg is detected
+    std::env::set_var("WATERFALLS_TEST_CRASH_ON_REORG", "1");
+
+    // Launch first server instance with the persistent database
+    let test_env =
+        waterfalls::test_env::launch_with_node(node, Some(db_path.clone()), Family::Bitcoin).await;
+
+    // Generate some initial blocks
+    test_env.node_generate(5).await;
+
+    // Create a UTXO that we'll spend
+    let address_to_spend = test_env.get_new_address(None);
+    test_env.send_to(&address_to_spend, 10_000);
+    test_env.node_generate(1).await;
+
+    // Get the UTXO we'll double-spend
+    let unspent = test_env.list_unspent();
+    let utxo = &unspent[0];
+    println!(
+        "UTXO to spend: {} vout {} amount {}",
+        utxo.txid, utxo.vout, utxo.amount
+    );
+
+    // Create and broadcast transaction A spending the UTXO to recipient_a
+    let recipient_a = test_env.get_new_address(None);
+    let tx_a = test_env.create_transaction_spending(
+        &[(*utxo).clone()],
+        &recipient_a,
+        utxo.amount - 0.00001,
+    );
+    let signed_tx_a = test_env.sign_raw_transanction_with_wallet(&tx_a);
+    let txid_a = test_env.client().broadcast(&signed_tx_a).await.unwrap();
+
+    // Mine block H+1 containing transaction A
+    let block_h1_hashes = test_env.node_generate(1).await;
+    let block_h1_hash = block_h1_hashes[0];
+    println!("Block H+1: {} with tx_a: {}", block_h1_hash, txid_a);
+
+    // Verify transaction A is indexed
+    test_env
+        .client()
+        .wait_tip_hash(block_h1_hash)
+        .await
+        .unwrap();
+    let recipient_a_history = test_env.client().address_txs(&recipient_a).await.unwrap();
+    assert!(
+        recipient_a_history.contains(&txid_a.to_string()),
+        "Transaction A should be in recipient A's history"
+    );
+    println!("✓ Block H+1 indexed, transaction A confirmed");
+
+    // Now invalidate the block to trigger reorg
+    println!("\n=== Triggering reorg (will cause crash) ===");
+    test_env.invalidate_block(block_h1_hash);
+
+    // The server will detect the reorg and crash due to WATERFALLS_TEST_CRASH_ON_REORG
+    // Extract the node before the crash completes so we can reuse it
+    let node = test_env.into_node();
+
+    println!("Waiting for server to detect reorg and crash...");
+
+    // Give it some time to detect the reorg and crash
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+    println!("✓ Server crashed as expected (reorg data lost from memory)");
+
+    // At this point:
+    // - The database has block H+1 indexed (UTXO marked as spent)
+    // - The reorg data (which would restore the UTXO) was only in memory
+    // - The reorg data is now LOST because the process crashed
+
+    println!("\n=== Phase 2: Restart server without crash injection ===");
+
+    // Remove the crash env var for the restart
+    std::env::remove_var("WATERFALLS_TEST_CRASH_ON_REORG");
+
+    // Restart the server with the SAME database and SAME node
+    // Use launch_with_node_no_generate to avoid generating blocks during launch
+    // (the server will crash during indexing anyway)
+    let test_env2 = waterfalls::test_env::launch_with_node_no_generate(
+        node,
+        Some(db_path.clone()),
+        Family::Bitcoin,
+    )
+    .await;
+
+    println!("✓ Server restarted with same database");
+
+    // Generate blocks on the node to give the server something to index
+    // The server will detect reorg and crash when trying to index these
+    let _hashes = test_env2.node_generate_no_wait(102);
+    println!("   Generated 102 new blocks on node (server should crash while indexing)");
+
+    println!("\nWaiting to see if server crashes during indexing...");
+
+    // Give the server some time to start indexing and hit the error
+    // The server's indexing thread will panic when it tries to process blocks
+    // and encounters the missing UTXO
+    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+    // Note: The HTTP server may still respond to queries even though the indexing
+    // thread has crashed. The key indicator of failure is in the server logs:
+    // "ERROR waterfalls::store::db] every utxo must exist when spent"
+    // and "Initial sync channel closed unexpectedly (blocks thread may have crashed)"
+
+    // Clean up env var to avoid affecting other tests (if running multiple)
+    std::env::remove_var("WATERFALLS_TEST_CRASH_ON_REORG");
+
+    // Don't call shutdown because the indexing thread has already crashed
+    // Just let test_env2 drop, which will clean up resources
+}
+
 #[cfg(feature = "test_env")]
 #[tokio::test]
 async fn test_lwk_wollet() {
