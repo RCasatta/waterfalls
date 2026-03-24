@@ -785,6 +785,187 @@ async fn test_bitcoin_reorg() {
     test_env.shutdown().await;
 }
 
+#[cfg(all(feature = "test_env", feature = "db"))]
+#[tokio::test]
+async fn test_bitcoin_two_block_reorg() {
+    let _ = env_logger::try_init();
+
+    let tempdir = tempfile::TempDir::new().unwrap();
+    let path = tempdir.path().to_path_buf();
+    let exe = std::env::var("BITCOIND_EXEC").unwrap();
+    let test_env = waterfalls::test_env::launch(exe, Some(path), Family::Bitcoin).await;
+
+    // Generate some initial blocks to build upon
+    test_env.node_generate(5).await;
+
+    // Create some UTXOs that can be spent in the competing chains
+    let address_to_spend = test_env.get_new_address(None);
+    test_env.send_to(&address_to_spend, 10_000);
+    test_env.node_generate(1).await; // This creates UTXOs we can spend
+
+    println!("=== Setting up initial blockchain state ===");
+
+    // Get two UTXOs that we'll spend in competing chains
+    let unspent = test_env.list_unspent();
+    let utxo_1 = &unspent[0]; // Will be spent in original chain block H+1
+    let utxo_2 = &unspent[1]; // Will be spent in original chain block H+2
+
+    println!(
+        "UTXO 1: {} vout {} amount {}",
+        utxo_1.txid, utxo_1.vout, utxo_1.amount
+    );
+    println!(
+        "UTXO 2: {} vout {} amount {}",
+        utxo_2.txid, utxo_2.vout, utxo_2.amount
+    );
+
+    // ===== Create original chain with 2 blocks =====
+
+    // Block H+1: Create transaction A spending utxo_1 to recipient_a
+    let recipient_a = test_env.get_new_address(None);
+    let tx_a = test_env.create_transaction_spending(
+        &[(*utxo_1).clone()],
+        &recipient_a,
+        utxo_1.amount - 0.00001,
+    );
+    let signed_tx_a = test_env.sign_raw_transanction_with_wallet(&tx_a);
+    let txid_a = test_env.client().broadcast(&signed_tx_a).await.unwrap();
+    let block_h1_hashes = test_env.node_generate(1).await;
+    let block_h1_hash = block_h1_hashes[0];
+
+    println!("\n=== Original Chain ===");
+    println!("Block H+1: {} with tx_a: {}", block_h1_hash, txid_a);
+
+    // Wait for waterfalls to index block H+1
+    test_env
+        .client()
+        .wait_tip_hash(block_h1_hash)
+        .await
+        .unwrap();
+
+    // Block H+2: Create transaction B spending OUTPUT FROM tx_a (creates dependency)
+    // This is the key: tx_b spends an output created in block H+1
+    // If reorg handling is broken, this output won't exist when we try to index the new chain
+    let recipient_b = test_env.get_new_address(None);
+
+    // tx_a created an output at vout 0 to recipient_a
+    // The amount is: initial amount minus fee from tx_a
+    // Round to 8 decimal places to avoid floating point precision issues
+    let tx_a_output_amount = (utxo_1.amount * 100_000_000.0 - 1_000.0) / 100_000_000.0;
+
+    let tx_a_output = waterfalls::test_env::Input {
+        txid: txid_a.to_string(),
+        vout: 0,
+        amount: tx_a_output_amount,
+    };
+
+    // Round to 8 decimal places
+    let tx_b_output_amount = (tx_a_output_amount * 100_000_000.0 - 1_000.0) / 100_000_000.0;
+
+    let tx_b = test_env.create_transaction_spending(
+        &[tx_a_output.clone()],
+        &recipient_b,
+        tx_b_output_amount,
+    );
+    let signed_tx_b = test_env.sign_raw_transanction_with_wallet(&tx_b);
+    let txid_b = test_env.client().broadcast(&signed_tx_b).await.unwrap();
+    let block_h2_hashes = test_env.node_generate(1).await;
+    let block_h2_hash = block_h2_hashes[0];
+
+    println!("Block H+2: {} with tx_b: {}", block_h2_hash, txid_b);
+
+    // Wait for waterfalls to index block H+2
+    test_env
+        .client()
+        .wait_tip_hash(block_h2_hash)
+        .await
+        .unwrap();
+
+    // Verify both transactions are in their respective address histories
+    let recipient_a_history_before = test_env.client().address_txs(&recipient_a).await.unwrap();
+    let recipient_b_history_before = test_env.client().address_txs(&recipient_b).await.unwrap();
+
+    assert!(
+        recipient_a_history_before.contains(&txid_a.to_string()),
+        "Transaction A should be in recipient A's history before reorg"
+    );
+    assert!(
+        recipient_b_history_before.contains(&txid_b.to_string()),
+        "Transaction B should be in recipient B's history before reorg"
+    );
+
+    println!("✓ Both transactions confirmed and indexed");
+
+    // ===== Trigger 2-block reorg =====
+
+    println!("\n=== Triggering 2-block reorg ===");
+
+    // Invalidate both blocks (must invalidate in reverse order: H+2, then H+1)
+    println!("Invalidating block H+2: {}", block_h2_hash);
+    test_env.invalidate_block(block_h2_hash);
+
+    println!("Invalidating block H+1: {}", block_h1_hash);
+    test_env.invalidate_block(block_h1_hash);
+
+    // After invalidating blocks, tx_a and tx_b go back into the mempool.
+    // The node will naturally re-include them when we mine new blocks.
+    // This tests our multi-block reorg handling:
+    // - If we only roll back 1 block, tx_a's output won't be properly restored
+    // - When indexing new H+2' with tx_b, it will fail with "utxo must exist when spent"
+    // - If we correctly roll back both blocks, everything works cleanly
+
+    println!("\n=== Mining new chain (tx_a and tx_b will be re-included from mempool) ===");
+
+    // Mine 3 new blocks to make the new chain longer than the old one
+    // The node will naturally include tx_a and tx_b from the mempool
+    let new_blocks = test_env.node_generate(3).await;
+    let block_h1_prime_hash = new_blocks[0];
+    let block_h2_prime_hash = new_blocks[1];
+    let final_tip_hash = new_blocks[2];
+
+    println!("New blocks mined: H+1'={}, H+2'={}, H+3'={}",
+        block_h1_prime_hash, block_h2_prime_hash, final_tip_hash);
+    println!("✓ tx_a and tx_b were naturally re-included by the node");
+    test_env
+        .client()
+        .wait_tip_hash(final_tip_hash)
+        .await
+        .unwrap();
+
+    println!("\n=== Verifying final state ===");
+
+    // If we get here without panicking, verify the state
+    let current_tip = test_env.client().tip_hash().await.unwrap();
+    println!("Current tip: {}", current_tip);
+    assert_eq!(current_tip, final_tip_hash);
+
+    // Check address histories after 2-block reorg
+    let recipient_a_history_after = test_env.client().address_txs(&recipient_a).await.unwrap();
+    let recipient_b_history_after = test_env.client().address_txs(&recipient_b).await.unwrap();
+
+    println!("Recipient A history: {:?}", recipient_a_history_after);
+    println!("Recipient B history: {:?}", recipient_b_history_after);
+
+    // After a proper 2-block reorg with tx_a and tx_b re-included:
+    // - Both transactions should STILL be in the histories (they were re-mined)
+    // - This tests that our reorg logic correctly handled rolling back 2 blocks
+    //   and then re-indexing them with the same transactions
+    assert!(
+        recipient_a_history_after.contains(&txid_a.to_string()),
+        "Transaction A should still be in recipient A's history after reorg (re-included)"
+    );
+    assert!(
+        recipient_b_history_after.contains(&txid_b.to_string()),
+        "Transaction B should still be in recipient B's history after reorg (re-included)"
+    );
+
+    println!("\n✓ 2-block reorg completed successfully!");
+    println!("✓ tx_a and tx_b were correctly re-indexed in the new chain");
+    println!("✓ This confirms multi-block reorg handling works correctly");
+
+    test_env.shutdown().await;
+}
+
 #[cfg(feature = "test_env")]
 #[tokio::test]
 async fn test_lwk_wollet() {
