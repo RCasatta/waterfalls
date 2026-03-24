@@ -641,7 +641,12 @@ mod test {
         args.network = Network::ElementsRegtest;
         args.node_url = Some(elementsd.rpc_url());
         args.request_timeout_seconds = 10;
-        args.rpc_user_password = Some(elementsd.params.cookie_file.to_string_lossy().to_string());
+        args.rpc_user_password = Some(
+            std::fs::read_to_string(&elementsd.params.cookie_file)
+                .unwrap()
+                .trim()
+                .to_string(),
+        );
         let client = Client::new(&args).unwrap();
         test(client, args.network).await;
     }
@@ -686,7 +691,12 @@ mod test {
         args.network = Network::BitcoinRegtest;
         args.node_url = Some(bitcoind.rpc_url());
         args.request_timeout_seconds = 10;
-        args.rpc_user_password = Some(bitcoind.params.cookie_file.to_string_lossy().to_string());
+        args.rpc_user_password = Some(
+            std::fs::read_to_string(&bitcoind.params.cookie_file)
+                .unwrap()
+                .trim()
+                .to_string(),
+        );
         let client = Client::new(&args).unwrap();
         test(client, args.network).await;
     }
