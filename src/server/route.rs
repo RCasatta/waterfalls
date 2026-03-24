@@ -307,24 +307,22 @@ pub async fn route(
                     }
                 }
                 (Some(""), Some("fee-estimates"), None, None, None) => {
-                    let cached = state
-                        .cached_fee_estimates
-                        .read()
-                        .map_err(|e| Error::String(e.to_string()))?;
-                    if let (ref cache, Some(cache_time)) = *cached {
-                        if cache_time.elapsed() < Duration::from_secs(FEE_ESTIMATES_TTL as u64) {
-                            let result = serde_json::to_string(cache)
-                                .map_err(|e| Error::String(e.to_string()))?;
-                            return any_resp(
-                                result.into_bytes(),
-                                StatusCode::OK,
-                                Some("application/json"),
-                                Some(FEE_ESTIMATES_TTL),
-                                None,
-                            );
+                    {
+                        let cached = state.cached_fee_estimates.read().await;
+                        if let (ref cache, Some(cache_time)) = *cached {
+                            if cache_time.elapsed() < Duration::from_secs(FEE_ESTIMATES_TTL as u64) {
+                                let result = serde_json::to_string(cache)
+                                    .map_err(|e| Error::String(e.to_string()))?;
+                                return any_resp(
+                                    result.into_bytes(),
+                                    StatusCode::OK,
+                                    Some("application/json"),
+                                    Some(FEE_ESTIMATES_TTL),
+                                    None,
+                                );
+                            }
                         }
                     }
-                    drop(cached);
 
                     let fee_estimates = client
                         .lock()
@@ -333,11 +331,10 @@ pub async fn route(
                         .await
                         .map_err(|_| Error::CannotEstimateFee)?;
 
-                    let mut cached = state
-                        .cached_fee_estimates
-                        .write()
-                        .map_err(|e| Error::String(e.to_string()))?;
-                    *cached = (fee_estimates.clone(), Some(Instant::now()));
+                    {
+                        let mut cached = state.cached_fee_estimates.write().await;
+                        *cached = (fee_estimates.clone(), Some(Instant::now()));
+                    }
 
                     let result = serde_json::to_string(&fee_estimates)
                         .map_err(|e| Error::String(e.to_string()))?;

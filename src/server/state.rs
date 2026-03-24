@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, collections::HashMap, sync::RwLock, time::Instant};
+use std::{cmp::Ordering, collections::HashMap, time::Instant};
 
 use crate::{
     server::{derivation_cache::DerivationCache, Mempool},
@@ -8,7 +8,7 @@ use crate::{
 use age::x25519::Identity;
 use bitcoin::{key::Secp256k1, secp256k1::All, PrivateKey};
 use elements::BlockHash;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use super::{sign::p2pkh, Error};
 

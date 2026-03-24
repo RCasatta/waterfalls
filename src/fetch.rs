@@ -810,5 +810,8 @@ mod test {
                 assert_eq!(header_json.nextblockhash, None, "network:{network}");
             }
         }
+
+        let fee_estimates = client.fee_estimates().await.unwrap();
+        assert!(fee_estimates.values().all(|&f| f > 0.0));
     }
 }

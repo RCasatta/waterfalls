@@ -387,8 +387,24 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let is_unspent = client.unspent(&outpoint_for_unspent_check).await.unwrap();
     assert!(!is_unspent, "UTXO should be spent");
 
+    let fee_estimates = client.fee_estimates().await.unwrap();
+    assert!(fee_estimates.values().all(|&f| f > 0.0));
+
     test_env.shutdown().await;
     assert!(true);
+}
+
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn test_fee_estimates_elements() {
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory(Family::Elements).await;
+    let fee_estimates = test_env.client().fee_estimates().await.unwrap();
+    assert!(!fee_estimates.is_empty());
+    assert!(fee_estimates.values().all(|&f| f > 0.0));
+
+    test_env.shutdown().await;
 }
 
 #[cfg(feature = "test_env")]

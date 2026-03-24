@@ -4,6 +4,7 @@ use crate::{
     LastUsedIndexResponse, WaterfallResponse,
 };
 use std::{
+    collections::HashMap,
     error::Error,
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -635,6 +636,17 @@ impl WaterfallClient {
             );
         }
         Ok(text)
+    }
+
+    pub async fn fee_estimates(&self) -> anyhow::Result<HashMap<u16, f64>> {
+        let url = format!("{}/fee-estimates", self.base_url);
+        let response = self.client.get(&url).send().await?;
+        let status_code = response.status().as_u16();
+        let text = response.text().await?;
+        if status_code != 200 {
+            bail!("fee_estimates response is not 200 but: {status_code} text: {text}");
+        }
+        Ok(serde_json::from_str(&text)?)
     }
 
     pub async fn unspent(&self, outpoint: &str) -> anyhow::Result<bool> {
