@@ -65,7 +65,32 @@ pub async fn launch_with_node(elementsd: BitcoinD, family: Family) -> TestEnv {
     inner_launch_with_node(elementsd, None, family).await
 }
 
+#[cfg(feature = "db")]
+pub async fn launch_with_node_no_generate(
+    node: BitcoinD,
+    path: Option<PathBuf>,
+    family: Family,
+) -> TestEnv {
+    inner_launch_with_node_no_generate(node, path, family).await
+}
+
 async fn inner_launch_with_node(node: BitcoinD, path: Option<PathBuf>, family: Family) -> TestEnv {
+    let test_env = inner_launch_with_node_no_generate(node, path, family).await;
+
+    test_env.node_generate(1).await;
+
+    test_env
+        .node
+        .client
+        .call::<Value>("rescanblockchain", &[])
+        .unwrap();
+
+    test_env.node_generate(101).await;
+
+    test_env
+}
+
+async fn inner_launch_with_node_no_generate(node: BitcoinD, path: Option<PathBuf>, family: Family) -> TestEnv {
     let mut args = Arguments {
         node_url: Some(node.rpc_url()),
         derivation_cache_capacity: 10000,
@@ -108,7 +133,7 @@ async fn inner_launch_with_node(node: BitcoinD, path: Option<PathBuf>, family: F
     let client = WaterfallClient::new(base_url.to_string(), family);
     let secp = Secp256k1::new();
 
-    let test_env = TestEnv {
+    TestEnv {
         node,
         handle,
         tx,
@@ -118,19 +143,7 @@ async fn inner_launch_with_node(node: BitcoinD, path: Option<PathBuf>, family: F
         wif_key,
         secp,
         family,
-    };
-
-    test_env.node_generate(1).await;
-
-    test_env
-        .node
-        .client
-        .call::<Value>("rescanblockchain", &[])
-        .unwrap();
-
-    test_env.node_generate(101).await;
-
-    test_env
+    }
 }
 
 pub fn launch_bitcoin<S: AsRef<OsStr>>(exe: S) -> BitcoinD {
@@ -174,6 +187,14 @@ impl TestEnv {
         self.tx.send(()).unwrap();
         let _ = self.handle.await.unwrap();
         // BitcoinD will be automatically dropped here, calling its Drop implementation
+    }
+
+    /// Extract the BitcoinD node from this TestEnv, signaling the server to shutdown.
+    /// Used in tests that need to restart the server with the same node.
+    pub fn into_node(self) -> BitcoinD {
+        // Signal shutdown but don't wait for it to complete
+        let _ = self.tx.send(());
+        self.node
     }
 
     pub fn network(&self) -> Network {
@@ -220,8 +241,9 @@ impl TestEnv {
         be::Address::from_str(addr.as_str().unwrap(), self.network()).unwrap()
     }
 
-    /// generate `block_num` blocks and wait the waterfalls server had indexed them
-    pub async fn node_generate(&self, block_num: u32) -> Vec<BlockHash> {
+    /// Generate blocks on the node without waiting for waterfalls to index them.
+    /// Useful for tests that expect the server to crash or be unavailable.
+    pub fn node_generate_no_wait(&self, block_num: u32) -> Vec<BlockHash> {
         let address = self.get_new_address(None);
         let result = self
             .node
@@ -232,17 +254,19 @@ impl TestEnv {
             )
             .unwrap();
 
-        let hashes: Vec<BlockHash> = result
+        result
             .as_array()
             .unwrap()
             .iter()
             .map(|v| BlockHash::from_str(v.as_str().unwrap()).unwrap())
-            .collect();
+            .collect()
+    }
 
+    /// generate `block_num` blocks and wait the waterfalls server had indexed them
+    pub async fn node_generate(&self, block_num: u32) -> Vec<BlockHash> {
+        let hashes = self.node_generate_no_wait(block_num);
         let last = hashes.last().unwrap();
-
         self.client.wait_tip_hash(*last).await.unwrap();
-
         hashes
     }
 
