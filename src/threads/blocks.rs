@@ -50,6 +50,17 @@ async fn get_next_block_to_index(
                 Ok(ChainStatus::NewBlock(next)) => Some(next),
                 Ok(ChainStatus::Reorg) => {
                     log::warn!("reorg happened! {last:?} removed from the chain");
+
+                    // TEST ONLY: Allow test to inject a crash before reorg is processed.
+                    // This demonstrates the problem: reorg data is only in memory, so if
+                    // the process crashes here, the reorg data is lost forever.
+                    // Only enabled with the 'reorg_crash_test' feature flag.
+                    #[cfg(feature = "reorg_crash_test")]
+                    if std::env::var("WATERFALLS_TEST_CRASH_ON_REORG").is_ok() {
+                        log::error!("WATERFALLS_TEST_CRASH_ON_REORG is set, intentionally panicking before processing reorg");
+                        panic!("TEST CRASH: Simulating crash before reorg processing (reorg data will be lost)");
+                    }
+
                     let reorged_height = last.height;
                     let previous_height = reorged_height - 1;
                     let blocks_hash_ts = state

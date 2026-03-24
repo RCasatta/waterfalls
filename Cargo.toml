@@ -72,6 +72,10 @@ synced_node = []
 bench_test = []
 examine_logs = []
 
+# Test that uses crash injection via env var to demonstrate reorg data not persisted
+# Must be run separately to avoid interfering with other tests
+reorg_crash_test = []
+
 [patch.crates-io]
 lwk_wollet = { git = "https://github.com/blockstream/lwk", rev = "ba7eaf71e7be497abaf3f3b88003c9e639f145a3" }
 lwk_common = { git = "https://github.com/blockstream/lwk", rev = "ba7eaf71e7be497abaf3f3b88003c9e639f145a3" }
