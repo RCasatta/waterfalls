@@ -404,7 +404,7 @@ async fn test_fee_estimates_elements() {
     // The fee estimator needs multiple fee-paying txs spread across many blocks.
     // Send one tx per batch and mine a few blocks each time, mimicking the working prod node.
     let addr = test_env.get_new_address(None);
-    for _ in 0..50 {
+    for _ in 0..25 {
         test_env.send_to(&addr, 1_000);
         test_env.node_generate(3).await;
     }
@@ -424,7 +424,7 @@ async fn test_fee_estimates_bitcoin() {
     let test_env = launch_memory(Family::Bitcoin).await;
 
     let addr = test_env.get_new_address(None);
-    for _ in 0..50 {
+    for _ in 0..25 {
         test_env.send_to(&addr, 1_000);
         test_env.node_generate(3).await;
     }

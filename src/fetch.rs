@@ -508,7 +508,9 @@ impl Client {
             let status = response.status();
             let text = response.text().await?;
             if status != 200 {
-                anyhow::bail!("fee estimate fetch failed with status:{status}, body is {text}");
+                let msg = format!("fee estimate fetch failed with status:{status}, body is {text}");
+                log::warn!("{msg}");
+                anyhow::bail!("{msg}");
             }
 
             serde_json::from_str::<HashMap<u16, f64>>(&text)?
@@ -539,44 +541,50 @@ impl Client {
             let status = response.status();
             let text = response.text().await?;
             if status != 200 {
-                anyhow::bail!("fee estimate fetch failed with status:{status}, body is {text}");
+                let msg = format!("fee estimate fetch failed with status:{status}, body is {text}");
+                log::warn!("{msg}");
+                anyhow::bail!("{msg}");
             }
 
-            let replies: Vec<serde_json::Value> = serde_json::from_str(&text)?;
-            replies
-                .iter()
-                .zip(CONF_TARGETS)
-                .filter_map(|(reply, target)| {
-                    if !reply["error"].is_null() {
-                        log::warn!(
-                            "failed estimating fee for target {}: {:?}",
-                            target,
-                            reply["error"]
-                        );
-                        return None;
-                    }
-                    let result = &reply["result"];
-                    if !result["errors"].is_null() {
-                        log::warn!(
-                            "failed estimating fee for target {}: {:?}",
-                            target,
-                            result["errors"]
-                        );
-                        return None;
-                    }
-                    let feerate = result["feerate"].as_f64()?;
-                    if feerate == -1f64 {
-                        log::warn!("not enough data to estimate fee for target {}", target);
-                        return None;
-                    }
-                    // Convert from BTC/kB to sat/vB
-                    Some((target, feerate * 100_000f64))
-                })
-                .collect()
+            parse_fee_estimates_rpc_reply(&text)?
         };
 
         Ok(result)
     }
+}
+
+fn parse_fee_estimates_rpc_reply(text: &str) -> anyhow::Result<HashMap<u16, f64>> {
+    let replies: Vec<serde_json::Value> = serde_json::from_str(text)?;
+    Ok(replies
+        .iter()
+        .zip(CONF_TARGETS)
+        .filter_map(|(reply, target)| {
+            if !reply["error"].is_null() {
+                log::warn!(
+                    "failed estimating fee for target {}: {:?}",
+                    target,
+                    reply["error"]
+                );
+                return None;
+            }
+            let result = &reply["result"];
+            if !result["errors"].is_null() {
+                log::warn!(
+                    "failed estimating fee for target {}: {:?}",
+                    target,
+                    result["errors"]
+                );
+                return None;
+            }
+            let feerate = result["feerate"].as_f64()?;
+            if feerate == -1f64 {
+                log::warn!("not enough data to estimate fee for target {}", target);
+                return None;
+            }
+            // Convert from BTC/kB to sat/vB
+            Some((target, feerate * 100_000f64))
+        })
+        .collect())
 }
 
 #[derive(Debug)]
@@ -614,7 +622,48 @@ mod test {
         test_env, Family,
     };
 
-    use super::Client;
+    use super::{parse_fee_estimates_rpc_reply, Client};
+
+    #[test]
+    fn test_parse_fee_estimates_rpc_reply() {
+        let json = r#"[
+            {"error": null, "result": {"feerate": 0.00010000}},
+            {"error": null, "result": {"feerate": 0.00005000}},
+            {"error": null, "result": {"feerate": -1}},
+            {"error": "some rpc error", "result": null},
+            {"error": null, "result": {"errors": ["Insufficient data"]}},
+            {"error": null, "result": {"feerate": 0.00002000}},
+            {"error": null, "result": {}},
+            {"error": null, "result": {"feerate": "not-a-number"}}
+        ]"#;
+
+        let result = parse_fee_estimates_rpc_reply(json).unwrap();
+
+        // target 1: 0.00010000 BTC/kB == 10.0 sat/vB
+        assert_eq!(result[&1], 10.0);
+        // target 2: 0.00005000 BTC/kB == 5.0 sat/vB
+        assert_eq!(result[&2], 5.0);
+        // target 3: feerate == -1 -> filtered out
+        assert!(!result.contains_key(&3));
+        // target 4: has rpc error -> filtered out
+        assert!(!result.contains_key(&4));
+        // target 5: has result.errors -> filtered out
+        assert!(!result.contains_key(&5));
+        // target 6: 0.00002000 BTC/kB == 2.0 sat/vB
+        assert_eq!(result[&6], 2.0);
+        // target 7: feerate field missing -> filtered out
+        assert!(!result.contains_key(&7));
+        // target 8: feerate is not a number -> filtered out
+        assert!(!result.contains_key(&8));
+    }
+
+    #[test]
+    fn test_parse_fee_estimates_rpc_reply_invalid_input() {
+        assert!(parse_fee_estimates_rpc_reply("not json").is_err());
+        assert!(parse_fee_estimates_rpc_reply("{}").is_err());
+        assert!(parse_fee_estimates_rpc_reply("").is_err());
+        assert!(parse_fee_estimates_rpc_reply("42").is_err());
+    }
 
     #[tokio::test]
     #[ignore = "connects to prod server"]
