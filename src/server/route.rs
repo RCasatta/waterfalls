@@ -46,6 +46,7 @@ const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
 const MAX_ADDRESS_LENGTH: usize = 100; // max characters for an address (excessive to be conservative)
 const MAX_TX_BODY_SIZE: usize = 1024 * 1024; // 1MB limit for transaction broadcast body
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30); // timeout for reading request body
+const FEE_ESTIMATES_TTL: u32 = 30; // cache fee estimates for 30 seconds
 
 // needed endpoint to make this self-contained for testing, in prod they should probably be never hit cause proxied by nginx
 // https://waterfalls.liquidwebwallet.org/liquidtestnet/api/blocks/tip/hash
@@ -304,6 +305,47 @@ pub async fn route(
                     } else {
                         str_resp("false".to_string(), StatusCode::NOT_FOUND)
                     }
+                }
+                (Some(""), Some("fee-estimates"), None, None, None) => {
+                    {
+                        let cached = state.cached_fee_estimates.read().await;
+                        if let (ref cache, Some(cache_time)) = *cached {
+                            if cache_time.elapsed() < Duration::from_secs(FEE_ESTIMATES_TTL as u64)
+                            {
+                                let result = serde_json::to_string(cache)
+                                    .map_err(|e| Error::String(e.to_string()))?;
+                                return any_resp(
+                                    result.into_bytes(),
+                                    StatusCode::OK,
+                                    Some("application/json"),
+                                    Some(FEE_ESTIMATES_TTL),
+                                    None,
+                                );
+                            }
+                        }
+                    }
+
+                    let fee_estimates = client
+                        .lock()
+                        .await
+                        .fee_estimates()
+                        .await
+                        .map_err(|_| Error::CannotEstimateFee)?;
+
+                    {
+                        let mut cached = state.cached_fee_estimates.write().await;
+                        *cached = (fee_estimates.clone(), Some(Instant::now()));
+                    }
+
+                    let result = serde_json::to_string(&fee_estimates)
+                        .map_err(|e| Error::String(e.to_string()))?;
+                    any_resp(
+                        result.into_bytes(),
+                        StatusCode::OK,
+                        Some("application/json"),
+                        Some(FEE_ESTIMATES_TTL),
+                        None,
+                    )
                 }
 
                 _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),
