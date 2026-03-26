@@ -242,6 +242,43 @@ Returns transaction history for a specific address in Esplora-compatible format.
 ]
 ```
 
+## Fee Estimation
+
+### Get Fee Estimates
+```
+GET /fee-estimates
+```
+Returns fee estimates for various confirmation targets in sat/vB (satoshis per virtual byte). The endpoint queries either the connected node's RPC or proxies to Esplora depending on server configuration.
+
+**Response Format (JSON):**
+ 
+The following is a non-exhaustive example, more keys are present:
+```json
+{
+  "1": 10.5,
+  "2": 8.2,
+  "3": 7.5,
+  "1008": 1.0
+}
+```
+
+**Response Fields:**
+
+The response is a JSON object where:
+- **Key** (string): Confirmation target in blocks (e.g., "1", "6", "144")
+- **Value** (float): Estimated fee rate in sat/vB for that confirmation target
+
+**Confirmation Targets:**
+
+The endpoint provides estimates for the following confirmation targets (in blocks):
+- Short-term: 1-25 blocks
+- Medium-term: 144 blocks (~1 day)
+- Long-term: 504 blocks (~3.5 days), 1008 blocks (~1 week)
+
+**Caching:**
+
+Fee estimates are cached server-side for 30 seconds to reduce load on the underlying node or Esplora API.
+
 ## Transaction Operations
 
 ### Broadcast Transaction
@@ -252,7 +289,7 @@ Broadcasts a raw transaction to the network.
 
 **Request Body:** Raw transaction hex string
 
-**Response:** 
+**Response:**
 - Success (200): Transaction ID
 - Error (400): Error message
 
