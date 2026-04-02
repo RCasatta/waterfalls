@@ -66,6 +66,7 @@ No `rustfmt.toml` or `clippy.toml` — default settings are used.
 ### Imports
 
 Grouped in this order (separated by blank lines when practical):
+
 1. `std::` — standard library
 2. External crates — `anyhow`, `elements`, `hyper`, `serde`, `tokio`, etc.
 3. `crate::` / `super::` — internal modules
@@ -128,12 +129,37 @@ tests/integration.rs    # Integration tests
 benches/benches.rs      # Criterion benchmarks
 ```
 
-## CI (`.github/workflows/rust.yml`)
+## CI
+
+### Rust checks (`.github/workflows/rust.yml`)
 
 Runs on push/PR to `master`:
+
 - **tests**: downloads bitcoind 28.0 & elementsd 23.2.4, runs `cargo test` and `cargo test -- --ignored`
 - **checks**: `cargo check` with various feature combinations
 - **nix**: `nix build .` with cachix
+
+### Docker publish (`.github/workflows/docker-publish.yml`)
+
+Runs on push to `master`, tag creation, and manual dispatch:
+
+- Push to `master` publishes `blockstream/waterfalls:latest`
+- Tag push publishes `blockstream/waterfalls:<git-tag>`
+
+The workflow builds native images on:
+
+- `ubuntu-latest` for `linux/amd64`
+- `ubuntu-24.04-arm` for `linux/arm64`
+
+Then it creates a multi-arch manifest tag from per-arch tags:
+
+- `blockstream/waterfalls:<final-tag>-amd64`
+- `blockstream/waterfalls:<final-tag>-arm64`
+- `blockstream/waterfalls:<final-tag>` (manifest list with both architectures)
+
+Required GitHub repository secret:
+
+- `DOCKERHUB_TOKEN`
 
 ## Cursor Rules
 
