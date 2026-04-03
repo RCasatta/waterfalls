@@ -33,12 +33,14 @@ jobs:
           should_publish=false
           image_tag=""
 
-          if [[ "${GITHUB_REF_TYPE}" == "branch" && "${GITHUB_REF_NAME}" == "master" ]]; then
-            should_publish=true
-            image_tag="latest"
-          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            should_publish=true
-            image_tag="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_REPOSITORY}" == "Blockstream/waterfalls" ]]; then
+            if [[ "${GITHUB_REF_TYPE}" == "branch" && "${GITHUB_REF_NAME}" == "master" ]]; then
+              should_publish=true
+              image_tag="latest"
+            elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+              should_publish=true
+              image_tag="${GITHUB_REF_NAME}"
+            fi
           fi
 
           echo "should_publish=${should_publish}" >> "${GITHUB_OUTPUT}"
