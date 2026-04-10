@@ -91,7 +91,11 @@ async fn inner_launch_with_node(node: BitcoinD, path: Option<PathBuf>, family: F
     test_env
 }
 
-async fn inner_launch_with_node_no_generate(node: BitcoinD, path: Option<PathBuf>, family: Family) -> TestEnv {
+async fn inner_launch_with_node_no_generate(
+    node: BitcoinD,
+    path: Option<PathBuf>,
+    family: Family,
+) -> TestEnv {
     let mut args = Arguments {
         node_url: Some(node.rpc_url()),
         derivation_cache_capacity: 10000,
