@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, hash::Hasher, sync::Mutex};
 use elements::OutPoint;
 use fxhash::FxHasher;
 
-use crate::{error_panic, ScriptHash};
+use crate::{error_panic, Height, ScriptHash};
 
 use super::{BlockMeta, Store, TxSeen};
 use crate::V;
@@ -12,9 +12,7 @@ use crate::V;
 pub struct MemoryStore {
     utxos: Mutex<BTreeMap<OutPoint, ScriptHash>>,
     history: Mutex<BTreeMap<ScriptHash, Vec<TxSeen>>>,
-
-    // TODO memory store does not fully support reorgs
-    last_block: Mutex<BTreeMap<OutPoint, ScriptHash>>,
+    reorg_data: Mutex<BTreeMap<Height, MemoryReorgData>>,
 }
 
 impl Store for MemoryStore {
@@ -70,26 +68,38 @@ impl Store for MemoryStore {
         let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.1).collect();
         let script_hashes = self.remove_utxos(&only_outpoints);
 
-        let last_block = BTreeMap::from_iter(
+        let spent = Vec::from_iter(
             only_outpoints
                 .iter()
                 .cloned()
                 .zip(script_hashes.iter().cloned()),
         );
-        *self.last_block.lock().unwrap() = last_block;
 
         for (script_hash, (vin, _, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
             el.push(TxSeen::new(txid, block_meta.height(), V::Vin(vin)));
         }
 
+        self.reorg_data.lock().unwrap().insert(
+            block_meta.height(),
+            MemoryReorgData {
+                spent,
+                history: history_map.clone(),
+                utxos_created: utxo_created.clone(),
+            },
+        );
         self.update_history(history_map);
         self.insert_utxos(&utxo_created);
         Ok(())
     }
 
-    fn reorg(&self, _height: crate::Height) {
-        self.insert_utxos(&self.last_block.lock().unwrap());
+    fn reorg(&self, height: crate::Height) {
+        let reorg_data = self.reorg_data.lock().unwrap().remove(&height).unwrap_or_else(|| {
+            error_panic!("missing reorg data for height {height}");
+        });
+        self.insert_utxos_vec(&reorg_data.spent);
+        self.remove_utxos_map(&reorg_data.utxos_created);
+        self.remove_history_entries(reorg_data.history);
     }
 
     fn ibd_finished(&self) {}
@@ -120,14 +130,55 @@ impl MemoryStore {
     fn insert_utxos(&self, adds: &BTreeMap<OutPoint, ScriptHash>) {
         self.utxos.lock().unwrap().extend(adds);
     }
+    fn insert_utxos_vec(&self, adds: &[(OutPoint, ScriptHash)]) {
+        self.utxos.lock().unwrap().extend(adds.iter().cloned());
+    }
+    fn remove_utxos_map(&self, removes: &BTreeMap<OutPoint, ScriptHash>) {
+        let mut utxos = self.utxos.lock().unwrap();
+        for outpoint in removes.keys() {
+            utxos.remove(outpoint);
+        }
+    }
+    fn remove_history_entries(&self, removes: BTreeMap<ScriptHash, Vec<TxSeen>>) {
+        let mut history = self.history.lock().unwrap();
+        for (script_hash, entries_to_remove) in removes {
+            let existing = history.get_mut(&script_hash).unwrap_or_else(|| {
+                error_panic!("missing history for script hash {script_hash}");
+            });
+            let new_len = existing
+                .len()
+                .checked_sub(entries_to_remove.len())
+                .unwrap_or_else(|| {
+                    error_panic!(
+                        "history underflow for script hash {script_hash}: existing {} remove {}",
+                        existing.len(),
+                        entries_to_remove.len()
+                    );
+                });
+            if existing[new_len..] != entries_to_remove {
+                error_panic!("history mismatch while reorging script hash {script_hash}");
+            }
+            existing.truncate(new_len);
+            if existing.is_empty() {
+                history.remove(&script_hash);
+            }
+        }
+    }
 
     pub(crate) fn new() -> Self {
         Self {
             utxos: Mutex::new(BTreeMap::new()),
             history: Mutex::new(BTreeMap::new()),
-            last_block: Mutex::new(BTreeMap::new()),
+            reorg_data: Mutex::new(BTreeMap::new()),
         }
     }
+}
+
+#[derive(Debug)]
+struct MemoryReorgData {
+    spent: Vec<(OutPoint, ScriptHash)>,
+    history: BTreeMap<ScriptHash, Vec<TxSeen>>,
+    utxos_created: BTreeMap<OutPoint, ScriptHash>,
 }
 
 #[cfg(test)]
