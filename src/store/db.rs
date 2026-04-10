@@ -660,9 +660,9 @@ impl Store for DBStore {
             };
 
             // Serialize and save reorg data
-            let reorg_bytes = reorg_data
-                .to_bytes()
-                .with_context(|| format!("failed to serialize reorg data for block {block_meta:?}"))?;
+            let reorg_bytes = reorg_data.to_bytes().with_context(|| {
+                format!("failed to serialize reorg data for block {block_meta:?}")
+            })?;
             let reorg_cf = self.db.cf_handle(REORG_CF).expect("missing REORG_CF");
             batch.put_cf(&reorg_cf, block_meta.height().to_be_bytes(), reorg_bytes);
 

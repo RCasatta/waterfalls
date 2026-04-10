@@ -968,8 +968,10 @@ async fn test_bitcoin_two_block_reorg() {
     let block_h2_prime_hash = new_blocks[1];
     let final_tip_hash = new_blocks[2];
 
-    println!("New blocks mined: H+1'={}, H+2'={}, H+3'={}",
-        block_h1_prime_hash, block_h2_prime_hash, final_tip_hash);
+    println!(
+        "New blocks mined: H+1'={}, H+2'={}, H+3'={}",
+        block_h1_prime_hash, block_h2_prime_hash, final_tip_hash
+    );
     println!("✓ tx_a and tx_b were naturally re-included by the node");
     test_env
         .client()
