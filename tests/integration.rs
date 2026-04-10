@@ -832,6 +832,15 @@ async fn test_bitcoin_reorg() {
 
 #[cfg(all(feature = "test_env", feature = "db"))]
 #[tokio::test]
+async fn test_bitcoin_two_block_reorg_memory() {
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory(Family::Bitcoin).await;
+    do_test_bitcoin_two_block_reorg(test_env).await;
+}
+
+#[cfg(all(feature = "test_env", feature = "db"))]
+#[tokio::test]
 async fn test_bitcoin_two_block_reorg() {
     let _ = env_logger::try_init();
 
@@ -839,7 +848,11 @@ async fn test_bitcoin_two_block_reorg() {
     let path = tempdir.path().to_path_buf();
     let exe = std::env::var("BITCOIND_EXEC").unwrap();
     let test_env = waterfalls::test_env::launch(exe, Some(path), Family::Bitcoin).await;
+    do_test_bitcoin_two_block_reorg(test_env).await;
+}
 
+#[cfg(feature = "test_env")]
+async fn do_test_bitcoin_two_block_reorg(test_env: waterfalls::test_env::TestEnv) {
     // Generate some initial blocks to build upon
     test_env.node_generate(5).await;
 
