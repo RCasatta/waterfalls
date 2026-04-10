@@ -330,12 +330,24 @@ lazy_static! {
         &["name", "event"]
     )
     .unwrap();
+    static ref WATERFALLS_CONNECTION_ERROR_COUNTER: IntCounterVec = register_int_counter_vec!(
+        "waterfalls_connection_errors_total",
+        "Connection-level errors observed by the HTTP server.",
+        &["kind"]
+    )
+    .unwrap();
 }
 
 pub(crate) fn cache_counter(cache_name: &str, hit_miss: bool) {
     let hit_miss = if hit_miss { "hit" } else { "miss" };
     crate::WATERFALLS_CACHE_COUNTER
         .with_label_values(&[cache_name, hit_miss])
+        .inc();
+}
+
+pub(crate) fn inc_connection_error_counter(kind: &str) {
+    crate::WATERFALLS_CONNECTION_ERROR_COUNTER
+        .with_label_values(&[kind])
         .inc();
 }
 

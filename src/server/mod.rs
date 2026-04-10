@@ -1,11 +1,13 @@
 //! Inside this module everything is needed to run the service providing the waterfalls protocol
 
+use std::collections::HashMap;
 use std::future::Future;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::fetch::Client;
+use crate::inc_connection_error_counter;
 use crate::server::preload::headers;
 use crate::store::memory::MemoryStore;
 use crate::store::AnyStore;
@@ -377,6 +379,10 @@ pub async fn inner_main(
 
     // Create broadcast channel for shutdown signal
     let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
+    let header_timeout_aggregation = Arc::new(Mutex::new(HeaderTimeoutAggregation {
+        counts: HashMap::new(),
+        last_report: Instant::now(),
+    }));
 
     let h1 = {
         let state = state.clone();
@@ -446,10 +452,11 @@ pub async fn inner_main(
 
     loop {
         tokio::select! {
-            Ok( (stream, _)) = listener.accept() => {
+            Ok((stream, peer_addr)) = listener.accept() => {
                 let io = TokioIo::new(stream);
                 let state = state.clone();
                 let client = client.clone();
+                let header_timeout_aggregation = header_timeout_aggregation.clone();
 
                 tokio::task::spawn(async move {
                     let state = &state;
@@ -469,7 +476,10 @@ pub async fn inner_main(
                     if let Err(err) = result {
                         let msg = format!("{err:?}");
                         if msg.contains("HeaderTimeout") {
-                            log::warn!("Header read timeout (possible scanner/slowloris): {msg}");
+                            inc_connection_error_counter("header_timeout");
+                            let mut aggregation = header_timeout_aggregation.lock().await;
+                            *aggregation.counts.entry(peer_addr.ip()).or_insert(0) += 1;
+                            report_header_timeouts_if_due(&mut aggregation);
                         } else {
                             log::error!("Error serving connection: {msg}");
                         }
@@ -492,4 +502,33 @@ pub async fn inner_main(
 
     log::info!("shutting down gracefully");
     Ok(())
+}
+
+fn report_header_timeouts_if_due(aggregation: &mut HeaderTimeoutAggregation) {
+    if aggregation.last_report.elapsed() < Duration::from_secs(300) {
+        return;
+    }
+
+    let counts = std::mem::take(&mut aggregation.counts);
+    aggregation.last_report = Instant::now();
+
+    if counts.is_empty() {
+        return;
+    }
+
+    let total: u64 = counts.values().sum();
+    let unique_ips = counts.len();
+    let (top_ip, top_count) = counts
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .expect("counts is not empty");
+
+    log::info!(
+        "Observed {total} header read timeouts in the last period across {unique_ips} IPs; top source: {top_ip} ({top_count})"
+    );
+}
+
+struct HeaderTimeoutAggregation {
+    counts: HashMap<IpAddr, u64>,
+    last_report: Instant,
 }
