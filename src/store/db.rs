@@ -794,6 +794,7 @@ mod test {
         },
         Store,
     };
+    use crate::OutPoint;
     use crate::V;
 
     use super::DBStore;
@@ -824,7 +825,7 @@ mod test {
         let salt2 = get_or_init_salt(&db.db).unwrap();
         assert_eq!(salt, salt2);
 
-        let o = OutPoint::default();
+        let o = OutPoint::null();
         let o1 = {
             let mut o1 = o;
             o1.vout = 1;

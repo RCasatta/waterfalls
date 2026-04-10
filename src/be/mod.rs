@@ -2,6 +2,7 @@ mod address;
 mod block;
 mod block_header;
 mod descriptor;
+mod outpoint;
 mod transaction;
 mod txid;
 
@@ -9,6 +10,7 @@ pub use address::Address;
 pub use block::Block;
 pub use block_header::BlockHeader;
 pub use descriptor::{bitcoin_descriptor, Descriptor};
+pub use outpoint::OutPoint;
 pub use transaction::{Input, InputRef, Output, OutputRef, Transaction, TransactionRef};
 pub use txid::Txid;
 
