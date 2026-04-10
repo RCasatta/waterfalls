@@ -557,8 +557,9 @@ fn parse_fee_estimates_rpc_reply(text: &str) -> anyhow::Result<HashMap<u16, f64>
     let replies: Vec<serde_json::Value> = serde_json::from_str(text)?;
     Ok(replies
         .iter()
-        .zip(CONF_TARGETS)
-        .filter_map(|(reply, target)| {
+        .filter_map(|reply| {
+            // in our request we are setting the id as the requested block target
+            let target = reply["id"].as_u64().and_then(|id| u16::try_from(id).ok())?;
             if !reply["error"].is_null() {
                 log::warn!(
                     "failed estimating fee for target {}: {:?}",
@@ -627,14 +628,14 @@ mod test {
     #[test]
     fn test_parse_fee_estimates_rpc_reply() {
         let json = r#"[
-            {"error": null, "result": {"feerate": 0.00010000}},
-            {"error": null, "result": {"feerate": 0.00005000}},
-            {"error": null, "result": {"feerate": -1}},
-            {"error": "some rpc error", "result": null},
-            {"error": null, "result": {"errors": ["Insufficient data"]}},
-            {"error": null, "result": {"feerate": 0.00002000}},
-            {"error": null, "result": {}},
-            {"error": null, "result": {"feerate": "not-a-number"}}
+            {"id": 1, "error": null, "result": {"feerate": 0.00010000}},
+            {"id": 2, "error": null, "result": {"feerate": 0.00005000}},
+            {"id": 3, "error": null, "result": {"feerate": -1}},
+            {"id": 4, "error": "some rpc error", "result": null},
+            {"id": 5, "error": null, "result": {"errors": ["Insufficient data"]}},
+            {"id": 6, "error": null, "result": {"feerate": 0.00002000}},
+            {"id": 7, "error": null, "result": {}},
+            {"id": 8, "error": null, "result": {"feerate": "not-a-number"}}
         ]"#;
 
         let result = parse_fee_estimates_rpc_reply(json).unwrap();
@@ -663,6 +664,21 @@ mod test {
         assert!(parse_fee_estimates_rpc_reply("{}").is_err());
         assert!(parse_fee_estimates_rpc_reply("").is_err());
         assert!(parse_fee_estimates_rpc_reply("42").is_err());
+    }
+
+    #[test]
+    fn test_parse_fee_estimates_rpc_reply_out_of_order_batch() {
+        let json = r#"[
+            {"id": 6, "error": null, "result": {"feerate": 0.00002000}},
+            {"id": 1, "error": null, "result": {"feerate": 0.00010000}},
+            {"id": 2, "error": null, "result": {"feerate": 0.00005000}}
+        ]"#;
+
+        let result = parse_fee_estimates_rpc_reply(json).unwrap();
+
+        assert_eq!(result[&1], 10.0);
+        assert_eq!(result[&2], 5.0);
+        assert_eq!(result[&6], 2.0);
     }
 
     #[tokio::test]
