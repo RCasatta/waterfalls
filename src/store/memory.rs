@@ -80,6 +80,7 @@ impl Store for MemoryStore {
             el.push(TxSeen::new(txid, block_meta.height(), V::Vin(vin)));
         }
 
+        // TODO: handle unwraps on the lock
         self.reorg_data.lock().unwrap().insert(
             block_meta.height(),
             MemoryReorgData {
@@ -94,9 +95,14 @@ impl Store for MemoryStore {
     }
 
     fn reorg(&self, height: crate::Height) {
-        let reorg_data = self.reorg_data.lock().unwrap().remove(&height).unwrap_or_else(|| {
-            error_panic!("missing reorg data for height {height}");
-        });
+        let reorg_data = self
+            .reorg_data
+            .lock()
+            .unwrap()
+            .remove(&height)
+            .unwrap_or_else(|| {
+                error_panic!("missing reorg data for height {height}");
+            });
         self.insert_utxos_vec(&reorg_data.spent);
         self.remove_utxos_map(&reorg_data.utxos_created);
         self.remove_history_entries(reorg_data.history);
@@ -220,10 +226,9 @@ mod tests {
             .unwrap(),
             123,
         );
-        let spending_txid = Txid::from_str(
-            "4444444444444444444444444444444444444444444444444444444444444444",
-        )
-        .unwrap();
+        let spending_txid =
+            Txid::from_str("4444444444444444444444444444444444444444444444444444444444444444")
+                .unwrap();
         let mut history_map = BTreeMap::new();
         history_map.insert(
             recipient_script_hash,
@@ -248,7 +253,11 @@ mod tests {
         );
         assert_eq!(
             store.history.lock().unwrap().get(&source_script_hash),
-            Some(&vec![TxSeen::new(spending_txid, block_meta.height(), V::Vin(0))])
+            Some(&vec![TxSeen::new(
+                spending_txid,
+                block_meta.height(),
+                V::Vin(0)
+            )])
         );
         assert_eq!(
             store.history.lock().unwrap().get(&recipient_script_hash),
