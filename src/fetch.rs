@@ -462,14 +462,7 @@ impl Client {
         if status != 200 {
             anyhow::bail!("broadcast failed with status:{status}, body is {text}");
         }
-        let value: serde_json::Value = serde_json::from_str(&text)?;
-        let txid_text = value
-            .get("result")
-            .ok_or(anyhow!("unexpected json without result"))?
-            .as_str()
-            .ok_or(anyhow!("unexpected non-string result"))?;
-
-        let txid = crate::be::Txid::from_str(txid_text)?;
+        let txid = parse_broadcast_response(&text, self.use_esplora)?;
         assert_eq!(txid, tx.txid());
         Ok(txid)
     }
@@ -585,6 +578,20 @@ fn parse_fee_estimates_rpc_reply(text: &str) -> anyhow::Result<HashMap<u16, f64>
             Some((target, feerate * 100_000f64))
         })
         .collect())
+}
+
+fn parse_broadcast_response(text: &str, use_esplora: bool) -> anyhow::Result<crate::be::Txid> {
+    if use_esplora {
+        return crate::be::Txid::from_str(text.trim()).map_err(Into::into);
+    }
+
+    let value: serde_json::Value = serde_json::from_str(text)?;
+    let txid_text = value
+        .get("result")
+        .ok_or(anyhow!("unexpected json without result"))?
+        .as_str()
+        .ok_or(anyhow!("unexpected non-string result"))?;
+    crate::be::Txid::from_str(txid_text).map_err(Into::into)
 }
 
 #[derive(Debug)]
