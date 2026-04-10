@@ -198,37 +198,20 @@ mod tests {
         let store = MemoryStore::new();
         let source_script_hash = 11;
         let recipient_script_hash = 22;
-        let source_outpoint = OutPoint::new(
-            elements::Txid::from_str(
-                "1111111111111111111111111111111111111111111111111111111111111111",
-            )
-            .unwrap(),
-            0,
-        );
-        let created_outpoint = OutPoint::new(
-            elements::Txid::from_str(
-                "2222222222222222222222222222222222222222222222222222222222222222",
-            )
-            .unwrap(),
-            1,
-        );
+        let one = "1111111111111111111111111111111111111111111111111111111111111111";
+        let source_outpoint = OutPoint::new(elements::Txid::from_str(one).unwrap(), 0);
+        let two = "2222222222222222222222222222222222222222222222222222222222222222";
+        let created_outpoint = OutPoint::new(elements::Txid::from_str(two).unwrap(), 1);
         store
             .utxos
             .lock()
             .unwrap()
             .insert(source_outpoint, source_script_hash);
 
-        let block_meta = BlockMeta::new(
-            1,
-            elements::BlockHash::from_str(
-                "3333333333333333333333333333333333333333333333333333333333333333",
-            )
-            .unwrap(),
-            123,
-        );
-        let spending_txid =
-            Txid::from_str("4444444444444444444444444444444444444444444444444444444444444444")
-                .unwrap();
+        let three = "3333333333333333333333333333333333333333333333333333333333333333";
+        let block_meta = BlockMeta::new(1, elements::BlockHash::from_str(three).unwrap(), 123);
+        let four = "4444444444444444444444444444444444444444444444444444444444444444";
+        let spending_txid = Txid::from_str(four).unwrap();
         let mut history_map = BTreeMap::new();
         history_map.insert(
             recipient_script_hash,
