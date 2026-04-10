@@ -67,7 +67,6 @@ impl Store for MemoryStore {
         utxo_created: std::collections::BTreeMap<elements::OutPoint, ScriptHash>,
     ) -> anyhow::Result<()> {
         let mut history_map = history_map;
-        // // TODO should be a db tx
         let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.1).collect();
         let script_hashes = self.remove_utxos(&only_outpoints);
 
@@ -77,7 +76,7 @@ impl Store for MemoryStore {
                 .cloned()
                 .zip(script_hashes.iter().cloned()),
         );
-        *self.last_block.lock().unwrap() = last_block; // TODO handle unwrap;
+        *self.last_block.lock().unwrap() = last_block;
 
         for (script_hash, (vin, _, txid)) in script_hashes.into_iter().zip(utxo_spent) {
             let el = history_map.entry(script_hash).or_default();
@@ -128,5 +127,94 @@ impl MemoryStore {
             history: Mutex::new(BTreeMap::new()),
             last_block: Mutex::new(BTreeMap::new()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::be::Txid;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_memory_store_reorg_restores_utxos_and_history() {
+        let store = MemoryStore::new();
+        let source_script_hash = 11;
+        let recipient_script_hash = 22;
+        let source_outpoint = OutPoint::new(
+            elements::Txid::from_str(
+                "1111111111111111111111111111111111111111111111111111111111111111",
+            )
+            .unwrap(),
+            0,
+        );
+        let created_outpoint = OutPoint::new(
+            elements::Txid::from_str(
+                "2222222222222222222222222222222222222222222222222222222222222222",
+            )
+            .unwrap(),
+            1,
+        );
+        store
+            .utxos
+            .lock()
+            .unwrap()
+            .insert(source_outpoint, source_script_hash);
+
+        let block_meta = BlockMeta::new(
+            1,
+            elements::BlockHash::from_str(
+                "3333333333333333333333333333333333333333333333333333333333333333",
+            )
+            .unwrap(),
+            123,
+        );
+        let spending_txid = Txid::from_str(
+            "4444444444444444444444444444444444444444444444444444444444444444",
+        )
+        .unwrap();
+        let mut history_map = BTreeMap::new();
+        history_map.insert(
+            recipient_script_hash,
+            vec![TxSeen::new(spending_txid, block_meta.height(), V::Vout(1))],
+        );
+        let mut utxo_created = BTreeMap::new();
+        utxo_created.insert(created_outpoint, recipient_script_hash);
+
+        store
+            .update(
+                &block_meta,
+                vec![(0, source_outpoint, spending_txid)],
+                history_map,
+                utxo_created,
+            )
+            .unwrap();
+
+        assert_eq!(store.utxos.lock().unwrap().get(&source_outpoint), None);
+        assert_eq!(
+            store.utxos.lock().unwrap().get(&created_outpoint),
+            Some(&recipient_script_hash)
+        );
+        assert_eq!(
+            store.history.lock().unwrap().get(&source_script_hash),
+            Some(&vec![TxSeen::new(spending_txid, block_meta.height(), V::Vin(0))])
+        );
+        assert_eq!(
+            store.history.lock().unwrap().get(&recipient_script_hash),
+            Some(&vec![TxSeen::new(
+                spending_txid,
+                block_meta.height(),
+                V::Vout(1)
+            )])
+        );
+
+        store.reorg(block_meta.height());
+
+        assert_eq!(
+            store.utxos.lock().unwrap().get(&source_outpoint),
+            Some(&source_script_hash)
+        );
+        assert_eq!(store.utxos.lock().unwrap().get(&created_outpoint), None);
+        assert!(store.history.lock().unwrap().is_empty());
     }
 }
