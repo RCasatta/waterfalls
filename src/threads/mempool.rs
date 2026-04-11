@@ -4,7 +4,12 @@ use crate::{
     server::{Error, State},
     store::Store,
 };
-use std::{collections::HashSet, future::Future, sync::Arc, time::Instant};
+use std::{
+    collections::HashSet,
+    future::Future,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::time::{sleep, timeout};
 
 pub(crate) async fn mempool_sync_infallible(
@@ -25,10 +30,10 @@ async fn sync_mempool_once(
     mempool_txids: &mut HashSet<crate::be::Txid>,
     state: &Arc<State>,
     family: Family,
-) {
+) -> Option<MempoolSyncStats> {
+    let start = Instant::now();
     match client.mempool(support_verbose).await {
         Ok(current) => {
-            let start = Instant::now();
             crate::MEMPOOL_TXS_COUNT.set(current.len() as i64);
 
             let db = &state.store;
@@ -37,13 +42,6 @@ async fn sync_mempool_once(
             let removed: Vec<_> = mempool_txids.difference(&current).cloned().collect();
             if !new.is_empty() {
                 log::debug!("new txs in mempool {:?}, tip: {tip:?}", new);
-            }
-            if removed.len() > 1 {
-                log::info!(
-                    "removed {} txs from mempool, tip: {tip:?}, still in mempool: {}",
-                    removed.len(),
-                    current.len()
-                );
             }
 
             let mut txs = vec![];
@@ -67,13 +65,23 @@ async fn sync_mempool_once(
                 mempool_txids.clear();
                 mempool_txids.extend(m.txids_iter());
             }
-            crate::MEMPOOL_LOOP_DURATION.set(start.elapsed().as_millis() as i64);
+            let processing_time = start.elapsed();
+            crate::MEMPOOL_LOOP_DURATION.set(processing_time.as_millis() as i64);
+            Some(MempoolSyncStats {
+                tip,
+                mempool_txs: current.len(),
+                processing_time,
+            })
         }
         Err(e) => {
-            log::warn!("mempool sync error, is the node running and has rest=1 ?\n{e:?}")
+            log::warn!("mempool sync error, is the node running and has rest=1 ?\n{e:?}");
+            None
         }
     }
-    sleep(std::time::Duration::from_secs(1)).await;
+}
+
+async fn sleep_between_cycles() {
+    sleep(Duration::from_secs(1)).await;
 }
 
 async fn mempool_sync(
@@ -117,6 +125,9 @@ async fn mempool_sync(
     let mut mempool_txids = HashSet::new();
     let support_vebose = client.mempool(true).await.is_ok();
     log::info!("mempool support verbose: {support_vebose}");
+    let mut last_summary = Instant::now();
+    let mut processing_since_last_summary = Duration::ZERO;
+    let mut latest_stats = None;
 
     loop {
         tokio::select! {
@@ -125,8 +136,34 @@ async fn mempool_sync(
                 return Ok(());
             }
             _ = async {
-                sync_mempool_once(&client, support_vebose, &mut mempool_txids, &state, family).await;
+                if let Some(stats) =
+                    sync_mempool_once(&client, support_vebose, &mut mempool_txids, &state, family)
+                        .await
+                {
+                    processing_since_last_summary += stats.processing_time;
+                    latest_stats = Some(stats);
+                }
+                if last_summary.elapsed() >= Duration::from_secs(60) {
+                    if let Some(stats) = latest_stats {
+                        log::info!(
+                            "mempool summary: tip={:?}, txs={}, processing_time_ms={}",
+                            stats.tip,
+                            stats.mempool_txs,
+                            processing_since_last_summary.as_millis()
+                        );
+                    }
+                    last_summary = Instant::now();
+                    processing_since_last_summary = Duration::ZERO;
+                }
+                sleep_between_cycles().await;
             } => {}
         }
     }
+}
+
+#[derive(Clone, Copy)]
+struct MempoolSyncStats {
+    tip: Option<u32>,
+    mempool_txs: usize,
+    processing_time: Duration,
 }
