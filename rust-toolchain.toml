@@ -1,4 +1,4 @@
 [toolchain]
 channel = "1.85.0"
 #channel = "nightly"
-components = ["cargo", "clippy", "rust-src", "rust-std", "rustc", "rustfmt"]
+components = ["cargo", "clippy", "rust-analyzer", "rust-src", "rust-std", "rustc", "rustfmt"]
