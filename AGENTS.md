@@ -5,7 +5,7 @@ Waterfalls is a Rust project providing blockchain data to Liquid and Bitcoin lig
 ## Development Environment
 
 Use Nix (defined in `flake.nix`): `nix develop` or `direnv allow`.
-Provides: Rust toolchain (via rust-overlay), RocksDB, OpenSSL, bitcoind, elementsd, libclang.
+Provides: Rust toolchain (via rust-overlay), RocksDB, OpenSSL, bitcoind, elementsd, libclang, rust-analyzer.
 
 When the nix env is not already active (e.g. sandbox), prefer `direnv exec . <command>`
 (e.g. `direnv exec . cargo check`) over `nix develop --command <command>` — it uses the
@@ -14,9 +14,9 @@ cached nix-direnv environment and avoids flake re-evaluation overhead.
 ## Build & Check Commands
 
 ```bash
-cargo build                              # Debug build
+cargo build --quiet                      # Debug build with suppressed outputs, reduce useless tokens
 cargo build --release                    # Release build
-cargo check                              # Fast type-check
+cargo check --quiet                      # Fast type-check
 cargo check --no-default-features        # Check without default features
 cargo check --no-default-features --features test_env
 cargo check --benches
@@ -25,10 +25,11 @@ cargo check --tests
 
 ## Test Commands
 
+There are unit tests and integration tests. The former are launched with `--lib` the latter takes longer and cannot be launched in the sandbox (they must spawn nodes bindings on port which is not permitted in the sandbox), thus they require escalation. Run integration tests only if you are requested or really need to prove a change.
+
 ```bash
-cargo test                               # Run all tests (uses default features: test_env, db)
+cargo test --lib --quiet                 # Run all tests (uses default features: test_env, db)
 cargo test test_name                     # Run a single test by name
-cargo test test_name -- --exact          # Run exactly one test (no substring match)
 cargo test -- --nocapture                # Show stdout/stderr
 cargo test -- --ignored                  # Run ignored tests (require internet)
 cargo test --test integration            # Run only integration tests
@@ -109,6 +110,7 @@ Use absolute paths: `use waterfalls::be::Address` (in tests/benches), `use crate
 - `env_logger::try_init()` at test start (ignore the error if already initialized)
 - Test infrastructure in `src/test_env.rs`: `TestEnv`, `WaterfallClient`, `launch()`, `launch_with_node()`
 - Integration tests in `tests/integration.rs` use `launch_memory()` / `test_env::launch()` to spin up node + server
+- Test name should avoid common prefix in the name, so that specifiying the full name of a test, only one test run
 
 ## Project Structure
 
