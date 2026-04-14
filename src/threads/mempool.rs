@@ -49,11 +49,13 @@ async fn sync_mempool_once(
                 match client.tx(*new_txid, family).await {
                     Ok(tx) => txs.push((*new_txid, tx)),
                     Err(e) => {
+                        let err_msg =
+                            format!("failing fetching {new_txid} in mempool loop, error is: {e}");
                         if let Some(crate::fetch::Error::TxNotFound(_, _)) = e.downcast_ref() {
                             // tx not found, it was replaced from mempool with RBF for example
-                            log::info!("{e}");
+                            log::info!("{err_msg}");
                         } else {
-                            log::error!("{e}");
+                            log::error!("{err_msg}");
                         }
                     }
                 }
