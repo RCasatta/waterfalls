@@ -3,12 +3,10 @@ use std::{
     iter,
 };
 
-use elements::OutPoint;
-
 use crate::{
     be,
     store::{AnyStore, Store},
-    ScriptHash, TxSeen, V,
+    OutPoint, ScriptHash, TxSeen, V,
 };
 
 pub struct Mempool {
@@ -59,7 +57,7 @@ impl Mempool {
             .flat_map(|(txid, tx)| tx.outputs_iter().enumerate().zip(iter::repeat(txid)))
             .map(|((vout, txout), txid)| {
                 (
-                    OutPoint::new(txid.elements(), vout as u32),
+                    OutPoint::new(*txid, vout as u32),
                     db.hash(txout.script_pubkey_bytes()),
                 )
             });

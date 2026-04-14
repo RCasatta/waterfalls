@@ -1,8 +1,7 @@
 use anyhow::Result;
-use elements::OutPoint;
 use std::collections::BTreeMap;
 
-use crate::{store::TxSeen, ScriptHash};
+use crate::{store::TxSeen, OutPoint, ScriptHash};
 
 use super::db::{vec_tx_seen_from_be_bytes, vec_tx_seen_to_be_bytes};
 
@@ -131,14 +130,12 @@ mod test {
 
     #[test]
     fn test_reorg_data_roundtrip() {
-        use elements::{hashes::Hash, OutPoint, Txid};
-
         // Create a ReorgData with all fields populated
         let mut reorg_data = ReorgData::default();
 
         // Add some spent UTXOs
-        let txid1 = Txid::from_slice(&[1u8; 32]).unwrap();
-        let txid2 = Txid::from_slice(&[2u8; 32]).unwrap();
+        let txid1 = crate::be::Txid::from_slice(&[1u8; 32]).unwrap();
+        let txid2 = crate::be::Txid::from_slice(&[2u8; 32]).unwrap();
         let outpoint1 = OutPoint::new(txid1, 0);
         let outpoint2 = OutPoint::new(txid2, 1);
         reorg_data.spent.push((outpoint1, 123456789u64));
@@ -167,8 +164,8 @@ mod test {
             .insert(script_hash2, vec![tx_seen1.clone(), tx_seen2.clone()]);
 
         // Add some created UTXOs
-        let txid3 = Txid::from_slice(&[5u8; 32]).unwrap();
-        let txid4 = Txid::from_slice(&[6u8; 32]).unwrap();
+        let txid3 = crate::be::Txid::from_slice(&[5u8; 32]).unwrap();
+        let txid4 = crate::be::Txid::from_slice(&[6u8; 32]).unwrap();
         let outpoint3 = OutPoint::new(txid3, 2);
         let outpoint4 = OutPoint::new(txid4, 3);
         reorg_data.utxos_created.insert(outpoint3, 333333u64);

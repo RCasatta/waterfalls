@@ -286,16 +286,8 @@ pub async fn route(
                 (Some(""), Some("v1"), Some("unspent"), Some(outpoint), None) => {
                     // note this method only considers confirmed utxos
                     // outpoint is of the form txid:vout
-                    // manual outpoint parsing because elements::OutPoint has [elements] prefix
-                    let mut parts = outpoint.split(":");
-                    let txid = parts.next().ok_or(Error::InvalidOutpoint)?;
-                    let vout = parts.next().ok_or(Error::InvalidOutpoint)?;
-                    if parts.next().is_some() {
-                        return Err(Error::InvalidOutpoint);
-                    }
-                    let txid = elements::Txid::from_str(txid).map_err(|_| Error::InvalidTxid)?;
-                    let vout = vout.parse::<u32>().map_err(|_| Error::InvalidOutpoint)?;
-                    let outpoint = elements::OutPoint::new(txid, vout);
+                    let outpoint =
+                        crate::OutPoint::from_str(outpoint).map_err(|_| Error::InvalidOutpoint)?;
                     let state = state
                         .store
                         .get_utxos(&[outpoint])

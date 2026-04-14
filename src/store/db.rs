@@ -3,7 +3,7 @@ use elements::{
     encode::Encodable,
     hashes::Hash,
     secp256k1_zkp::rand::{thread_rng, Rng},
-    BlockHash, OutPoint,
+    BlockHash,
 };
 use fxhash::FxHasher;
 use rocksdb::{
@@ -27,7 +27,7 @@ use std::{
 use crate::{
     error_panic,
     store::{BlockMeta, Store, TxSeen},
-    Height, ScriptHash,
+    Height, OutPoint, ScriptHash,
 };
 
 /// RocksDB wrapper for index storage
@@ -783,7 +783,7 @@ fn concat_merge(
 
 #[cfg(test)]
 mod test {
-    use elements::{hashes::Hash, BlockHash, OutPoint, Txid};
+    use elements::{hashes::Hash, BlockHash, Txid};
     use rocksdb::DB;
     use std::{collections::BTreeMap, sync::atomic::AtomicBool};
 
@@ -924,32 +924,17 @@ mod test {
             rng.fill_bytes(&mut txid_bytes);
             let txid = Txid::from_byte_array(txid_bytes);
             let vout = rng.next_u32();
-            outpoints.push(OutPoint { txid, vout });
+            outpoints.push(OutPoint::new(txid.into(), vout));
         }
 
         // Add some specific test cases to ensure edge cases work
         let zero_txid = Txid::all_zeros();
         let max_txid = Txid::from_byte_array([0xff; 32]);
-        outpoints.push(OutPoint {
-            txid: zero_txid,
-            vout: 0,
-        });
-        outpoints.push(OutPoint {
-            txid: zero_txid,
-            vout: 1,
-        });
-        outpoints.push(OutPoint {
-            txid: zero_txid,
-            vout: u32::MAX,
-        });
-        outpoints.push(OutPoint {
-            txid: max_txid,
-            vout: 0,
-        });
-        outpoints.push(OutPoint {
-            txid: max_txid,
-            vout: u32::MAX,
-        });
+        outpoints.push(OutPoint::new(zero_txid.into(), 0));
+        outpoints.push(OutPoint::new(zero_txid.into(), 1));
+        outpoints.push(OutPoint::new(zero_txid.into(), u32::MAX));
+        outpoints.push(OutPoint::new(max_txid.into(), 0));
+        outpoints.push(OutPoint::new(max_txid.into(), u32::MAX));
 
         // Sort by PartialOrd
         let mut outpoints_by_ord = outpoints.clone();

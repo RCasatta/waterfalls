@@ -1,9 +1,8 @@
 use std::{collections::BTreeMap, hash::Hasher, sync::Mutex};
 
-use elements::OutPoint;
 use fxhash::FxHasher;
 
-use crate::{error_panic, Height, ScriptHash};
+use crate::{error_panic, Height, OutPoint, ScriptHash};
 
 use super::{BlockMeta, Store, TxSeen};
 use crate::V;
@@ -30,7 +29,7 @@ impl Store for MemoryStore {
 
     fn get_utxos(
         &self,
-        outpoints: &[elements::OutPoint],
+        outpoints: &[OutPoint],
     ) -> anyhow::Result<Vec<Option<ScriptHash>>> {
         let mut result = Vec::with_capacity(outpoints.len());
         for outpoint in outpoints {
@@ -60,9 +59,9 @@ impl Store for MemoryStore {
     fn update(
         &self,
         block_meta: &BlockMeta,
-        utxo_spent: Vec<(u32, elements::OutPoint, crate::be::Txid)>,
+        utxo_spent: Vec<(u32, OutPoint, crate::be::Txid)>,
         history_map: std::collections::BTreeMap<ScriptHash, Vec<TxSeen>>,
-        utxo_created: std::collections::BTreeMap<elements::OutPoint, ScriptHash>,
+        utxo_created: std::collections::BTreeMap<OutPoint, ScriptHash>,
     ) -> anyhow::Result<()> {
         let mut history_map = history_map;
         let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.1).collect();
@@ -199,9 +198,9 @@ mod tests {
         let source_script_hash = 11;
         let recipient_script_hash = 22;
         let one = "1111111111111111111111111111111111111111111111111111111111111111";
-        let source_outpoint = OutPoint::new(elements::Txid::from_str(one).unwrap(), 0);
+        let source_outpoint = OutPoint::new(crate::be::Txid::from_str(one).unwrap(), 0);
         let two = "2222222222222222222222222222222222222222222222222222222222222222";
-        let created_outpoint = OutPoint::new(elements::Txid::from_str(two).unwrap(), 1);
+        let created_outpoint = OutPoint::new(crate::be::Txid::from_str(two).unwrap(), 1);
         store
             .utxos
             .lock()

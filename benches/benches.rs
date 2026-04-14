@@ -7,14 +7,14 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hyper::body::Buf;
 
 use elements::secp256k1_zkp::rand::{thread_rng, RngCore};
-use elements::{OutPoint, Txid};
+use elements::Txid;
 use elements_miniscript::Descriptor;
 use elements_miniscript::DescriptorPublicKey;
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, DBCompressionType, Options, WriteBatch, DB,
 };
 use tempfile;
-use waterfalls::WaterfallResponse;
+use waterfalls::{OutPoint, WaterfallResponse};
 
 criterion_group!(
     benches,
@@ -189,7 +189,7 @@ pub fn writebatch_sorting(c: &mut Criterion) {
         rng.fill_bytes(&mut txid_bytes);
         let txid = Txid::from_byte_array(txid_bytes);
         let vout = rng.next_u32();
-        test_outpoints.push(OutPoint { txid, vout });
+        test_outpoints.push(OutPoint::new(txid.into(), vout));
     }
 
     // Helper function to serialize OutPoint

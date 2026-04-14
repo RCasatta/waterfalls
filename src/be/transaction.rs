@@ -209,13 +209,10 @@ impl InputRef<'_> {
         }
     }
 
-    pub(crate) fn previous_output(&self) -> elements::OutPoint {
+    pub(crate) fn previous_output(&self) -> crate::OutPoint {
         match self {
-            InputRef::Bitcoin(input) => elements::OutPoint::new(
-                crate::be::Txid::from(input.previous_output.txid).elements(),
-                input.previous_output.vout,
-            ),
-            InputRef::Elements(input) => input.previous_output,
+            InputRef::Bitcoin(input) => input.previous_output.into(),
+            InputRef::Elements(input) => input.previous_output.into(),
         }
     }
 }

@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use crate::cbor::{cbor_block_hash, cbor_opt_block_hash};
 pub use be::Family;
-use elements::{BlockHash, OutPoint};
+pub use be::OutPoint;
+use elements::BlockHash;
 use lazy_static::lazy_static;
 use minicbor::{Decode, Encode};
 use prometheus::{
@@ -287,9 +288,7 @@ impl TxSeen {
     }
 
     pub fn outpoint(&self) -> Option<OutPoint> {
-        self.v
-            .vout()
-            .map(|vout| OutPoint::new(self.txid.elements(), vout))
+        self.v.vout().map(|vout| OutPoint::new(self.txid, vout))
     }
 }
 

@@ -1,6 +1,6 @@
-use crate::{Height, ScriptHash, Timestamp, TxSeen};
+use crate::{Height, OutPoint, ScriptHash, Timestamp, TxSeen};
 use anyhow::Result;
-use elements::{BlockHash, OutPoint};
+use elements::BlockHash;
 use std::collections::BTreeMap;
 
 #[cfg(feature = "db")]
