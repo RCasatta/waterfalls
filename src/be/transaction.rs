@@ -1,6 +1,6 @@
 use crate::{be, Family};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Transaction {
     Bitcoin(bitcoin::Transaction),
     Elements(elements::Transaction),
