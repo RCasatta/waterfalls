@@ -30,7 +30,7 @@ async fn sync_mempool_once(
     mempool_txids: &mut HashSet<crate::be::Txid>,
     state: &Arc<State>,
     family: Family,
-) -> Option<MempoolSyncStats> {
+) -> Result<MempoolSyncStats, Error> {
     let start = Instant::now();
     match client.mempool(support_verbose).await {
         Ok(current) => {
@@ -69,15 +69,17 @@ async fn sync_mempool_once(
             }
             let processing_time = start.elapsed();
             crate::MEMPOOL_LOOP_DURATION.set(processing_time.as_millis() as i64);
-            Some(MempoolSyncStats {
+            Ok(MempoolSyncStats {
                 tip,
                 mempool_txs: current.len(),
                 processing_time,
             })
         }
         Err(e) => {
-            log::warn!("mempool sync error, is the node running and has rest=1 ?\n{e:?}");
-            None
+            let err_msg =
+                format!("mempool sync error, is the node running and has rest=1 ?\n{e:?}");
+            log::warn!("{err_msg}");
+            Err(Error::String(err_msg))
         }
     }
 }
@@ -138,7 +140,7 @@ async fn mempool_sync(
                 return Ok(());
             }
             _ = async {
-                if let Some(stats) =
+                if let Ok(stats) =
                     sync_mempool_once(&client, support_vebose, &mut mempool_txids, &state, family)
                         .await
                 {
