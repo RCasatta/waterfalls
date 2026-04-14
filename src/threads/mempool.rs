@@ -86,7 +86,7 @@ async fn sync_mempool_once(
 }
 
 async fn sleep_between_cycles() {
-    sleep(Duration::from_secs(1)).await;
+    sleep(Duration::from_millis(100)).await;
 }
 
 async fn mempool_sync(
