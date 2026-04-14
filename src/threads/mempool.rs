@@ -57,6 +57,7 @@ async fn sync_mempool_once(
                         } else {
                             log::error!("{err_msg}");
                         }
+                        return Err(Error::String(err_msg));
                     }
                 }
             }
