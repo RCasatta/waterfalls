@@ -630,6 +630,7 @@ async fn handle_waterfalls_req(
             utxo_only,
         }) => {
             id = string_hash(&descriptor.to_string());
+            state.record_descriptor_access(id).await;
             if page != 0 || to_index != 0 || utxo_only {
                 log::info!("{id:x}: page={page}, to_index={to_index}, utxo_only={utxo_only}");
             }
@@ -762,6 +763,7 @@ async fn handle_last_used_index(
     let db = &state.store;
     let start = Instant::now();
     let id = string_hash(&descriptor.to_string());
+    state.record_descriptor_access(id).await;
 
     let timer = crate::WATERFALLS_HISTOGRAM
         .with_label_values(&["last_used_index"])

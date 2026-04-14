@@ -336,6 +336,11 @@ lazy_static! {
         &["kind"]
     )
     .unwrap();
+    pub(crate) static ref WATERFALLS_UNIQUE_DESCRIPTORS: IntGauge = register_int_gauge!(
+        "waterfalls_unique_descriptors",
+        "Unique descriptor IDs seen within the last 24 hours."
+    )
+    .unwrap();
 }
 
 pub(crate) fn cache_counter(cache_name: &str, hit_miss: bool) {
@@ -349,6 +354,10 @@ pub(crate) fn inc_connection_error_counter(kind: &str) {
     crate::WATERFALLS_CONNECTION_ERROR_COUNTER
         .with_label_values(&[kind])
         .inc();
+}
+
+pub(crate) fn set_unique_descriptors(count: usize) {
+    crate::WATERFALLS_UNIQUE_DESCRIPTORS.set(count as i64);
 }
 
 /// Response from the last_used_index endpoint
@@ -441,5 +450,17 @@ mod tests {
         */
 
         assert_eq!(cbor.len(), 76);
+    }
+
+    #[test]
+    fn test_descriptor_metrics_registered() {
+        set_unique_descriptors(7);
+
+        let metric_names = prometheus::gather()
+            .into_iter()
+            .map(|metric| metric.get_name().to_string())
+            .collect::<Vec<_>>();
+
+        assert!(metric_names.contains(&"waterfalls_unique_descriptors".to_string()));
     }
 }

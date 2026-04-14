@@ -1,4 +1,8 @@
-use std::{cmp::Ordering, collections::HashMap, time::Instant};
+use std::{
+    cmp::Ordering,
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use crate::{
     server::{derivation_cache::DerivationCache, Mempool},
@@ -11,6 +15,9 @@ use elements::BlockHash;
 use tokio::sync::{Mutex, RwLock};
 
 use super::{sign::p2pkh, Error};
+
+const DESCRIPTOR_METRICS_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
+const DESCRIPTOR_METRICS_PRUNE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 pub struct State {
     /// An asymmetric encryption key, the public key is used to optionally encrypt the descriptor field so that it's harder to leak it.
@@ -32,6 +39,8 @@ pub struct State {
     pub derivation_cache: Mutex<DerivationCache>,
 
     pub cached_fee_estimates: RwLock<(HashMap<u16, f64>, Option<Instant>)>,
+
+    descriptor_metrics: Mutex<DescriptorMetrics>,
 }
 
 impl State {
@@ -54,6 +63,7 @@ impl State {
             cache_control_seconds,
             derivation_cache: Mutex::new(DerivationCache::new(derivation_cache_capacity)),
             cached_fee_estimates: RwLock::new((HashMap::new(), None)),
+            descriptor_metrics: Mutex::new(DescriptorMetrics::new()),
         })
     }
 
@@ -98,6 +108,12 @@ impl State {
     pub fn address(&self) -> bitcoin::Address {
         p2pkh(&self.secp, &self.wif_key)
     }
+
+    pub async fn record_descriptor_access(&self, id: u64) {
+        let mut descriptor_metrics = self.descriptor_metrics.lock().await;
+        descriptor_metrics.record(id, Instant::now());
+        crate::set_unique_descriptors(descriptor_metrics.unique_count());
+    }
 }
 
 fn update_hash_ts(blocks_hash_ts: &mut Vec<(BlockHash, u32)>, meta: &BlockMeta) {
@@ -124,6 +140,37 @@ fn update_hash_ts(blocks_hash_ts: &mut Vec<(BlockHash, u32)>, meta: &BlockMeta) 
     }
 
     assert_eq!(blocks_hash_ts.len() as u32 - 1, meta.height());
+}
+
+struct DescriptorMetrics {
+    last_seen: HashMap<u64, Instant>,
+    last_prune: Instant,
+}
+
+impl DescriptorMetrics {
+    fn new() -> Self {
+        Self {
+            last_seen: HashMap::new(),
+            last_prune: Instant::now(),
+        }
+    }
+
+    fn record(&mut self, id: u64, now: Instant) {
+        self.last_seen.insert(id, now);
+        if now.duration_since(self.last_prune) >= DESCRIPTOR_METRICS_PRUNE_INTERVAL {
+            self.prune(now);
+            self.last_prune = now;
+        }
+    }
+
+    fn prune(&mut self, now: Instant) {
+        self.last_seen
+            .retain(|_, last_seen| now.duration_since(*last_seen) <= DESCRIPTOR_METRICS_RETENTION);
+    }
+
+    fn unique_count(&self) -> usize {
+        self.last_seen.len()
+    }
 }
 
 #[cfg(test)]
@@ -186,5 +233,31 @@ mod tests {
         assert_eq!(blocks_hash_ts.len(), 2);
         assert_eq!(blocks_hash_ts[1].0, meta2.hash());
         assert_eq!(blocks_hash_ts[1].1, meta2.timestamp());
+    }
+
+    #[test]
+    fn test_descriptor_metrics_record_and_prune() {
+        let base = Instant::now();
+        let mut metrics = DescriptorMetrics {
+            last_seen: HashMap::new(),
+            last_prune: base,
+        };
+
+        metrics.record(1, base);
+        assert_eq!(metrics.unique_count(), 1);
+
+        metrics.record(1, base + Duration::from_secs(1));
+        assert_eq!(metrics.unique_count(), 1);
+
+        metrics.record(2, base + Duration::from_secs(2));
+        assert_eq!(metrics.unique_count(), 2);
+
+        assert_eq!(metrics.unique_count(), 2);
+
+        metrics.record(
+            3,
+            base + DESCRIPTOR_METRICS_RETENTION + DESCRIPTOR_METRICS_PRUNE_INTERVAL,
+        );
+        assert_eq!(metrics.unique_count(), 1);
     }
 }
