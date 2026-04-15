@@ -5,7 +5,7 @@ use crate::{
     store::Store,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     future::Future,
     sync::Arc,
     time::{Duration, Instant},
@@ -28,7 +28,6 @@ async fn sync_mempool_once(
     client: &Client,
     support_verbose: bool,
     mempool_txids: &mut HashSet<crate::be::Txid>,
-    mempool_cache: &mut HashMap<crate::be::Txid, crate::be::Transaction>,
     state: &Arc<State>,
     family: Family,
 ) -> Result<MempoolSyncStats, Error> {
@@ -45,6 +44,10 @@ async fn sync_mempool_once(
                 log::debug!("new txs in mempool {:?}, tip: {tip:?}", new);
             }
 
+            // we keep this lock because we are the critical path
+            // it's fine if the zmq thread wait for us.
+            // and it's also beneficial so that the final mempool_cache.clear() does not delete tx we didn't use yet
+            let mut mempool_cache = state.mempool_cache.lock().await;
             let mut txs = vec![];
             for new_txid in new {
                 let tx = if let Some(tx) = mempool_cache.get(new_txid).cloned() {
@@ -75,8 +78,8 @@ async fn sync_mempool_once(
                 m.update(db, &removed, &txs);
                 mempool_txids.clear();
                 mempool_txids.extend(m.txids_iter());
-                mempool_cache.clear();
             }
+            mempool_cache.clear();
             let processing_time = start.elapsed();
             crate::MEMPOOL_LOOP_DURATION.set(processing_time.as_millis() as i64);
             Ok(MempoolSyncStats {
@@ -137,7 +140,6 @@ async fn mempool_sync(
     }
 
     let mut mempool_txids = HashSet::new();
-    let mut mempool_cache = HashMap::new();
     let support_vebose = client.mempool(true).await.is_ok();
     log::info!("mempool support verbose: {support_vebose}");
     let mut last_summary = Instant::now();
@@ -152,7 +154,7 @@ async fn mempool_sync(
             }
             _ = async {
                 if let Ok(stats) =
-                    sync_mempool_once(&client, support_vebose, &mut mempool_txids, &mut mempool_cache, &state, family)
+                    sync_mempool_once(&client, support_vebose, &mut mempool_txids, &state, family)
                         .await
                 {
                     processing_since_last_summary += stats.processing_time;

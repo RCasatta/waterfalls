@@ -28,6 +28,7 @@ pub struct State {
 
     pub store: AnyStore,
     pub mempool: Mutex<Mempool>,
+    pub mempool_cache: Mutex<HashMap<crate::be::Txid, crate::be::Transaction>>,
     pub blocks_hash_ts: Mutex<Vec<(BlockHash, Timestamp)>>, // TODO should be moved into the Store, but in memory for db
 
     pub secp: Secp256k1<All>,
@@ -57,6 +58,7 @@ impl State {
             wif_key,
             store,
             mempool: Mutex::new(Mempool::new()),
+            mempool_cache: Mutex::new(HashMap::new()),
             blocks_hash_ts: Mutex::new(Vec::new()),
             secp: bitcoin::key::Secp256k1::new(),
             max_addresses,

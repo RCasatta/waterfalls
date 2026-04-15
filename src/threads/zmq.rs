@@ -1,21 +1,26 @@
-use std::future::Future;
+use std::{future::Future, sync::Arc};
 
 use futures_util::StreamExt;
 use tmq::{subscribe, Context, Multipart};
 
-use crate::{be::Family, server::Error};
+use crate::{
+    be::Family,
+    server::{Error, State},
+};
 
 pub(crate) async fn rawtx_listener_infallible(
+    state: Arc<State>,
     endpoint: String,
     family: Family,
     shutdown_signal: impl Future<Output = ()>,
 ) {
-    if let Err(e) = rawtx_listener(endpoint, family, shutdown_signal).await {
+    if let Err(e) = rawtx_listener(state, endpoint, family, shutdown_signal).await {
         log::error!("{:?}", e);
     }
 }
 
 async fn rawtx_listener(
+    state: Arc<State>,
     endpoint: String,
     family: Family,
     shutdown_signal: impl Future<Output = ()>,
@@ -40,7 +45,7 @@ async fn rawtx_listener(
             }
             message = socket.next() => {
                 match message {
-                    Some(Ok(message)) => process_rawtx_message(message, family)?,
+                    Some(Ok(message)) => process_rawtx_message(&state, message, family).await?,
                     Some(Err(e)) => log::error!("error receiving ZMQ message from {endpoint}: {e}"),
                     None => {
                         return Err(Error::String(format!(
@@ -53,7 +58,11 @@ async fn rawtx_listener(
     }
 }
 
-fn process_rawtx_message(message: Multipart, family: Family) -> Result<(), Error> {
+async fn process_rawtx_message(
+    state: &Arc<State>,
+    message: Multipart,
+    family: Family,
+) -> Result<(), Error> {
     let mut parts = message.iter().map(|part| part.as_ref());
     let Some(topic) = parts.next() else {
         log::warn!("received ZMQ message without topic");
@@ -71,7 +80,9 @@ fn process_rawtx_message(message: Multipart, family: Family) -> Result<(), Error
 
     let tx = crate::be::Transaction::from_bytes(payload, family)
         .map_err(|e| Error::String(format!("failed decoding rawtx payload from ZMQ: {e}")))?;
-    log::debug!("zmq rawtx txid={}", tx.txid());
+    let txid = tx.txid();
+    state.mempool_cache.lock().await.insert(txid, tx);
+    log::debug!("zmq rawtx txid={txid}");
 
     Ok(())
 }

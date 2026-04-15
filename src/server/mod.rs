@@ -442,6 +442,7 @@ pub async fn inner_main(
     };
 
     let h3 = args.zmq_endpoint.clone().map(|endpoint| {
+        let state = state.clone();
         let family = args.network.into();
         let shutdown_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
@@ -449,7 +450,7 @@ pub async fn inner_main(
                 let mut rx = shutdown_rx;
                 let _ = rx.recv().await;
             };
-            rawtx_listener_infallible(endpoint, family, shutdown_future).await
+            rawtx_listener_infallible(state, endpoint, family, shutdown_future).await
         })
     });
 
