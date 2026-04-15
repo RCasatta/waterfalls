@@ -306,6 +306,11 @@ lazy_static! {
         "The duration of each loop iteration computing the mempool in milliseconds.",
     )
     .unwrap();
+    static ref MEMPOOL_CLIENT_DURATION: IntGauge = register_int_gauge!(
+        "waterfalls_mempool_client_duration_milliseconds",
+        "The duration of the client mempool fetch in milliseconds.",
+    )
+    .unwrap();
     static ref MEMPOOL_TXS_COUNT: IntGauge = register_int_gauge!(opts!(
         "waterfalls_mempool_txs_count",
         "The number of transactions in the mempool."

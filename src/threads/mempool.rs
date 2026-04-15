@@ -35,6 +35,8 @@ async fn sync_mempool_once(
     let start = Instant::now();
     match client.mempool(support_verbose).await {
         Ok(current) => {
+            let client_mempool_elapsed = start.elapsed();
+            crate::MEMPOOL_CLIENT_DURATION.set(client_mempool_elapsed.as_millis() as i64);
             crate::MEMPOOL_TXS_COUNT.set(current.len() as i64);
 
             let db = &state.store;
