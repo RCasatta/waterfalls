@@ -1,5 +1,6 @@
 use crate::{
     be::Family,
+    cache_counter,
     fetch::Client,
     server::{Error, State},
     store::Store,
@@ -50,7 +51,9 @@ async fn sync_mempool_once(
             let mut mempool_cache = state.mempool_cache.lock().await;
             let mut txs = vec![];
             for new_txid in new {
-                let tx = if let Some(tx) = mempool_cache.get(new_txid).cloned() {
+                let cached_tx = mempool_cache.get(new_txid).cloned();
+                cache_counter("mempool_cache", cached_tx.is_some());
+                let tx = if let Some(tx) = cached_tx {
                     Ok(tx)
                 } else {
                     client.tx(*new_txid, family).await
