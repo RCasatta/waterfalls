@@ -13,6 +13,7 @@ use crate::store::memory::MemoryStore;
 use crate::store::AnyStore;
 use crate::threads::blocks::blocks_infallible;
 use crate::threads::mempool::mempool_sync_infallible;
+use crate::threads::zmq::rawtx_listener_infallible;
 use age::x25519::Identity;
 use bitcoin::{NetworkKind, PrivateKey};
 use hyper::server::conn::http1;
@@ -89,6 +90,10 @@ pub struct Arguments {
     #[arg(long, env)]
     pub rpc_user_password: Option<String>,
 
+    /// Optional ZMQ endpoint used to subscribe to node raw transaction notifications.
+    #[arg(long, env)]
+    pub zmq_endpoint: Option<String>,
+
     /// Maximum number of addresses that can be specified in the query string.
     #[arg(env, long, default_value = "100")]
     pub max_addresses: usize,
@@ -158,6 +163,7 @@ impl std::fmt::Debug for Arguments {
                 "rpc_user_password",
                 &self.rpc_user_password.as_ref().map(|_| "Some(<redacted>)"),
             )
+            .field("zmq_endpoint", &self.zmq_endpoint)
             .field("max_addresses", &self.max_addresses)
             .field("add_cors", &self.add_cors)
             .field("derivation_cache_capacity", &self.derivation_cache_capacity)
@@ -435,6 +441,18 @@ pub async fn inner_main(
         })
     };
 
+    let h3 = args.zmq_endpoint.clone().map(|endpoint| {
+        let family = args.network.into();
+        let shutdown_rx = shutdown_tx.subscribe();
+        tokio::spawn(async move {
+            let shutdown_future = async {
+                let mut rx = shutdown_rx;
+                let _ = rx.recv().await;
+            };
+            rawtx_listener_infallible(endpoint, family, shutdown_future).await
+        })
+    });
+
     let addr = args.listen.unwrap_or(SocketAddr::from((
         [127, 0, 0, 1],
         args.network.default_listen_port(),
@@ -499,6 +517,9 @@ pub async fn inner_main(
 
     h1.await.unwrap();
     h2.await.unwrap();
+    if let Some(h3) = h3 {
+        h3.await.unwrap();
+    }
 
     log::info!("shutting down gracefully");
     Ok(())

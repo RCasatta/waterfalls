@@ -29,6 +29,7 @@ http-body-util = "0.1"
 hyper-util = { version = "0.1.5", features = ["full", "server"] }
 reqwest = "0.12.12"
 anyhow = "1.0.86"
+futures-util = "0.3.31"
 rocksdb = { version = "0.24.0", features = [
     "multi-threaded-cf",
     "zstd",
@@ -53,6 +54,7 @@ minicbor = { version = "0.23", default-features = false, features = [
 prefix_uvarint = "0.6.1"
 lrumap = "0.1.0"
 hex-simd = "0.8.0"
+tmq = "0.5.0"
 
 
 [dev-dependencies]

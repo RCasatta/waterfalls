@@ -27,10 +27,7 @@ impl Store for MemoryStore {
         Box::new(vec![].into_iter())
     }
 
-    fn get_utxos(
-        &self,
-        outpoints: &[OutPoint],
-    ) -> anyhow::Result<Vec<Option<ScriptHash>>> {
+    fn get_utxos(&self, outpoints: &[OutPoint]) -> anyhow::Result<Vec<Option<ScriptHash>>> {
         let mut result = Vec::with_capacity(outpoints.len());
         for outpoint in outpoints {
             result.push(self.utxos.lock().unwrap().get(outpoint).cloned());
