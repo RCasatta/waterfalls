@@ -81,6 +81,11 @@ async fn process_rawtx_message(
     let tx = crate::be::Transaction::from_bytes(payload, family)
         .map_err(|e| Error::String(format!("failed decoding rawtx payload from ZMQ: {e}")))?;
     let txid = tx.txid();
+    // Intentionally wait on the shared mempool_cache lock here. The mempool thread keeps
+    // it for the whole sync cycle so it can safely clear the cache at the end without
+    // racing with concurrent ZMQ inserts. We considered a small local queue here, but
+    // without a separate drain trigger/worker it could leave transactions sitting there
+    // until another ZMQ message arrives, so stalling on the lock is the simpler tradeoff.
     state.mempool_cache.lock().await.insert(txid, tx);
     log::debug!("zmq rawtx txid={txid}");
 
