@@ -1,4 +1,8 @@
-use std::{future::Future, sync::Arc};
+use std::{
+    future::Future,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use futures_util::StreamExt;
 use tmq::{subscribe, Context, Multipart};
@@ -25,6 +29,8 @@ async fn rawtx_listener(
     family: Family,
     shutdown_signal: impl Future<Output = ()>,
 ) -> Result<(), Error> {
+    let mut received_txs = 0u64;
+    let mut last_summary = Instant::now();
     let ctx = Context::new();
     let socket_builder = subscribe(&ctx)
         .connect(&endpoint)
@@ -45,7 +51,15 @@ async fn rawtx_listener(
             }
             message = socket.next() => {
                 match message {
-                    Some(Ok(message)) => process_rawtx_message(&state, message, family).await?,
+                    Some(Ok(message)) => {
+                        process_rawtx_message(&state, message, family).await?;
+                        received_txs += 1;
+                        if last_summary.elapsed() >= Duration::from_secs(5 * 60) {
+                            log::info!("zmq rawtx summary: received_txs={received_txs}");
+                            last_summary = Instant::now();
+                            received_txs = 0;
+                        }
+                    }
                     Some(Err(e)) => log::error!("error receiving ZMQ message from {endpoint}: {e}"),
                     None => {
                         return Err(Error::String(format!(
