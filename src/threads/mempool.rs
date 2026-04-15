@@ -72,8 +72,7 @@ async fn sync_mempool_once(
             }
             {
                 let mut m = state.mempool.lock().await;
-                m.remove(&removed);
-                m.add(db, &txs);
+                m.update(db, &removed, &txs);
                 mempool_txids.clear();
                 mempool_txids.extend(m.txids_iter());
                 mempool_cache.clear();

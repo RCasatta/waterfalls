@@ -30,7 +30,17 @@ impl Mempool {
         }
     }
 
-    pub fn remove(&mut self, txids: &[crate::be::Txid]) {
+    pub fn update(
+        &mut self,
+        db: &AnyStore,
+        removed_txids: &[crate::be::Txid],
+        txs: &[(crate::be::Txid, be::Transaction)],
+    ) {
+        self.remove(removed_txids);
+        self.add(db, txs);
+    }
+
+    fn remove(&mut self, txids: &[crate::be::Txid]) {
         for txid in txids {
             if let Some(hashes) = self.txid_hashes.remove(txid) {
                 for hash in hashes {
@@ -47,7 +57,7 @@ impl Mempool {
             .retain(|k, _| !txids.contains(&k.txid.into()));
     }
 
-    pub fn add(&mut self, db: &AnyStore, txs: &[(crate::be::Txid, be::Transaction)]) {
+    fn add(&mut self, db: &AnyStore, txs: &[(crate::be::Txid, be::Transaction)]) {
         let txs_map: HashMap<crate::be::Txid, &be::Transaction> =
             txs.iter().map(|(txid, tx)| (*txid, tx)).collect();
 
