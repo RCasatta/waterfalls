@@ -15,6 +15,13 @@ pub struct Mempool {
     outpoints_created: HashMap<OutPoint, ScriptHash>,
 }
 
+pub struct MempoolStats {
+    pub txids: usize,
+    pub script_hashes: usize,
+    pub positions: usize,
+    pub outpoints_created: usize,
+}
+
 impl Default for Mempool {
     fn default() -> Self {
         Self::new()
@@ -154,6 +161,15 @@ impl Mempool {
 
     pub(crate) fn txids_iter(&self) -> impl Iterator<Item = crate::be::Txid> + '_ {
         self.txid_hashes.keys().cloned()
+    }
+
+    pub fn stats(&self) -> MempoolStats {
+        MempoolStats {
+            txids: self.txid_hashes.len(),
+            script_hashes: self.hash_txids.len(),
+            positions: self.hash_txids.values().map(|positions| positions.len()).sum(),
+            outpoints_created: self.outpoints_created.len(),
+        }
     }
 }
 

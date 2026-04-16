@@ -13,6 +13,8 @@ use std::{
 };
 use tokio::time::{sleep, timeout};
 
+const BIG_MEMPOOL_DELTA_THRESHOLD: usize = 1_000;
+
 pub(crate) async fn mempool_sync_infallible(
     state: Arc<State>,
     client: Client,
@@ -43,8 +45,19 @@ async fn sync_mempool_once(
             let tip = state.tip_height().await;
             let new: Vec<_> = current.difference(mempool_txids).collect();
             let removed: Vec<_> = mempool_txids.difference(&current).cloned().collect();
+            let is_big_delta = new.len() >= BIG_MEMPOOL_DELTA_THRESHOLD
+                || removed.len() >= BIG_MEMPOOL_DELTA_THRESHOLD;
             if !new.is_empty() {
                 log::debug!("new txs in mempool {:?}, tip: {tip:?}", new);
+            }
+            if is_big_delta {
+                log::info!(
+                    "mempool big delta detected: tip={tip:?}, new={}, removed={}, current_txs={}, previous_tracked_txs={}",
+                    new.len(),
+                    removed.len(),
+                    current.len(),
+                    mempool_txids.len(),
+                );
             }
 
             // we keep this lock because we are the critical path
@@ -83,9 +96,27 @@ async fn sync_mempool_once(
                 m.update(db, &removed, &txs);
                 mempool_txids.clear();
                 mempool_txids.extend(m.txids_iter());
+                if is_big_delta {
+                    let stats = m.stats();
+                    log::info!(
+                        "mempool big delta applied: tip={tip:?}, tracked_txs={}, script_hashes={}, positions={}, outpoints_created={}, fetched_txs={}",
+                        stats.txids,
+                        stats.script_hashes,
+                        stats.positions,
+                        stats.outpoints_created,
+                        txs.len(),
+                    );
+                }
             }
             mempool_cache.clear();
             let processing_time = start.elapsed();
+            if is_big_delta {
+                log::info!(
+                    "mempool big delta processed: tip={tip:?}, loop_ms={}, client_fetch_ms={}",
+                    processing_time.as_millis(),
+                    client_mempool_elapsed.as_millis(),
+                );
+            }
             crate::MEMPOOL_LOOP_DURATION.set(processing_time.as_millis() as i64);
             Ok(MempoolSyncStats {
                 tip,
