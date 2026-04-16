@@ -310,7 +310,7 @@ impl DBStore {
             return Ok(());
         }
 
-        log::debug!("remove_history_entries {to_remove:?}");
+        log::info!("remove history entries: {}", to_remove.len());
 
         // Get the script hashes we need to process
         let script_hashes: Vec<ScriptHash> = to_remove.keys().cloned().collect();
