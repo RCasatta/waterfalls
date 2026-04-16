@@ -248,11 +248,10 @@ impl DBStore {
     }
 
     /// Add UTXO deletions to an existing batch (does not write to DB).
-    fn delete_utxos_batch(
-        &self,
-        batch: &mut rocksdb::WriteBatch,
-        outpoints: &[OutPoint],
-    ) -> Result<()> {
+    fn delete_utxos_batch<'a, I>(&self, batch: &mut rocksdb::WriteBatch, outpoints: I) -> Result<()>
+    where
+        I: IntoIterator<Item = &'a OutPoint>,
+    {
         let cf = self.utxo_cf();
         let mut key_buf: Vec<u8> = vec![0u8; 36];
 
@@ -271,7 +270,7 @@ impl DBStore {
         let result = self.get_utxos_for_spending(outpoints)?;
 
         let mut batch = rocksdb::WriteBatch::with_capacity_bytes(outpoints.len() * 36);
-        self.delete_utxos_batch(&mut batch, outpoints)?;
+        self.delete_utxos_batch(&mut batch, outpoints.iter())?;
         self.write(batch)?;
 
         Ok(result)
@@ -503,9 +502,7 @@ impl DBStore {
 
         // Remove UTXOs that were created in the reorged block
         if !reorg_data.utxos_created.is_empty() {
-            let outpoints_to_remove: Vec<OutPoint> =
-                reorg_data.utxos_created.keys().cloned().collect();
-            self.delete_utxos_batch(&mut batch, &outpoints_to_remove)?;
+            self.delete_utxos_batch(&mut batch, reorg_data.utxos_created.keys())?;
         }
 
         // Remove history entries that were added in the reorged block
@@ -640,7 +637,7 @@ impl Store for DBStore {
         );
 
         // Add all operations to the batch
-        self.delete_utxos_batch(&mut batch, &only_outpoints)
+        self.delete_utxos_batch(&mut batch, only_outpoints.iter())
             .with_context(|| format!("failed to delete spent utxos for block {block_meta:?}"))?;
         self.set_hash_ts_batch(&mut batch, block_meta);
         self.update_history(&mut batch, &history_map)
