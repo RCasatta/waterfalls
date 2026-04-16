@@ -252,7 +252,7 @@ pub async fn route(
                         Ok(tx) => tx,
                         Err(e) => {
                             log::warn!(
-                                "Cannot find tx, is the node running and txindex=1 ?\n{e:?}"
+                                "Cannot find tx, is the node running and txindex=1 ? error: {e:?}"
                             );
                             return Err(Error::CannotFindTx);
                         }

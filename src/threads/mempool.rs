@@ -126,7 +126,7 @@ async fn sync_mempool_once(
         }
         Err(e) => {
             let err_msg =
-                format!("mempool sync error, is the node running and has rest=1 ?\n{e:?}");
+                format!("mempool sync error, is the node running and has rest=1 ? error: {e:?}");
             log::warn!("{err_msg}");
             Err(Error::String(err_msg))
         }
