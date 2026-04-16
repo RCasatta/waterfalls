@@ -305,44 +305,46 @@ impl DBStore {
         batch: &mut rocksdb::WriteBatch,
         to_remove: &BTreeMap<ScriptHash, Vec<TxSeen>>,
     ) -> Result<()> {
+        const REORG_HISTORY_CHUNK_SIZE: usize = 20;
+
         if to_remove.is_empty() {
             return Ok(());
         }
 
         log::info!("remove history entries: {}", to_remove.len());
 
-        // Get the script hashes we need to process
-        let script_hashes: Vec<ScriptHash> = to_remove.keys().cloned().collect();
-
-        // Read current history for these script hashes
-        let current_history = self.get_history(&script_hashes)?;
-
         let cf = self.history_cf();
 
-        for (i, script_hash) in script_hashes.iter().enumerate() {
-            let entries_to_remove = &to_remove[script_hash];
-            let mut current_entries = current_history[i].clone();
+        for script_hashes in to_remove.keys().collect::<Vec<_>>().chunks(REORG_HISTORY_CHUNK_SIZE) {
+            let script_hashes: Vec<ScriptHash> = script_hashes.iter().map(|e| **e).collect();
+            let current_history = self.get_history(&script_hashes)?;
 
-            // Remove the specific entries
-            for entry_to_remove in entries_to_remove {
-                current_entries.retain(|entry| {
-                    !(entry.txid == entry_to_remove.txid
-                        && entry.height == entry_to_remove.height
-                        && entry.v == entry_to_remove.v)
-                });
-            }
+            for (script_hash, mut current_entries) in
+                script_hashes.iter().zip(current_history.into_iter())
+            {
+                let entries_to_remove = &to_remove[script_hash];
 
-            // Write back the cleaned history
-            if current_entries.is_empty() {
-                // If no entries left, delete the key entirely
-                batch.delete_cf(&cf, script_hash.to_be_bytes());
-            } else {
-                // Otherwise, replace with the cleaned entries
-                batch.put_cf(
-                    &cf,
-                    script_hash.to_be_bytes(),
-                    vec_tx_seen_to_be_bytes(&current_entries),
-                );
+                // Remove the specific entries
+                for entry_to_remove in entries_to_remove {
+                    current_entries.retain(|entry| {
+                        !(entry.txid == entry_to_remove.txid
+                            && entry.height == entry_to_remove.height
+                            && entry.v == entry_to_remove.v)
+                    });
+                }
+
+                // Write back the cleaned history
+                if current_entries.is_empty() {
+                    // If no entries left, delete the key entirely
+                    batch.delete_cf(&cf, script_hash.to_be_bytes());
+                } else {
+                    // Otherwise, replace with the cleaned entries
+                    batch.put_cf(
+                        &cf,
+                        script_hash.to_be_bytes(),
+                        vec_tx_seen_to_be_bytes(&current_entries),
+                    );
+                }
             }
         }
         Ok(())
