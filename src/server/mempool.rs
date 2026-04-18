@@ -145,10 +145,10 @@ impl Mempool {
     pub fn seen(&self, script_hashes: &[ScriptHash]) -> Vec<Vec<TxSeen>> {
         let mut result = vec![];
         for h in script_hashes {
-            let txid_positions = self.hash_txids.get(h).cloned().unwrap_or(vec![]);
+            let txid_positions = self.hash_txids.get(h).map(Vec::as_slice).unwrap_or(&[]);
             let tx_seens: Vec<TxSeen> = txid_positions
                 .into_iter()
-                .map(|(txid, position)| TxSeen::mempool(txid, V::from_raw(position)))
+                .map(|(txid, position)| TxSeen::mempool(*txid, V::from_raw(*position)))
                 .collect();
             result.push(tx_seens);
         }
