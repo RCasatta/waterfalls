@@ -78,9 +78,10 @@ impl Mempool {
         // we need to build this map for every txid all the ScriptHash involved, for output is easy
         // while for input we have to check the ScriptHash of previous output, the previous output must
         // be fetched from the db or from the mempool itself
-        let mut txid_hashes: HashMap<crate::be::Txid, HashSet<ScriptHash>> = HashMap::new();
+        let mut txid_hashes: HashMap<crate::be::Txid, HashSet<ScriptHash>> =
+            HashMap::with_capacity(txs.len());
         let mut txid_script_positions: HashMap<crate::be::Txid, Vec<(ScriptHash, i32)>> =
-            HashMap::new();
+            HashMap::with_capacity(txs.len());
 
         let prevouts: Vec<OutPoint> = txs
             .iter()
