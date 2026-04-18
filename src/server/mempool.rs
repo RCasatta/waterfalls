@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    iter,
 };
 
 use crate::{
@@ -65,19 +64,15 @@ impl Mempool {
     }
 
     fn add(&mut self, db: &AnyStore, txs: &[(crate::be::Txid, be::Transaction)]) {
-        let txs_map: HashMap<crate::be::Txid, &be::Transaction> =
-            txs.iter().map(|(txid, tx)| (*txid, tx)).collect();
-
         // update the unconfirmed utxo set
-        let outputs_created = txs_map
+        let outputs_created = txs
             .iter()
-            .flat_map(|(txid, tx)| tx.outputs_iter().enumerate().zip(iter::repeat(txid)))
-            .map(|((vout, txout), txid)| {
+            .flat_map(|(txid, tx)| tx.outputs_iter().enumerate().map(move |(vout, txout)| {
                 (
                     OutPoint::new(*txid, vout as u32),
                     db.hash(txout.script_pubkey_bytes()),
                 )
-            });
+            }));
         self.outpoints_created.extend(outputs_created);
 
         // we need to build this map for every txid all the ScriptHash involved, for output is easy
@@ -95,7 +90,7 @@ impl Mempool {
         let spending_script_hashes = db.get_utxos(&prevouts).unwrap();
 
         let mut prevouts_index = 0usize;
-        for (txid, tx) in txs_map {
+        for (txid, tx) in txs {
             for (vin, input) in tx.inputs_iter().enumerate() {
                 let e = match spending_script_hashes[prevouts_index] {
                     Some(e) => e,
@@ -111,10 +106,10 @@ impl Mempool {
                     }
                 };
 
-                txid_hashes.entry(txid).or_default().insert(e);
+                txid_hashes.entry(*txid).or_default().insert(e);
                 // Negative position for inputs: -(vin + 1)
                 txid_script_positions
-                    .entry(txid)
+                    .entry(*txid)
                     .or_default()
                     .push((e, -(vin as i32) - 1));
                 prevouts_index += 1;
@@ -122,10 +117,10 @@ impl Mempool {
 
             for (vout, output) in tx.outputs_iter().enumerate() {
                 let e = db.hash(output.script_pubkey_bytes());
-                txid_hashes.entry(txid).or_default().insert(e);
+                txid_hashes.entry(*txid).or_default().insert(e);
                 // Positive position for outputs: vout + 1
                 txid_script_positions
-                    .entry(txid)
+                    .entry(*txid)
                     .or_default()
                     .push((e, vout as i32 + 1));
             }
