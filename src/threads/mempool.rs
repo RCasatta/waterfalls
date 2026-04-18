@@ -45,6 +45,7 @@ async fn sync_mempool_once(
             let tip = state.tip_height().await;
             let new: Vec<_> = current.difference(mempool_txids).collect();
             let removed: Vec<_> = mempool_txids.difference(&current).cloned().collect();
+            crate::MEMPOOL_NEW_TXS_COUNTER.inc_by(new.len() as u64);
             let is_big_delta = new.len() >= BIG_MEMPOOL_DELTA_THRESHOLD
                 || removed.len() >= BIG_MEMPOOL_DELTA_THRESHOLD;
             if !new.is_empty() {

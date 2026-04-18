@@ -7,8 +7,9 @@ use elements::BlockHash;
 use lazy_static::lazy_static;
 use minicbor::{Decode, Encode};
 use prometheus::{
-    labels, opts, register_counter, register_histogram_vec, register_int_counter_vec,
-    register_int_gauge, Counter, HistogramVec, IntCounterVec, IntGauge,
+    labels, opts, register_counter, register_histogram_vec, register_int_counter,
+    register_int_counter_vec, register_int_gauge, Counter, HistogramVec, IntCounter,
+    IntCounterVec, IntGauge,
 };
 use serde::{Deserialize, Serialize};
 
@@ -314,6 +315,11 @@ lazy_static! {
     static ref MEMPOOL_TXS_COUNT: IntGauge = register_int_gauge!(opts!(
         "waterfalls_mempool_txs_count",
         "The number of transactions in the mempool."
+    ))
+    .unwrap();
+    pub(crate) static ref MEMPOOL_NEW_TXS_COUNTER: IntCounter = register_int_counter!(opts!(
+        "waterfalls_mempool_new_txs_total",
+        "The total number of new transactions observed during mempool sync."
     ))
     .unwrap();
     pub(crate) static ref WATERFALLS_HISTOGRAM: HistogramVec = register_histogram_vec!(
