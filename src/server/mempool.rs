@@ -143,7 +143,7 @@ impl Mempool {
     }
 
     pub fn seen(&self, script_hashes: &[ScriptHash]) -> Vec<Vec<TxSeen>> {
-        let mut result = vec![];
+        let mut result = Vec::with_capacity(script_hashes.len());
         for h in script_hashes {
             let txid_positions = self.hash_txids.get(h).map(Vec::as_slice).unwrap_or(&[]);
             let tx_seens: Vec<TxSeen> = txid_positions
