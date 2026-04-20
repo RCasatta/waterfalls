@@ -135,6 +135,10 @@ pub struct Arguments {
     #[arg(env, long, default_value = "10")]
     pub header_read_timeout_seconds: u64,
 
+    /// Delay in milliseconds between mempool sync cycles. Default is 500.
+    #[arg(env, long)]
+    pub mempool_sleep_between_cycles_ms: Option<u64>,
+
     /// Number of recent block heights to keep reorg data for. Older reorg data is automatically deleted. Default is 6.
     #[cfg(feature = "db")]
     #[arg(env, long)]
@@ -176,6 +180,10 @@ impl std::fmt::Debug for Arguments {
             .field(
                 "header_read_timeout_seconds",
                 &self.header_read_timeout_seconds,
+            )
+            .field(
+                "mempool_sleep_between_cycles_ms",
+                &self.mempool_sleep_between_cycles_ms,
             );
 
         #[cfg(feature = "db")]
@@ -198,6 +206,10 @@ impl Arguments {
         } else if self.request_timeout_seconds == 0 {
             Err(Error::String(
                 "Request timeout must be greater than 0".to_string(),
+            ))
+        } else if self.mempool_sleep_between_cycles_ms == Some(0) {
+            Err(Error::String(
+                "Mempool sleep between cycles must be greater than 0".to_string(),
             ))
         } else {
             Ok(())
@@ -434,6 +446,7 @@ pub async fn inner_main(
                 state,
                 client,
                 args.network.into(),
+                Duration::from_millis(args.mempool_sleep_between_cycles_ms.unwrap_or(500)),
                 initial_sync_rx,
                 shutdown_future,
             )

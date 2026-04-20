@@ -19,10 +19,20 @@ pub(crate) async fn mempool_sync_infallible(
     state: Arc<State>,
     client: Client,
     family: Family,
+    sleep_between_cycles: Duration,
     initial_sync_rx: tokio::sync::oneshot::Receiver<()>,
     shutdown_signal: impl Future<Output = ()>,
 ) {
-    if let Err(e) = mempool_sync(state, client, family, initial_sync_rx, shutdown_signal).await {
+    if let Err(e) = mempool_sync(
+        state,
+        client,
+        family,
+        sleep_between_cycles,
+        initial_sync_rx,
+        shutdown_signal,
+    )
+    .await
+    {
         log::error!("{:?}", e);
     }
 }
@@ -134,14 +144,15 @@ async fn sync_mempool_once(
     }
 }
 
-async fn sleep_between_cycles() {
-    sleep(Duration::from_millis(100)).await;
+async fn sleep_between_cycles(delay: Duration) {
+    sleep(delay).await;
 }
 
 async fn mempool_sync(
     state: Arc<State>,
     client: Client,
     family: Family,
+    sleep_between_cycles_delay: Duration,
     initial_sync_rx: tokio::sync::oneshot::Receiver<()>,
     shutdown_signal: impl Future<Output = ()>,
 ) -> Result<(), Error> {
@@ -209,7 +220,7 @@ async fn mempool_sync(
                     last_summary = Instant::now();
                     processing_since_last_summary = Duration::ZERO;
                 }
-                sleep_between_cycles().await;
+                sleep_between_cycles(sleep_between_cycles_delay).await;
             } => {}
         }
     }
