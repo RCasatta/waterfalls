@@ -719,10 +719,8 @@ async fn handle_waterfalls_req(
         minicbor::encode(&waterfall_response, &mut bytes).unwrap();
         bytes
     } else {
-        serde_json::to_string(&waterfall_response)
+        serde_json::to_vec(&waterfall_response)
             .expect("does not contain a map with non-string keys")
-            .as_bytes()
-            .to_vec()
     };
 
     let m = sign_response(&state.secp, &state.wif_key, &result);
