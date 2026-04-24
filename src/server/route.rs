@@ -577,10 +577,8 @@ async fn handle_single_address(
         }
     }
 
-    let result = serde_json::to_string(&result).unwrap();
-
     any_resp(
-        result.into_bytes(),
+        serde_json::to_vec(&result).unwrap(),
         hyper::StatusCode::OK,
         Some("application/json"),
         Some(state.cache_control_seconds),
