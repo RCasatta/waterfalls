@@ -40,7 +40,7 @@ impl Mempool {
         &mut self,
         db: &AnyStore,
         removed_txids: &[crate::be::Txid],
-        txs: &[(crate::be::Txid, be::Transaction)],
+        txs: &[(crate::be::Txid, &be::Transaction)],
     ) {
         self.remove(removed_txids);
         self.add(db, txs);
@@ -63,7 +63,7 @@ impl Mempool {
             .retain(|k, _| !txids.contains(&k.txid.into()));
     }
 
-    fn add(&mut self, db: &AnyStore, txs: &[(crate::be::Txid, be::Transaction)]) {
+    fn add(&mut self, db: &AnyStore, txs: &[(crate::be::Txid, &be::Transaction)]) {
         // update the unconfirmed utxo set
         let outputs_created = txs
             .iter()

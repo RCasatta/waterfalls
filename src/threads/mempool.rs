@@ -53,7 +53,7 @@ async fn sync_mempool_once(
 
             let db = &state.store;
             let tip = state.tip_height().await;
-            let new: Vec<_> = current.difference(mempool_txids).collect();
+            let new: Vec<_> = current.difference(mempool_txids).cloned().collect();
             let removed: Vec<_> = mempool_txids.difference(&current).cloned().collect();
             crate::MEMPOOL_NEW_TXS_COUNTER.inc_by(new.len() as u64);
             let is_big_delta = new.len() >= BIG_MEMPOOL_DELTA_THRESHOLD
@@ -75,8 +75,7 @@ async fn sync_mempool_once(
             // it's fine if the zmq thread wait for us.
             // and it's also beneficial so that the final mempool_cache.clear() does not delete tx we didn't use yet
             let mut mempool_cache = state.mempool_cache.lock().await;
-            let mut txs = vec![];
-            for new_txid in new {
+            for new_txid in &new {
                 let cached_tx = mempool_cache.get(new_txid).cloned();
                 cache_counter("mempool_cache", cached_tx.is_some());
                 let tx = if let Some(tx) = cached_tx {
@@ -86,7 +85,6 @@ async fn sync_mempool_once(
                 };
                 match tx {
                     Ok(tx) => {
-                        txs.push((*new_txid, tx.clone()));
                         mempool_cache.insert(*new_txid, tx);
                     }
                     Err(e) => {
@@ -102,6 +100,10 @@ async fn sync_mempool_once(
                     }
                 }
             }
+            let txs: Vec<_> = new
+                .iter()
+                .filter_map(|txid| mempool_cache.get(txid).map(|tx| (*txid, tx)))
+                .collect();
             {
                 let mut m = state.mempool.lock().await;
                 m.update(db, &removed, &txs);
