@@ -7,7 +7,8 @@ use elements::{
 };
 use fxhash::FxHasher;
 use rocksdb::{
-    BlockBasedOptions, BoundColumnFamily, Cache, DBCompressionType, MergeOperands, Options, DB,
+    BlockBasedOptions, BoundColumnFamily, Cache, DBCompressionType, DBPinnableSlice,
+    MergeOperands, Options, DB,
 };
 
 use crate::V;
@@ -79,18 +80,15 @@ impl DBStore {
     fn raw_history_multi_get(
         &self,
         scripts: &[ScriptHash],
-    ) -> Result<Vec<Option<Vec<u8>>>> {
+    ) -> Result<Vec<Option<DBPinnableSlice<'_>>>> {
         if scripts.is_empty() {
             return Ok(vec![]);
         }
 
-        let mut keys = Vec::with_capacity(scripts.len());
         let cf = self.history_cf();
-        for script in scripts {
-            keys.push((&cf, script.to_be_bytes()));
-        }
+        let keys: Vec<_> = scripts.iter().map(|script| script.to_be_bytes()).collect();
         self.db
-            .multi_get_cf(keys)
+            .batched_multi_get_cf(&cf, keys.iter(), false)
             .into_iter()
             .map(|entry| entry.map_err(Into::into))
             .collect()
