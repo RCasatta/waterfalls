@@ -85,13 +85,29 @@ impl DBStore {
             return Ok(vec![]);
         }
 
+        // Benchmarks on temporary RocksDB instances consistently showed that sorting
+        // the history keys before batched_multi_get_cf is a net win, including the
+        // production-shaped 20-lookups case, even after reordering results back.
         let cf = self.history_cf();
-        let keys: Vec<_> = scripts.iter().map(|script| script.to_be_bytes()).collect();
-        self.db
-            .batched_multi_get_cf(&cf, keys.iter(), false)
-            .into_iter()
-            .map(|entry| entry.map_err(Into::into))
-            .collect()
+        let mut indexed_keys: Vec<_> = scripts
+            .iter()
+            .enumerate()
+            .map(|(index, script)| (index, script.to_be_bytes()))
+            .collect();
+        indexed_keys.sort_unstable_by_key(|(_, key)| *key);
+        let sorted_results = self.db.batched_multi_get_cf(
+            &cf,
+            indexed_keys.iter().map(|(_, key)| key),
+            true,
+        );
+        let mut reordered: Vec<Option<DBPinnableSlice<'_>>> = std::iter::repeat_with(|| None)
+            .take(scripts.len())
+            .collect();
+        for ((index, _), result) in indexed_keys.into_iter().zip(sorted_results.into_iter()) {
+            reordered[index] = result.map_err(anyhow::Error::from)?;
+        }
+
+        Ok(reordered)
     }
 
     fn create_cf_descriptors(shared_db_cache_mb: u64) -> Vec<rocksdb::ColumnFamilyDescriptor> {

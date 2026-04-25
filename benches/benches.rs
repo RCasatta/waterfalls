@@ -24,7 +24,8 @@ criterion_group!(
     writebatch_sorting,
     hasher,
     txid_from_hex,
-    block_cache
+    block_cache,
+    history_multi_get
 );
 criterion_main!(benches);
 
@@ -542,4 +543,78 @@ pub fn block_cache(c: &mut Criterion) {
 
         group.finish();
     }
+}
+
+pub fn history_multi_get(c: &mut Criterion) {
+    const DEFAULT_NUM_HISTORY_KEYS: u64 = 500_000;
+    let num_history_keys = std::env::var("WATERFALLS_HISTORY_BENCH_ROWS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_NUM_HISTORY_KEYS);
+
+    let cache = Cache::new_hyper_clock_cache(8 * 1024 * 1024, 0);
+    let dir = tempfile::TempDir::new().unwrap();
+    let db = open_cache_bench_db(dir.path(), &cache);
+    populate_cache_bench_db(&db, 0, num_history_keys);
+
+    let cf = db.cf_handle("history").unwrap();
+    for lookup_count in [20usize, 512] {
+        let mut rng = thread_rng();
+        let scripts: Vec<u64> = (0..lookup_count)
+            .map(|_| rng.next_u64() % (num_history_keys * 2))
+            .collect();
+
+        let mut group = c.benchmark_group(format!(
+            "history_multi_get/{lookup_count}/{num_history_keys}"
+        ));
+        group.sample_size(20);
+
+        group.bench_function("batched_unsorted", |b| {
+            b.iter(|| {
+                black_box(bench_raw_history_multi_get_old(&db, &cf, &scripts));
+            });
+        });
+
+        group.bench_function("batched_sorted_reordered", |b| {
+            b.iter(|| {
+                black_box(bench_raw_history_multi_get_new(&db, &cf, &scripts));
+            });
+        });
+
+        group.finish();
+    }
+}
+
+fn bench_raw_history_multi_get_old(
+    db: &DB,
+    cf: &impl rocksdb::AsColumnFamilyRef,
+    scripts: &[u64],
+) -> usize {
+    let keys: Vec<_> = scripts.iter().map(|script| script.to_be_bytes()).collect();
+    let results = db.batched_multi_get_cf(cf, keys.iter(), false);
+    results
+        .into_iter()
+        .map(|result| result.unwrap().as_ref().map_or(0, |value| value.len()))
+        .sum()
+}
+
+fn bench_raw_history_multi_get_new(
+    db: &DB,
+    cf: &impl rocksdb::AsColumnFamilyRef,
+    scripts: &[u64],
+) -> usize {
+    let mut indexed_keys: Vec<_> = scripts
+        .iter()
+        .enumerate()
+        .map(|(index, script)| (index, script.to_be_bytes()))
+        .collect();
+    indexed_keys.sort_unstable_by_key(|(_, key)| *key);
+
+    let sorted_results = db.batched_multi_get_cf(cf, indexed_keys.iter().map(|(_, key)| key), true);
+    let mut reordered = vec![0usize; scripts.len()];
+    for ((index, _), result) in indexed_keys.into_iter().zip(sorted_results.into_iter()) {
+        reordered[index] = result.unwrap().as_ref().map_or(0, |value| value.len());
+    }
+
+    reordered.into_iter().sum()
 }
