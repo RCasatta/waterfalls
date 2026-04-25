@@ -142,17 +142,16 @@ impl Mempool {
         }
     }
 
-    pub fn seen(&self, script_hashes: &[ScriptHash]) -> Vec<Vec<TxSeen>> {
-        let mut result = Vec::with_capacity(script_hashes.len());
-        for h in script_hashes {
+    pub fn append_seen(&self, script_hashes: &[ScriptHash], out: &mut [Vec<TxSeen>]) {
+        for (h, tx_seens) in script_hashes.iter().zip(out.iter_mut()) {
             let txid_positions = self.hash_txids.get(h).map(Vec::as_slice).unwrap_or(&[]);
-            let tx_seens: Vec<TxSeen> = txid_positions
-                .into_iter()
-                .map(|(txid, position)| TxSeen::mempool(*txid, V::from_raw(*position)))
-                .collect();
-            result.push(tx_seens);
+            tx_seens.reserve(txid_positions.len());
+            tx_seens.extend(
+                txid_positions
+                    .iter()
+                    .map(|(txid, position)| TxSeen::mempool(*txid, V::from_raw(*position))),
+            );
         }
-        result
     }
 
     pub fn has_seen(&self, script_hashes: &[ScriptHash]) -> Vec<bool> {

@@ -551,8 +551,13 @@ async fn handle_single_address(
         })
         .collect();
 
-    let seen_mempool = state.mempool.lock().await.seen(&script_hash).remove(0);
-    result.extend(seen_mempool.iter().map(|tx_seen| EsploraTx {
+    let mut seen_mempool = vec![Vec::new()];
+    state
+        .mempool
+        .lock()
+        .await
+        .append_seen(&script_hash, &mut seen_mempool);
+    result.extend(seen_mempool[0].iter().map(|tx_seen| EsploraTx {
         txid: tx_seen.txid,
         status: Status {
             block_height: Some(-1),
@@ -864,13 +869,11 @@ async fn find_scripts(
     scripts: Vec<u64>,
 ) -> bool {
     let mut seen_blockchain = db.get_history(&scripts).unwrap();
-    let seen_mempool = state.mempool.lock().await.seen(&scripts);
-
-    for (conf, unconf) in seen_blockchain.iter_mut().zip(seen_mempool.iter()) {
-        for tx_seen in unconf {
-            conf.push(tx_seen.clone());
-        }
-    }
+    state
+        .mempool
+        .lock()
+        .await
+        .append_seen(&scripts, &mut seen_blockchain);
     let is_last = seen_blockchain.iter().all(|e| e.is_empty());
     result.extend(seen_blockchain);
     is_last
