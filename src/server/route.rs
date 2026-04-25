@@ -18,7 +18,7 @@ use hyper::{
 use prometheus::Encoder;
 use serde::Serialize;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashSet},
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
     sync::Arc,
@@ -385,27 +385,23 @@ fn parse_query(
     max_addresses: usize,
     network: Network,
 ) -> Result<WaterfallRequest, Error> {
-    let mut params = form_urlencoded::parse(query.as_bytes())
-        .into_owned()
-        .collect::<HashMap<String, String>>();
+    let mut page = 0u16;
+    let mut to_index = 0u32;
+    let mut utxo_only = false;
+    let mut descriptor = None;
+    let mut addresses = None;
 
-    let page = params
-        .get("page")
-        .map(|e| e.parse().unwrap_or(0))
-        .unwrap_or(0u16);
+    for (key, value) in form_urlencoded::parse(query.as_bytes()) {
+        match key.as_ref() {
+            "page" => page = value.parse().unwrap_or(0),
+            "to_index" => to_index = value.parse().unwrap_or(0),
+            "utxo_only" => utxo_only = value.parse().unwrap_or(false),
+            "descriptor" => descriptor = Some(value.into_owned()),
+            "addresses" => addresses = Some(value.into_owned()),
+            _ => {}
+        }
+    }
 
-    let to_index = params
-        .get("to_index")
-        .map(|e| e.parse().unwrap_or(0))
-        .unwrap_or(0u32);
-
-    let utxo_only = params
-        .get("utxo_only")
-        .map(|e| e.parse().unwrap_or(false))
-        .unwrap_or(false);
-
-    let descriptor = params.remove("descriptor");
-    let addresses = params.remove("addresses");
     match (descriptor, addresses) {
         (Some(_), Some(_)) => Err(Error::CannotSpecifyBothDescriptorAndAddresses),
         (Some(desc_str), None) => {
@@ -460,18 +456,19 @@ fn parse_descriptor_query(
     is_testnet_or_regtest: bool,
     network: Network,
 ) -> Result<be::Descriptor, Error> {
-    let params = form_urlencoded::parse(query.as_bytes())
-        .into_owned()
-        .collect::<HashMap<String, String>>();
+    let mut descriptor = None;
+    for (key, value) in form_urlencoded::parse(query.as_bytes()) {
+        if key == "descriptor" {
+            descriptor = Some(value.into_owned());
+        }
+    }
 
-    let desc_str = params
-        .get("descriptor")
-        .ok_or(Error::AtLeastOneFieldMandatory)?;
+    let desc_str = descriptor.ok_or(Error::AtLeastOneFieldMandatory)?;
 
-    let desc_str = if is_likely_age_encrypted(desc_str) {
-        encryption::decrypt(desc_str, key)?
+    let desc_str = if is_likely_age_encrypted(&desc_str) {
+        encryption::decrypt(&desc_str, key)?
     } else {
-        desc_str.clone()
+        desc_str
     };
 
     let descriptor = be::Descriptor::from_str(&desc_str, network)?;
