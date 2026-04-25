@@ -804,9 +804,7 @@ async fn handle_last_used_index(
         tip: tip_hash,
     };
 
-    let result = serde_json::to_string(&response)
-        .expect("serialization cannot fail")
-        .into_bytes();
+    let result = serde_json::to_vec(&response).expect("serialization cannot fail");
 
     log::info!(
         "{id:x}: last_used_index external={:?} internal={:?}, elapsed: {:.2?}",
