@@ -76,6 +76,26 @@ const VEC_TX_SEEN_MAX_SIZE: usize = 50; // 32 bytes (txid) + 9 bytes (height) + 
 const VEC_TX_SEEN_MIN_SIZE: usize = 34; // 32 bytes (txid) + 1 byte (height) + 1 byte (v)
 
 impl DBStore {
+    fn raw_history_multi_get(
+        &self,
+        scripts: &[ScriptHash],
+    ) -> Result<Vec<Option<Vec<u8>>>> {
+        if scripts.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut keys = Vec::with_capacity(scripts.len());
+        let cf = self.history_cf();
+        for script in scripts {
+            keys.push((&cf, script.to_be_bytes()));
+        }
+        self.db
+            .multi_get_cf(keys)
+            .into_iter()
+            .map(|entry| entry.map_err(Into::into))
+            .collect()
+    }
+
     fn create_cf_descriptors(shared_db_cache_mb: u64) -> Vec<rocksdb::ColumnFamilyDescriptor> {
         let cache_size = (shared_db_cache_mb * 1024 * 1024) as usize;
         // HyperClockCache is lock-free, reducing mutex contention under concurrent reads.
@@ -583,18 +603,9 @@ impl Store for DBStore {
             .with_label_values(&["all"])
             .start_timer();
 
-        if scripts.is_empty() {
-            return Ok(vec![]);
-        }
-        let mut keys = Vec::with_capacity(scripts.len());
-        let cf = self.history_cf();
-        for script in scripts {
-            keys.push((&cf, script.to_be_bytes()));
-        }
-        let db_results = self.db.multi_get_cf(keys);
+        let db_results = self.raw_history_multi_get(scripts)?;
         let mut result = Vec::with_capacity(scripts.len());
         for db_result in db_results {
-            let db_result = db_result?;
             match db_result {
                 None => result.push(vec![]),
                 Some(e) => {
@@ -603,6 +614,21 @@ impl Store for DBStore {
                 }
             }
         }
+        timer.observe_duration();
+        Ok(result)
+    }
+
+    fn has_history(&self, scripts: &[ScriptHash]) -> Result<Vec<bool>> {
+        let timer = crate::WATERFALLS_DB_HISTORY_HISTOGRAM
+            .with_label_values(&["all"])
+            .start_timer();
+
+        let result = self
+            .raw_history_multi_get(scripts)?
+            .into_iter()
+            .map(|entry| entry.is_some_and(|bytes| !bytes.is_empty()))
+            .collect();
+
         timer.observe_duration();
         Ok(result)
     }

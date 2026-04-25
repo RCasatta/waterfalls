@@ -155,6 +155,14 @@ impl Mempool {
         result
     }
 
+    pub fn has_seen(&self, script_hashes: &[ScriptHash]) -> Vec<bool> {
+        let mut result = Vec::with_capacity(script_hashes.len());
+        for h in script_hashes {
+            result.push(self.hash_txids.get(h).is_some_and(|entries| !entries.is_empty()));
+        }
+        result
+    }
+
     pub(crate) fn txids_iter(&self) -> impl Iterator<Item = crate::be::Txid> + '_ {
         self.txid_hashes.keys().cloned()
     }

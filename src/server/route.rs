@@ -771,13 +771,13 @@ async fn handle_last_used_index(
                 derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
 
             // Check which scripts have history (either confirmed or mempool)
-            let seen_blockchain = db.get_history(&scripts).unwrap();
-            let seen_mempool = state.mempool.lock().await.seen(&scripts);
+            let seen_blockchain = db.has_history(&scripts).unwrap();
+            let seen_mempool = state.mempool.lock().await.has_seen(&scripts);
 
             // Find the max index with activity in this batch
             let mut batch_has_activity = false;
             for (i, (conf, unconf)) in seen_blockchain.iter().zip(seen_mempool.iter()).enumerate() {
-                if !conf.is_empty() || !unconf.is_empty() {
+                if *conf || *unconf {
                     last_used_for_chain = Some(batch_start + i as u32);
                     batch_has_activity = true;
                 }

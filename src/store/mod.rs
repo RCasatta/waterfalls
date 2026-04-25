@@ -42,6 +42,9 @@ pub trait Store {
     /// Get history of multiple (usually 20 like the gap limit) scripts hash at once
     fn get_history(&self, scripts: &[ScriptHash]) -> Result<Vec<Vec<TxSeen>>>;
 
+    /// Check whether multiple scripts have any history without decoding full entries.
+    fn has_history(&self, scripts: &[ScriptHash]) -> Result<Vec<bool>>;
+
     /// update the store with all the data from the last block
     fn update(
         &self,
@@ -89,6 +92,14 @@ impl Store for AnyStore {
             #[cfg(feature = "db")]
             AnyStore::Db(d) => d.get_history(scripts),
             AnyStore::Mem(m) => m.get_history(scripts),
+        }
+    }
+
+    fn has_history(&self, scripts: &[ScriptHash]) -> Result<Vec<bool>> {
+        match self {
+            #[cfg(feature = "db")]
+            AnyStore::Db(d) => d.has_history(scripts),
+            AnyStore::Mem(m) => m.has_history(scripts),
         }
     }
 
