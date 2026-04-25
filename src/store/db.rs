@@ -593,17 +593,14 @@ impl Store for DBStore {
     }
 
     fn get_utxos(&self, outpoints: &[OutPoint]) -> Result<Vec<Option<ScriptHash>>> {
-        let mut keys = Vec::with_capacity(outpoints.len());
         let cf = self.utxo_cf();
-        for outpoint in outpoints {
-            keys.push((&cf, serialize_outpoint(outpoint)));
-        }
-        let db_results = self.db.multi_get_cf(keys);
+        let keys: Vec<_> = outpoints.iter().map(serialize_outpoint).collect();
+        let db_results = self.db.batched_multi_get_cf(&cf, keys.iter(), false);
         let result: Vec<_> = db_results
             .into_iter()
             .map(|e| {
                 e.unwrap().map(|e| {
-                    let bytes = e.try_into().unwrap();
+                    let bytes = e.as_ref().try_into().unwrap();
                     u64::from_be_bytes(bytes)
                 })
             })
