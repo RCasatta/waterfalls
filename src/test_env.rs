@@ -530,9 +530,12 @@ impl WaterfallClient {
             .send()
             .await?;
 
+        let status = response.status().as_u16();
         let headers = response.headers().clone();
-
         let body = response.text().await?;
+        if status != 200 {
+            bail!("waterfalls response is not 200 but: {status} body is: {body}");
+        }
         Ok((serde_json::from_str(&body)?, headers))
     }
 
