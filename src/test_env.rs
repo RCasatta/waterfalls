@@ -44,12 +44,31 @@ pub struct TestEnv {
 
 #[cfg(feature = "db")]
 pub async fn launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>, family: Family) -> TestEnv {
-    inner_launch(exe, path, family).await
+    inner_launch(exe, path, family, None, true).await
+}
+
+#[cfg(feature = "db")]
+pub async fn launch_with_max_txs_seen<S: AsRef<OsStr>>(
+    exe: S,
+    path: Option<PathBuf>,
+    family: Family,
+    max_txs_seen: usize,
+) -> TestEnv {
+    inner_launch(exe, path, family, Some(max_txs_seen), true).await
 }
 
 #[cfg(not(feature = "db"))]
 pub async fn launch<S: AsRef<OsStr>>(exe: S, family: Family) -> TestEnv {
-    inner_launch(exe, None, family).await
+    inner_launch(exe, None, family, None, true).await
+}
+
+#[cfg(not(feature = "db"))]
+pub async fn launch_with_max_txs_seen<S: AsRef<OsStr>>(
+    exe: S,
+    family: Family,
+    max_txs_seen: usize,
+) -> TestEnv {
+    inner_launch(exe, None, family, Some(max_txs_seen), true).await
 }
 
 #[cfg(feature = "db")]
@@ -72,11 +91,11 @@ pub async fn launch_with_node_no_generate(
     path: Option<PathBuf>,
     family: Family,
 ) -> TestEnv {
-    inner_launch_with_node_no_generate(node, path, family).await
+    inner_launch_with_node_no_generate(node, path, family, None).await
 }
 
 async fn inner_launch_with_node(node: BitcoinD, path: Option<PathBuf>, family: Family) -> TestEnv {
-    let test_env = inner_launch_with_node_no_generate(node, path, family).await;
+    let test_env = inner_launch_with_node_no_generate(node, path, family, None).await;
 
     test_env.node_generate(1).await;
 
@@ -95,6 +114,7 @@ async fn inner_launch_with_node_no_generate(
     node: BitcoinD,
     path: Option<PathBuf>,
     family: Family,
+    max_txs_seen: Option<usize>,
 ) -> TestEnv {
     let mut args = Arguments {
         node_url: Some(node.rpc_url()),
@@ -117,6 +137,7 @@ async fn inner_launch_with_node_no_generate(
     let wif_key = PrivateKey::generate(NetworkKind::Test);
     args.wif_key = Some(wif_key);
     args.max_addresses = 100;
+    args.max_txs_seen = max_txs_seen;
 
     let cookie = std::fs::read_to_string(&node.params.cookie_file).unwrap();
     args.rpc_user_password = Some(cookie);
@@ -175,12 +196,43 @@ pub fn launch_elements<S: AsRef<OsStr>>(exe: S) -> BitcoinD {
     BitcoinD::with_conf(exe, &conf).unwrap()
 }
 
-async fn inner_launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>, family: Family) -> TestEnv {
+async fn inner_launch<S: AsRef<OsStr>>(
+    exe: S,
+    path: Option<PathBuf>,
+    family: Family,
+    max_txs_seen: Option<usize>,
+    generate_blocks: bool,
+) -> TestEnv {
     let elementsd = match family {
         Family::Bitcoin => launch_bitcoin(exe),
         Family::Elements => launch_elements(exe),
     };
-    inner_launch_with_node(elementsd, path, family).await
+    if generate_blocks {
+        inner_launch_with_node_with_max_txs_seen(elementsd, path, family, max_txs_seen).await
+    } else {
+        inner_launch_with_node_no_generate(elementsd, path, family, max_txs_seen).await
+    }
+}
+
+async fn inner_launch_with_node_with_max_txs_seen(
+    node: BitcoinD,
+    path: Option<PathBuf>,
+    family: Family,
+    max_txs_seen: Option<usize>,
+) -> TestEnv {
+    let test_env = inner_launch_with_node_no_generate(node, path, family, max_txs_seen).await;
+
+    test_env.node_generate(1).await;
+
+    test_env
+        .node
+        .client
+        .call::<Value>("rescanblockchain", &[])
+        .unwrap();
+
+    test_env.node_generate(101).await;
+
+    test_env
 }
 
 impl TestEnv {

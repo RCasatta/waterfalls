@@ -52,6 +52,42 @@ async fn integration_fetch_client_regtest_bitcoin() {
     test_fetch_client_local_regtest(client, Network::BitcoinRegtest).await;
 }
 
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn integration_addresses_txs_seen_truncation() {
+    let _ = env_logger::try_init();
+
+    let exe = std::env::var("BITCOIND_EXEC").unwrap();
+    #[cfg(feature = "db")]
+    let test_env =
+        waterfalls::test_env::launch_with_max_txs_seen(exe, None, Family::Bitcoin, 3).await;
+    #[cfg(not(feature = "db"))]
+    let test_env = waterfalls::test_env::launch_with_max_txs_seen(exe, Family::Bitcoin, 3).await;
+
+    let addr = test_env.get_new_address(None);
+    let mut expected_txids = Vec::new();
+    for _ in 0..5 {
+        expected_txids.push(test_env.send_to(&addr, 10_000));
+        test_env.node_generate(1).await;
+    }
+
+    let result = test_env
+        .client()
+        .waterfalls_addresses(&vec![addr.clone()])
+        .await
+        .unwrap()
+        .0;
+    let txs = &result.txs_seen.get("addresses").unwrap()[0];
+
+    assert_eq!(txs.len(), 3);
+    assert_eq!(
+        txs.iter().map(|tx_seen| tx_seen.txid).collect::<Vec<_>>(),
+        expected_txids[..3].to_vec()
+    );
+
+    test_env.shutdown().await;
+}
+
 #[cfg(all(feature = "test_env", feature = "db"))]
 #[tokio::test]
 async fn integration_db_elements() {
