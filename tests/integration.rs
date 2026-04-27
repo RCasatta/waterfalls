@@ -80,6 +80,7 @@ async fn integration_addresses_txs_seen_truncation() {
     let txs = &result.txs_seen.get("addresses").unwrap()[0];
 
     assert_eq!(txs.len(), 3);
+    assert_eq!(result.has_more, Some(vec![addr.to_string()]));
     assert_eq!(
         txs.iter().map(|tx_seen| tx_seen.txid).collect::<Vec<_>>(),
         expected_txids[..3].to_vec()
