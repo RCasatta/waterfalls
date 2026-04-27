@@ -23,6 +23,45 @@ impl Address {
         })
     }
 
+    pub fn from_script(script: &elements::Script, network: Network) -> Option<Self> {
+        match network {
+            Network::Liquid => elements::Address::from_script(script, None, &AddressParams::LIQUID)
+                .map(Address::Elements),
+            Network::LiquidTestnet => {
+                elements::Address::from_script(script, None, &AddressParams::LIQUID_TESTNET)
+                    .map(Address::Elements)
+            }
+            Network::ElementsRegtest => {
+                elements::Address::from_script(script, None, &AddressParams::ELEMENTS)
+                    .map(Address::Elements)
+            }
+            Network::Bitcoin => bitcoin::Address::from_script(
+                &bitcoin::ScriptBuf::from_bytes(script.to_bytes()),
+                bitcoin::Network::Bitcoin,
+            )
+            .ok()
+            .map(Address::Bitcoin),
+            Network::BitcoinTestnet => bitcoin::Address::from_script(
+                &bitcoin::ScriptBuf::from_bytes(script.to_bytes()),
+                bitcoin::Network::Testnet,
+            )
+            .ok()
+            .map(Address::Bitcoin),
+            Network::BitcoinRegtest => bitcoin::Address::from_script(
+                &bitcoin::ScriptBuf::from_bytes(script.to_bytes()),
+                bitcoin::Network::Regtest,
+            )
+            .ok()
+            .map(Address::Bitcoin),
+            Network::BitcoinSignet => bitcoin::Address::from_script(
+                &bitcoin::ScriptBuf::from_bytes(script.to_bytes()),
+                bitcoin::Network::Signet,
+            )
+            .ok()
+            .map(Address::Bitcoin),
+        }
+    }
+
     // We are using elements::Script also for bitcoin script which is ugly but less impactfull for now
     pub(crate) fn script_pubkey(&self) -> elements::Script {
         match self {
