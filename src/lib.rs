@@ -29,7 +29,7 @@ pub(crate) use error_panic;
 
 pub mod be;
 mod cbor;
-mod fetch;
+pub mod fetch;
 pub mod server;
 mod store;
 mod threads;

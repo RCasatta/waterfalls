@@ -11,7 +11,7 @@ use elements::AddressParams;
 use tokio::time::sleep;
 use waterfalls::Family;
 #[cfg(feature = "test_env")]
-use waterfalls::{be, server::Network};
+use waterfalls::{be, fetch::Client as FetchClient, server::Arguments, server::Network};
 
 #[cfg(feature = "test_env")]
 #[tokio::test]
@@ -24,11 +24,32 @@ async fn integration_memory_elements() {
 
 #[cfg(feature = "test_env")]
 #[tokio::test]
+async fn integration_fetch_client_regtest_elements() {
+    let _ = env_logger::try_init();
+
+    let elementsd =
+        waterfalls::test_env::launch_elements(std::env::var("ELEMENTSD_EXEC").unwrap());
+    let client = fetch_client_for_node(&elementsd, Network::ElementsRegtest);
+    test_fetch_client_local_regtest(client, Network::ElementsRegtest).await;
+}
+
+#[cfg(feature = "test_env")]
+#[tokio::test]
 async fn integration_memory_bitcoin() {
     let _ = env_logger::try_init();
 
     let test_env = launch_memory(Family::Bitcoin).await;
     do_test(test_env).await;
+}
+
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn integration_fetch_client_regtest_bitcoin() {
+    let _ = env_logger::try_init();
+
+    let bitcoind = waterfalls::test_env::launch_bitcoin(std::env::var("BITCOIND_EXEC").unwrap());
+    let client = fetch_client_for_node(&bitcoind, Network::BitcoinRegtest);
+    test_fetch_client_local_regtest(client, Network::BitcoinRegtest).await;
 }
 
 #[cfg(all(feature = "test_env", feature = "db"))]
@@ -98,6 +119,81 @@ fn send_to_address(
         )
         .unwrap();
     elements::Txid::from_str(result.as_str().unwrap()).unwrap()
+}
+
+#[cfg(feature = "test_env")]
+fn fetch_client_for_node(node: &bitcoind::BitcoinD, network: Network) -> FetchClient {
+    let mut args = Arguments::default();
+    args.use_esplora = false;
+    args.network = network;
+    args.node_url = Some(node.rpc_url());
+    args.request_timeout_seconds = 10;
+    args.rpc_user_password = Some(
+        std::fs::read_to_string(&node.params.cookie_file)
+            .unwrap()
+            .trim()
+            .to_string(),
+    );
+    FetchClient::new(&args).unwrap()
+}
+
+#[cfg(feature = "test_env")]
+async fn test_fetch_client_local_regtest(client: FetchClient, network: Network) {
+    use elements::BlockHash;
+    use std::str::FromStr;
+
+    let (genesis_hash, genesis_txid) = match network {
+        Network::ElementsRegtest => (
+            "c7af03b0774a3498a574902bd41045c1633fd40b69ca163345c5d9c78bfd6af7",
+            "81c9570df1135a6bb7fb0f77a273561fddfd87bc62e7f265e94ffb01474ae578",
+        ),
+        Network::BitcoinRegtest => (
+            "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206",
+            "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",
+        ),
+        _ => panic!("unexpected network {network:?}"),
+    };
+
+    let genesis_hash = BlockHash::from_str(genesis_hash).unwrap();
+    let genesis_txid = be::Txid::from_str(genesis_txid).unwrap();
+
+    let fetched = client.block_hash(0).await.unwrap().unwrap();
+    assert_eq!(genesis_hash, fetched, "network:{network}");
+
+    let block = client.block(genesis_hash, network.into()).await.unwrap();
+    let header = block.header();
+    assert_eq!(header.block_hash(), genesis_hash, "network:{network}");
+
+    if network == Network::ElementsRegtest {
+        let genesis_tx = client.tx(genesis_txid, network.into()).await.unwrap();
+        assert_eq!(genesis_tx.txid(), genesis_txid);
+    }
+
+    client.mempool(false).await.unwrap();
+
+    let support_verbose = client.mempool(true).await.is_ok();
+    match network.into() {
+        Family::Bitcoin => assert!(support_verbose),
+        Family::Elements => assert!(!support_verbose),
+    }
+
+    let fetched_header = client
+        .block_header(genesis_hash, network.into())
+        .await
+        .unwrap();
+    assert_eq!(block.header(), fetched_header);
+    assert_eq!(fetched_header.block_hash(), genesis_hash, "network:{network}");
+
+    let header_json = client
+        .block_header_json(genesis_hash, network.into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(header_json.hash, genesis_hash);
+    assert_eq!(header_json.nextblockhash, None, "network:{network}");
+
+    let fee_estimates = client.fee_estimates().await.unwrap();
+    assert!(fee_estimates.values().all(|&f| f > 0.0));
 }
 
 #[cfg(feature = "test_env")]

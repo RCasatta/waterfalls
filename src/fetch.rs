@@ -627,7 +627,7 @@ mod test {
 
     use crate::{
         server::{Arguments, Network},
-        test_env, Family,
+        Family,
     };
 
     use super::{parse_fee_estimates_rpc_reply, Client};
@@ -704,26 +704,6 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_client_local_regtest_elements() {
-        let elementsd = test_env::launch_elements(
-            std::env::var("ELEMENTSD_EXEC").expect("ELEMENTSD_EXEC must be set"),
-        );
-        let mut args = Arguments::default();
-        args.use_esplora = false;
-        args.network = Network::ElementsRegtest;
-        args.node_url = Some(elementsd.rpc_url());
-        args.request_timeout_seconds = 10;
-        args.rpc_user_password = Some(
-            std::fs::read_to_string(&elementsd.params.cookie_file)
-                .unwrap()
-                .trim()
-                .to_string(),
-        );
-        let client = Client::new(&args).unwrap();
-        test(client, args.network).await;
-    }
-
-    #[tokio::test]
     #[cfg(feature = "synced_node")]
     async fn test_client_local_liquid() {
         let client = init_client(Network::Liquid);
@@ -750,27 +730,6 @@ mod test {
         args.use_esplora = false;
         args.network = network;
         Client::new(&args).unwrap()
-    }
-
-    #[tokio::test]
-    async fn test_client_local_regtest_bitcoin() {
-        let _ = env_logger::try_init();
-        let bitcoind = test_env::launch_bitcoin(
-            std::env::var("BITCOIND_EXEC").expect("BITCOIND_EXEC must be set"),
-        );
-        let mut args = Arguments::default();
-        args.use_esplora = false;
-        args.network = Network::BitcoinRegtest;
-        args.node_url = Some(bitcoind.rpc_url());
-        args.request_timeout_seconds = 10;
-        args.rpc_user_password = Some(
-            std::fs::read_to_string(&bitcoind.params.cookie_file)
-                .unwrap()
-                .trim()
-                .to_string(),
-        );
-        let client = Client::new(&args).unwrap();
-        test(client, args.network).await;
     }
 
     async fn test(client: Client, network: Network) {
