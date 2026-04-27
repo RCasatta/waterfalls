@@ -8,8 +8,8 @@ use lazy_static::lazy_static;
 use minicbor::{Decode, Encode};
 use prometheus::{
     labels, opts, register_counter, register_histogram_vec, register_int_counter,
-    register_int_counter_vec, register_int_gauge, Counter, HistogramVec, IntCounter,
-    IntCounterVec, IntGauge,
+    register_int_counter_vec, register_int_gauge, Counter, HistogramVec, IntCounter, IntCounterVec,
+    IntGauge,
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +29,7 @@ pub(crate) use error_panic;
 
 pub mod be;
 mod cbor;
-mod fetch;
+pub mod fetch;
 pub mod server;
 mod store;
 mod threads;
@@ -93,6 +93,10 @@ pub struct WaterfallResponse {
     #[cbor(n(3))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tip_meta: Option<BlockMeta>,
+
+    #[cbor(n(4))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_more: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Ord, PartialOrd, Encode, Decode)]

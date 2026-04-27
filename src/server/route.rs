@@ -76,7 +76,7 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, WithTip::No, false).await
+            handle_waterfalls_req(state, inputs, WithTip::No, false, network).await
         }
         (&Method::GET, "/v2/waterfalls", Some(query)) => {
             let inputs = parse_query(
@@ -86,7 +86,7 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, WithTip::Hash, false).await
+            handle_waterfalls_req(state, inputs, WithTip::Hash, false, network).await
         }
         (&Method::GET, "/v3/waterfalls", Some(_)) => {
             str_resp("v3 endpoint removed".to_string(), StatusCode::NOT_FOUND)
@@ -99,7 +99,7 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, WithTip::No, true).await
+            handle_waterfalls_req(state, inputs, WithTip::No, true, network).await
         }
         (&Method::GET, "/v2/waterfalls.cbor", Some(query)) => {
             let inputs = parse_query(
@@ -109,7 +109,7 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, WithTip::Hash, true).await
+            handle_waterfalls_req(state, inputs, WithTip::Hash, true, network).await
         }
         (&Method::GET, "/v3/waterfalls.cbor", Some(_)) => {
             str_resp("v3 endpoint removed".to_string(), StatusCode::NOT_FOUND)
@@ -122,7 +122,7 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, WithTip::All, false).await
+            handle_waterfalls_req(state, inputs, WithTip::All, false, network).await
         }
         (&Method::GET, "/v4/waterfalls.cbor", Some(query)) => {
             let inputs = parse_query(
@@ -132,7 +132,7 @@ pub async fn route(
                 state.max_addresses,
                 network,
             )?;
-            handle_waterfalls_req(state, inputs, WithTip::All, true).await
+            handle_waterfalls_req(state, inputs, WithTip::All, true, network).await
         }
         (&Method::GET, "/v1/last_used_index", Some(query)) => {
             let descriptor =
@@ -201,8 +201,8 @@ pub async fn route(
             .map_err(|_| Error::BodyReadTimeout)?
             .map_err(|_| Error::BodyTooLarge)?
             .to_bytes();
-            let tx_hex = std::str::from_utf8(&whole_body)
-                .map_err(|e| Error::String(e.to_string()))?;
+            let tx_hex =
+                std::str::from_utf8(&whole_body).map_err(|e| Error::String(e.to_string()))?;
             let tx = be::Transaction::from_str(tx_hex, network.into())
                 .map_err(|e| Error::String(e.to_string()))?;
             let result = client.lock().await.broadcast(&tx).await;
@@ -439,6 +439,9 @@ fn parse_query(
             if addresses.len() > max_addresses {
                 return Err(Error::TooManyAddresses);
             }
+            if page > 0 && addresses.len() > 1 {
+                return Err(Error::AddressPageRequiresSingleAddress);
+            }
             Ok(WaterfallRequest::Addresses(AddressesRequest {
                 addresses,
                 page,
@@ -537,9 +540,9 @@ async fn handle_single_address(
     let script_pubkey = address.script_pubkey();
 
     let script_hash = [db.hash(script_pubkey.as_bytes())];
-    let mut result: Vec<_> = db
-        .get_history(&script_hash)
-        .unwrap()
+    let mut seen_blockchain = db.get_history(&script_hash).unwrap();
+    truncate_history_page(&mut seen_blockchain, 0, state.max_txs_seen);
+    let mut result: Vec<_> = seen_blockchain
         .remove(0)
         .iter()
         .map(|e| EsploraTx {
@@ -598,6 +601,7 @@ async fn handle_waterfalls_req(
     inputs: WaterfallRequest,
     with_tip: WithTip,
     cbor: bool,
+    network: Network,
 ) -> Result<Response<Full<Bytes>>, Error> {
     let db = &state.store;
     let start = Instant::now();
@@ -610,6 +614,7 @@ async fn handle_waterfalls_req(
         .start_timer();
 
     let mut map = BTreeMap::new();
+    let mut has_more = Vec::new();
     let utxo_only_req;
     let id;
 
@@ -635,9 +640,21 @@ async fn handle_waterfalls_req(
                         derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
                     derivations_duration += batch_derivations_duration;
 
-                    let is_last = find_scripts(state, db, &mut result, scripts).await;
+                    let find_result = find_scripts(state, db, &mut result, scripts, 0).await;
+                    if utxo_only && find_result.has_more.iter().any(|has_more| *has_more) {
+                        return Err(Error::UtxoOnlyHistoryTooLarge);
+                    }
+                    for (i, has_more_for_script) in find_result.has_more.iter().enumerate() {
+                        if *has_more_for_script {
+                            let address =
+                                desc.address_at_derivation_index(batch_start + i as u32, network)?;
+                            has_more.push(address.to_string());
+                        }
+                    }
 
-                    if (is_last && batch_start + GAP_LIMIT >= to_index) || is_single_address {
+                    if (find_result.is_last && batch_start + GAP_LIMIT >= to_index)
+                        || is_single_address
+                    {
                         break;
                     }
                 }
@@ -649,7 +666,7 @@ async fn handle_waterfalls_req(
         }
         WaterfallRequest::Addresses(AddressesRequest {
             addresses,
-            page: _,
+            page,
             utxo_only,
         }) => {
             id = string_hash(&format!("{:?}", addresses));
@@ -659,9 +676,22 @@ async fn handle_waterfalls_req(
                 scripts.push(db.hash(addr.script_pubkey().as_bytes()));
             }
             let mut result = Vec::with_capacity(addresses.len());
-            let _ = find_scripts(state, db, &mut result, scripts).await;
+            let page = if addresses.len() == 1 {
+                page as usize
+            } else {
+                0
+            };
+            let find_result = find_scripts(state, db, &mut result, scripts, page).await;
+            if utxo_only && find_result.has_more.iter().any(|has_more| *has_more) {
+                return Err(Error::UtxoOnlyHistoryTooLarge);
+            }
             if utxo_only {
                 filter_utxo_only(&mut result, db)?;
+            }
+            for (addr, has_more_for_addr) in addresses.iter().zip(find_result.has_more.iter()) {
+                if *has_more_for_addr {
+                    has_more.push(addr.to_string());
+                }
             }
             map.insert("addresses".to_string(), result);
         }
@@ -707,6 +737,11 @@ async fn handle_waterfalls_req(
         page,
         tip: tip_hash,
         tip_meta,
+        has_more: if has_more.is_empty() {
+            None
+        } else {
+            Some(has_more)
+        },
     };
     let content = if cbor {
         "application/cbor"
@@ -867,8 +902,10 @@ async fn find_scripts(
     db: &crate::store::AnyStore,
     result: &mut Vec<Vec<TxSeen>>,
     scripts: Vec<u64>,
-) -> bool {
+    page: usize,
+) -> FindScriptsResult {
     let mut seen_blockchain = db.get_history(&scripts).unwrap();
+    let has_more = truncate_history_page(&mut seen_blockchain, page, state.max_txs_seen);
     state
         .mempool
         .lock()
@@ -876,7 +913,28 @@ async fn find_scripts(
         .append_seen(&scripts, &mut seen_blockchain);
     let is_last = seen_blockchain.iter().all(|e| e.is_empty());
     result.extend(seen_blockchain);
-    is_last
+    FindScriptsResult { is_last, has_more }
+}
+
+fn truncate_history_page(result: &mut [Vec<TxSeen>], page: usize, max_txs_seen: usize) -> Vec<bool> {
+    let start = page.saturating_mul(max_txs_seen);
+    let end = start.saturating_add(max_txs_seen);
+    let mut has_more = Vec::with_capacity(result.len());
+
+    for txs_seen in result.iter_mut() {
+        has_more.push(txs_seen.len() > end);
+        *txs_seen = txs_seen
+            .get(start..txs_seen.len().min(end))
+            .unwrap_or(&[])
+            .to_vec();
+    }
+
+    has_more
+}
+
+struct FindScriptsResult {
+    is_last: bool,
+    has_more: Vec<bool>,
 }
 
 fn calculate_script_pubkey_with_timing(
@@ -949,6 +1007,16 @@ pub async fn infallible_route(
                     .body(Full::new(e.to_string().into()))
                     .unwrap()
             } else if matches!(e, Error::DescriptorMustHaveWildcard) {
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Full::new(e.to_string().into()))
+                    .unwrap()
+            } else if matches!(e, Error::AddressPageRequiresSingleAddress) {
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Full::new(e.to_string().into()))
+                    .unwrap()
+            } else if matches!(e, Error::UtxoOnlyHistoryTooLarge) {
                 Response::builder()
                     .status(StatusCode::BAD_REQUEST)
                     .body(Full::new(e.to_string().into()))
@@ -1114,6 +1182,16 @@ mod tests {
             testnet_address
         );
 
+        let result = parse_query(
+            &format!("addresses={mainnet_address},{mainnet_address}&page=1"),
+            &key,
+            false,
+            100,
+            Network::Liquid,
+        )
+        .unwrap_err();
+        assert_eq!(result, Error::AddressPageRequiresSingleAddress);
+
         // Test Invalid Address (blinding key)
         let result = parse_query("addresses=lq1qqgyxa469eaugae2sz3q8qzaqy0v57ecuekzyngfac5nw4z87yqskc5tp2wtueqq6am0x062zewkrl9lr0cqwvw0j9633xqe2e", &key, false, 100, Network::Liquid).unwrap_err();
         assert_eq!(result, Error::AddressCannotBeBlinded);
@@ -1196,5 +1274,39 @@ mod tests {
         let json = serde_json::to_string(&build_info).unwrap();
         assert!(json.contains("version"));
         assert!(json.contains("git_commit"));
+    }
+
+    #[test]
+    fn test_truncate_history_page() {
+        let txid = crate::be::Txid::all_zeros();
+        let mut history = vec![
+            vec![
+                TxSeen::new(txid, 1, V::Undefined),
+                TxSeen::new(txid, 2, V::Undefined),
+                TxSeen::new(txid, 3, V::Undefined),
+            ],
+            vec![TxSeen::new(txid, 10, V::Undefined)],
+        ];
+
+        truncate_history_page(&mut history, 0, 2);
+        assert_eq!(
+            history[0].iter().map(|tx| tx.height).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(
+            history[1].iter().map(|tx| tx.height).collect::<Vec<_>>(),
+            vec![10]
+        );
+
+        let mut history = vec![vec![
+            TxSeen::new(txid, 1, V::Undefined),
+            TxSeen::new(txid, 2, V::Undefined),
+            TxSeen::new(txid, 3, V::Undefined),
+        ]];
+        truncate_history_page(&mut history, 1, 2);
+        assert_eq!(
+            history[0].iter().map(|tx| tx.height).collect::<Vec<_>>(),
+            vec![3]
+        );
     }
 }

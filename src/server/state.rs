@@ -34,6 +34,7 @@ pub struct State {
     pub secp: Secp256k1<All>,
 
     pub max_addresses: usize,
+    pub max_txs_seen: usize,
 
     pub cache_control_seconds: u32,
 
@@ -50,6 +51,7 @@ impl State {
         key: Identity,
         wif_key: PrivateKey,
         max_addresses: usize,
+        max_txs_seen: usize,
         cache_control_seconds: u32,
         derivation_cache_capacity: usize,
     ) -> Result<Self, Error> {
@@ -62,6 +64,7 @@ impl State {
             blocks_hash_ts: Mutex::new(Vec::new()),
             secp: bitcoin::key::Secp256k1::new(),
             max_addresses,
+            max_txs_seen,
             cache_control_seconds,
             derivation_cache: Mutex::new(DerivationCache::new(derivation_cache_capacity)),
             cached_fee_estimates: RwLock::new((HashMap::new(), None)),
