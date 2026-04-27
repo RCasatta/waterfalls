@@ -439,6 +439,9 @@ fn parse_query(
             if addresses.len() > max_addresses {
                 return Err(Error::TooManyAddresses);
             }
+            if page > 0 && addresses.len() > 1 {
+                return Err(Error::AddressPageRequiresSingleAddress);
+            }
             Ok(WaterfallRequest::Addresses(AddressesRequest {
                 addresses,
                 page,
@@ -1002,6 +1005,11 @@ pub async fn infallible_route(
                     .status(StatusCode::BAD_REQUEST)
                     .body(Full::new(e.to_string().into()))
                     .unwrap()
+            } else if matches!(e, Error::AddressPageRequiresSingleAddress) {
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Full::new(e.to_string().into()))
+                    .unwrap()
             } else if matches!(e, Error::BodyTooLarge) {
                 Response::builder()
                     .status(StatusCode::PAYLOAD_TOO_LARGE)
@@ -1162,6 +1170,16 @@ mod tests {
             result.addresses().unwrap().addresses[0].to_string(),
             testnet_address
         );
+
+        let result = parse_query(
+            &format!("addresses={mainnet_address},{mainnet_address}&page=1"),
+            &key,
+            false,
+            100,
+            Network::Liquid,
+        )
+        .unwrap_err();
+        assert_eq!(result, Error::AddressPageRequiresSingleAddress);
 
         // Test Invalid Address (blinding key)
         let result = parse_query("addresses=lq1qqgyxa469eaugae2sz3q8qzaqy0v57ecuekzyngfac5nw4z87yqskc5tp2wtueqq6am0x062zewkrl9lr0cqwvw0j9633xqe2e", &key, false, 100, Network::Liquid).unwrap_err();

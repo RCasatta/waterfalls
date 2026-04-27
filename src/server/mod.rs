@@ -317,6 +317,7 @@ pub enum Error {
     NotYetImplemented,
     AddressCannotBeBlinded,
     TooManyAddresses,
+    AddressPageRequiresSingleAddress,
     DescriptorMustHaveWildcard,
     BodyTooLarge,
     BodyReadTimeout,
