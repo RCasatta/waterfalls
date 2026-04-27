@@ -635,7 +635,7 @@ async fn handle_waterfalls_req(
                         derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
                     derivations_duration += batch_derivations_duration;
 
-                    let is_last = find_scripts(state, db, &mut result, scripts).await;
+                    let is_last = find_scripts(state, db, &mut result, scripts, 0).await;
 
                     if (is_last && batch_start + GAP_LIMIT >= to_index) || is_single_address {
                         break;
@@ -649,7 +649,7 @@ async fn handle_waterfalls_req(
         }
         WaterfallRequest::Addresses(AddressesRequest {
             addresses,
-            page: _,
+            page,
             utxo_only,
         }) => {
             id = string_hash(&format!("{:?}", addresses));
@@ -659,7 +659,12 @@ async fn handle_waterfalls_req(
                 scripts.push(db.hash(addr.script_pubkey().as_bytes()));
             }
             let mut result = Vec::with_capacity(addresses.len());
-            let _ = find_scripts(state, db, &mut result, scripts).await;
+            let page = if addresses.len() == 1 {
+                page as usize
+            } else {
+                0
+            };
+            let _ = find_scripts(state, db, &mut result, scripts, page).await;
             if utxo_only {
                 filter_utxo_only(&mut result, db)?;
             }
@@ -867,8 +872,10 @@ async fn find_scripts(
     db: &crate::store::AnyStore,
     result: &mut Vec<Vec<TxSeen>>,
     scripts: Vec<u64>,
+    page: usize,
 ) -> bool {
     let mut seen_blockchain = db.get_history(&scripts).unwrap();
+    truncate_history_page(&mut seen_blockchain, page, state.max_txs_seen);
     state
         .mempool
         .lock()
@@ -877,6 +884,18 @@ async fn find_scripts(
     let is_last = seen_blockchain.iter().all(|e| e.is_empty());
     result.extend(seen_blockchain);
     is_last
+}
+
+fn truncate_history_page(result: &mut [Vec<TxSeen>], page: usize, max_txs_seen: usize) {
+    let start = page.saturating_mul(max_txs_seen);
+    let end = start.saturating_add(max_txs_seen);
+
+    for txs_seen in result.iter_mut() {
+        *txs_seen = txs_seen
+            .get(start..txs_seen.len().min(end))
+            .unwrap_or(&[])
+            .to_vec();
+    }
 }
 
 fn calculate_script_pubkey_with_timing(
@@ -1196,5 +1215,39 @@ mod tests {
         let json = serde_json::to_string(&build_info).unwrap();
         assert!(json.contains("version"));
         assert!(json.contains("git_commit"));
+    }
+
+    #[test]
+    fn test_truncate_history_page() {
+        let txid = crate::be::Txid::all_zeros();
+        let mut history = vec![
+            vec![
+                TxSeen::new(txid, 1, V::Undefined),
+                TxSeen::new(txid, 2, V::Undefined),
+                TxSeen::new(txid, 3, V::Undefined),
+            ],
+            vec![TxSeen::new(txid, 10, V::Undefined)],
+        ];
+
+        truncate_history_page(&mut history, 0, 2);
+        assert_eq!(
+            history[0].iter().map(|tx| tx.height).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(
+            history[1].iter().map(|tx| tx.height).collect::<Vec<_>>(),
+            vec![10]
+        );
+
+        let mut history = vec![vec![
+            TxSeen::new(txid, 1, V::Undefined),
+            TxSeen::new(txid, 2, V::Undefined),
+            TxSeen::new(txid, 3, V::Undefined),
+        ]];
+        truncate_history_page(&mut history, 1, 2);
+        assert_eq!(
+            history[0].iter().map(|tx| tx.height).collect::<Vec<_>>(),
+            vec![3]
+        );
     }
 }

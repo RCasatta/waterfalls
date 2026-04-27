@@ -34,6 +34,8 @@ mod state;
 pub use mempool::Mempool;
 pub use state::State;
 
+const DEFAULT_MAX_TXS_SEEN: usize = 100;
+
 #[derive(Clone, clap::ValueEnum, Debug, PartialEq, Eq, Copy)]
 pub enum Network {
     Liquid,
@@ -97,6 +99,10 @@ pub struct Arguments {
     /// Maximum number of addresses that can be specified in the query string.
     #[arg(env, long, default_value = "100")]
     pub max_addresses: usize,
+
+    /// Maximum number of confirmed TxSeen entries returned for a single script.
+    #[arg(env, long)]
+    pub max_txs_seen: Option<usize>,
 
     /// If true, add CORS headers to responses
     #[arg(env, long)]
@@ -169,6 +175,7 @@ impl std::fmt::Debug for Arguments {
             )
             .field("zmq_endpoint", &self.zmq_endpoint)
             .field("max_addresses", &self.max_addresses)
+            .field("max_txs_seen", &self.max_txs_seen)
             .field("add_cors", &self.add_cors)
             .field("derivation_cache_capacity", &self.derivation_cache_capacity)
             .field("logs_rocksdb_stat_every", &self.logs_rocksdb_stat_every)
@@ -202,6 +209,10 @@ impl Arguments {
         if !self.use_esplora && self.rpc_user_password.is_none() {
             Err(Error::String(
                 "When using the node you must specify --rpc-user-password".to_string(),
+            ))
+        } else if self.max_txs_seen == Some(0) {
+            Err(Error::String(
+                "Max txs seen must be greater than 0".to_string(),
             ))
         } else if self.request_timeout_seconds == 0 {
             Err(Error::String(
@@ -383,6 +394,7 @@ pub async fn inner_main(
         key,
         wif_key,
         args.max_addresses,
+        args.max_txs_seen.unwrap_or(DEFAULT_MAX_TXS_SEEN),
         args.cache_control_seconds,
         args.derivation_cache_capacity,
     )?);
