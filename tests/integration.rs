@@ -108,6 +108,16 @@ async fn integration_addresses_txs_seen_truncation() {
         expected_txids[3..].to_vec()
     );
 
+    let err = test_env
+        .client()
+        .waterfalls_addresses_utxo_only(&vec![addr.clone()], true)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        format!("{err:?}"),
+        "waterfalls response is not 200 but: 400 body is: UtxoOnlyHistoryTooLarge"
+    );
+
     test_env.shutdown().await;
 }
 

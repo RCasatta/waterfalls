@@ -641,6 +641,9 @@ async fn handle_waterfalls_req(
                     derivations_duration += batch_derivations_duration;
 
                     let find_result = find_scripts(state, db, &mut result, scripts, 0).await;
+                    if utxo_only && find_result.has_more.iter().any(|has_more| *has_more) {
+                        return Err(Error::UtxoOnlyHistoryTooLarge);
+                    }
                     for (i, has_more_for_script) in find_result.has_more.iter().enumerate() {
                         if *has_more_for_script {
                             let address =
@@ -679,6 +682,9 @@ async fn handle_waterfalls_req(
                 0
             };
             let find_result = find_scripts(state, db, &mut result, scripts, page).await;
+            if utxo_only && find_result.has_more.iter().any(|has_more| *has_more) {
+                return Err(Error::UtxoOnlyHistoryTooLarge);
+            }
             if utxo_only {
                 filter_utxo_only(&mut result, db)?;
             }
@@ -1006,6 +1012,11 @@ pub async fn infallible_route(
                     .body(Full::new(e.to_string().into()))
                     .unwrap()
             } else if matches!(e, Error::AddressPageRequiresSingleAddress) {
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Full::new(e.to_string().into()))
+                    .unwrap()
+            } else if matches!(e, Error::UtxoOnlyHistoryTooLarge) {
                 Response::builder()
                     .status(StatusCode::BAD_REQUEST)
                     .body(Full::new(e.to_string().into()))
