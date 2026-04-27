@@ -108,6 +108,10 @@ async fn integration_addresses_txs_seen_truncation() {
         expected_txids[3..].to_vec()
     );
 
+    let address_txs = test_env.client().address_txs(&addr).await.unwrap();
+    let address_txs: serde_json::Value = serde_json::from_str(&address_txs).unwrap();
+    assert_eq!(address_txs.as_array().unwrap().len(), 3);
+
     let err = test_env
         .client()
         .waterfalls_addresses_utxo_only(&vec![addr.clone()], true)

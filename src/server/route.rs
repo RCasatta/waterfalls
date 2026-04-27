@@ -540,9 +540,9 @@ async fn handle_single_address(
     let script_pubkey = address.script_pubkey();
 
     let script_hash = [db.hash(script_pubkey.as_bytes())];
-    let mut result: Vec<_> = db
-        .get_history(&script_hash)
-        .unwrap()
+    let mut seen_blockchain = db.get_history(&script_hash).unwrap();
+    truncate_history_page(&mut seen_blockchain, 0, state.max_txs_seen);
+    let mut result: Vec<_> = seen_blockchain
         .remove(0)
         .iter()
         .map(|e| EsploraTx {
