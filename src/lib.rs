@@ -93,6 +93,10 @@ pub struct WaterfallResponse {
     #[cbor(n(3))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tip_meta: Option<BlockMeta>,
+
+    #[cbor(n(4))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_more: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Ord, PartialOrd, Encode, Decode)]
