@@ -201,8 +201,8 @@ pub async fn route(
             .map_err(|_| Error::BodyReadTimeout)?
             .map_err(|_| Error::BodyTooLarge)?
             .to_bytes();
-            let tx_hex = std::str::from_utf8(&whole_body)
-                .map_err(|e| Error::String(e.to_string()))?;
+            let tx_hex =
+                std::str::from_utf8(&whole_body).map_err(|e| Error::String(e.to_string()))?;
             let tx = be::Transaction::from_str(tx_hex, network.into())
                 .map_err(|e| Error::String(e.to_string()))?;
             let result = client.lock().await.broadcast(&tx).await;

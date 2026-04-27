@@ -7,8 +7,8 @@ use elements::{
 };
 use fxhash::FxHasher;
 use rocksdb::{
-    BlockBasedOptions, BoundColumnFamily, Cache, DBCompressionType, DBPinnableSlice,
-    MergeOperands, Options, DB,
+    BlockBasedOptions, BoundColumnFamily, Cache, DBCompressionType, DBPinnableSlice, MergeOperands,
+    Options, DB,
 };
 
 use crate::V;
@@ -95,11 +95,9 @@ impl DBStore {
             .map(|(index, script)| (index, script.to_be_bytes()))
             .collect();
         indexed_keys.sort_unstable_by_key(|(_, key)| *key);
-        let sorted_results = self.db.batched_multi_get_cf(
-            &cf,
-            indexed_keys.iter().map(|(_, key)| key),
-            true,
-        );
+        let sorted_results =
+            self.db
+                .batched_multi_get_cf(&cf, indexed_keys.iter().map(|(_, key)| key), true);
         let mut reordered: Vec<Option<DBPinnableSlice<'_>>> = std::iter::repeat_with(|| None)
             .take(scripts.len())
             .collect();
@@ -349,7 +347,11 @@ impl DBStore {
 
         let cf = self.history_cf();
 
-        for script_hashes in to_remove.keys().collect::<Vec<_>>().chunks(REORG_HISTORY_CHUNK_SIZE) {
+        for script_hashes in to_remove
+            .keys()
+            .collect::<Vec<_>>()
+            .chunks(REORG_HISTORY_CHUNK_SIZE)
+        {
             let script_hashes: Vec<ScriptHash> = script_hashes.iter().map(|e| **e).collect();
             let current_history = self.get_history(&script_hashes)?;
 

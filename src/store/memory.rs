@@ -57,7 +57,11 @@ impl Store for MemoryStore {
         let history = self.history.lock().unwrap();
         let mut result = Vec::with_capacity(scripts.len());
         for script in scripts {
-            result.push(history.get(script).is_some_and(|entries| !entries.is_empty()));
+            result.push(
+                history
+                    .get(script)
+                    .is_some_and(|entries| !entries.is_empty()),
+            );
         }
         Ok(result)
     }
