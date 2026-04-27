@@ -27,8 +27,7 @@ async fn integration_memory_elements() {
 async fn integration_fetch_client_regtest_elements() {
     let _ = env_logger::try_init();
 
-    let elementsd =
-        waterfalls::test_env::launch_elements(std::env::var("ELEMENTSD_EXEC").unwrap());
+    let elementsd = waterfalls::test_env::launch_elements(std::env::var("ELEMENTSD_EXEC").unwrap());
     let client = fetch_client_for_node(&elementsd, Network::ElementsRegtest);
     test_fetch_client_local_regtest(client, Network::ElementsRegtest).await;
 }
@@ -107,6 +106,62 @@ async fn integration_addresses_txs_seen_truncation() {
             .map(|tx_seen| tx_seen.txid)
             .collect::<Vec<_>>(),
         expected_txids[3..].to_vec()
+    );
+
+    test_env.shutdown().await;
+}
+
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn integration_descriptor_has_more_contains_addresses() {
+    let _ = env_logger::try_init();
+
+    let exe = std::env::var("BITCOIND_EXEC").unwrap();
+    #[cfg(feature = "db")]
+    let test_env =
+        waterfalls::test_env::launch_with_max_txs_seen(exe, None, Family::Bitcoin, 3).await;
+    #[cfg(not(feature = "db"))]
+    let test_env = waterfalls::test_env::launch_with_max_txs_seen(exe, Family::Bitcoin, 3).await;
+
+    let single_bitcoin_desc =
+        "wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/0/*)";
+    let parsed_desc = be::bitcoin_descriptor(single_bitcoin_desc).unwrap();
+    let response_key = parsed_desc.to_string();
+    let desc = parsed_desc.bitcoin().unwrap();
+    let addr = desc
+        .at_derivation_index(0)
+        .unwrap()
+        .address(bitcoin::Network::Regtest)
+        .unwrap();
+    let addr = be::Address::Bitcoin(addr);
+
+    let mut expected_txids = Vec::new();
+    for _ in 0..5 {
+        expected_txids.push(test_env.send_to(&addr, 10_000));
+        test_env.node_generate(1).await;
+    }
+
+    let result = test_env
+        .client()
+        .waterfalls_v2(single_bitcoin_desc)
+        .await
+        .unwrap()
+        .0;
+    let txs = result.txs_seen.get(&response_key).unwrap();
+
+    assert_eq!(txs.len(), 40);
+    assert_eq!(txs[0].len(), 3);
+    assert!(txs[1..]
+        .iter()
+        .all(|derived_script_txs| derived_script_txs.is_empty()));
+    assert_eq!(result.has_more, Some(vec![addr.to_string()]));
+    assert_ne!(result.has_more, Some(vec![single_bitcoin_desc.to_string()]));
+    assert_eq!(
+        txs[0]
+            .iter()
+            .map(|tx_seen| tx_seen.txid)
+            .collect::<Vec<_>>(),
+        expected_txids[..3].to_vec()
     );
 
     test_env.shutdown().await;
@@ -242,7 +297,11 @@ async fn test_fetch_client_local_regtest(client: FetchClient, network: Network) 
         .await
         .unwrap();
     assert_eq!(block.header(), fetched_header);
-    assert_eq!(fetched_header.block_hash(), genesis_hash, "network:{network}");
+    assert_eq!(
+        fetched_header.block_hash(),
+        genesis_hash,
+        "network:{network}"
+    );
 
     let header_json = client
         .block_header_json(genesis_hash, network.into())
