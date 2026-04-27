@@ -77,6 +77,16 @@ impl Descriptor {
         })
     }
 
+    pub(crate) fn address_at_derivation_index(
+        &self,
+        index: u32,
+        network: Network,
+    ) -> Result<crate::be::Address, Error> {
+        let script_pubkey = self.script_pubkey_at_derivation_index(index)?;
+        crate::be::Address::from_script(&script_pubkey.into(), network)
+            .ok_or_else(|| Error::String("Cannot derive address from script".to_string()))
+    }
+
     pub(crate) fn has_wildcard(&self) -> bool {
         match self {
             Descriptor::Bitcoin(desc) => desc.has_wildcard(),
