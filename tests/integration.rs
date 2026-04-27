@@ -71,19 +71,42 @@ async fn integration_addresses_txs_seen_truncation() {
         test_env.node_generate(1).await;
     }
 
-    let result = test_env
+    let result_page_0 = test_env
         .client()
         .waterfalls_addresses(&vec![addr.clone()])
         .await
         .unwrap()
         .0;
-    let txs = &result.txs_seen.get("addresses").unwrap()[0];
+    let txs_page_0 = &result_page_0.txs_seen.get("addresses").unwrap()[0];
 
-    assert_eq!(txs.len(), 3);
-    assert_eq!(result.has_more, Some(vec![addr.to_string()]));
+    assert_eq!(txs_page_0.len(), 3);
+    assert_eq!(result_page_0.page, 0);
+    assert_eq!(result_page_0.has_more, Some(vec![addr.to_string()]));
     assert_eq!(
-        txs.iter().map(|tx_seen| tx_seen.txid).collect::<Vec<_>>(),
+        txs_page_0
+            .iter()
+            .map(|tx_seen| tx_seen.txid)
+            .collect::<Vec<_>>(),
         expected_txids[..3].to_vec()
+    );
+
+    let result_page_1 = test_env
+        .client()
+        .waterfalls_addresses_with_page(&vec![addr.clone()], 1)
+        .await
+        .unwrap()
+        .0;
+    let txs_page_1 = &result_page_1.txs_seen.get("addresses").unwrap()[0];
+
+    assert_eq!(txs_page_1.len(), 2);
+    assert_eq!(result_page_1.page, 1);
+    assert_eq!(result_page_1.has_more, None);
+    assert_eq!(
+        txs_page_1
+            .iter()
+            .map(|tx_seen| tx_seen.txid)
+            .collect::<Vec<_>>(),
+        expected_txids[3..].to_vec()
     );
 
     test_env.shutdown().await;

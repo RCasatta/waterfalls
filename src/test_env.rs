@@ -478,12 +478,32 @@ impl WaterfallClient {
         &self,
         addressess: &[be::Address],
     ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
-        self.waterfalls_addresses_utxo_only(addressess, false).await
+        self.waterfalls_addresses_with_page_utxo_only(addressess, None, false)
+            .await
+    }
+
+    pub async fn waterfalls_addresses_with_page(
+        &self,
+        addressess: &[be::Address],
+        page: u32,
+    ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
+        self.waterfalls_addresses_with_page_utxo_only(addressess, Some(page), false)
+            .await
     }
 
     pub async fn waterfalls_addresses_utxo_only(
         &self,
         addressess: &[be::Address],
+        utxo_only: bool,
+    ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
+        self.waterfalls_addresses_with_page_utxo_only(addressess, None, utxo_only)
+            .await
+    }
+
+    pub async fn waterfalls_addresses_with_page_utxo_only(
+        &self,
+        addressess: &[be::Address],
+        page: Option<u32>,
         utxo_only: bool,
     ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         // this code is duplicated from waterfalls_version but we need to use the v3 endpoint which return a different object
@@ -496,6 +516,9 @@ impl WaterfallClient {
             .join(",");
 
         let mut query_params = vec![("addresses", addresses_str)];
+        if let Some(page) = page {
+            query_params.push(("page", page.to_string()));
+        }
         if utxo_only {
             query_params.push(("utxo_only", "true".to_string()));
         }
