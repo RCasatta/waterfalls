@@ -44,7 +44,7 @@ GET /v2/waterfalls.cbor?<query_params>
 **History truncation:**
 
 - To avoid unbounded responses on highly reused addresses, Waterfalls caps the number of confirmed `TxSeen` entries returned for a single script pubkey
-- The server-side cap is configurable and defaults to `100`
+- The server-side cap is configurable with `--max-txs-seen` (or `MAX_TXS_SEEN`) and defaults to `100`
 - Truncation is applied independently to each script/address result
 - For `addresses=<single_address>`, clients can continue the confirmed history by increasing `page`
 - Mempool entries are included on page `0`; subsequent pages contain only confirmed history
