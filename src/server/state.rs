@@ -265,4 +265,54 @@ mod tests {
         );
         assert_eq!(metrics.unique_count(), 1);
     }
+
+    #[tokio::test]
+    async fn test_reorg_truncates_blocks_hash_ts() {
+        use crate::store::{memory::MemoryStore, Store};
+        use bitcoin::NetworkKind;
+        use std::collections::BTreeMap;
+
+        let store = AnyStore::Mem(MemoryStore::new());
+        let key = Identity::generate();
+        let wif_key = PrivateKey::generate(NetworkKind::Test);
+        let state = State::new(store, key, wif_key, 100, 100, 5, 1000).unwrap();
+
+        let hash_0 =
+            BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
+                .unwrap();
+        let hash_1 =
+            BlockHash::from_str("1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap();
+        let hash_2 =
+            BlockHash::from_str("2222222222222222222222222222222222222222222222222222222222222222")
+                .unwrap();
+
+        let meta_0 = BlockMeta::new(0, hash_0, 100);
+        let meta_1 = BlockMeta::new(1, hash_1, 200);
+        let meta_2 = BlockMeta::new(2, hash_2, 300);
+
+        // Index 3 blocks in both the store and blocks_hash_ts
+        for meta in [&meta_0, &meta_1, &meta_2] {
+            state.set_hash_ts(meta).await;
+            state
+                .store
+                .update(meta, vec![], BTreeMap::new(), BTreeMap::new())
+                .unwrap();
+        }
+        assert_eq!(state.tip_height().await, Some(2));
+        assert_eq!(state.tip_hash().await, Some(hash_2));
+
+        // Simulate reorg at height 2 as threads/blocks.rs currently does:
+        // only store.reorg() is called, blocks_hash_ts is NOT truncated.
+        state.store.reorg(2);
+
+        // TODO: BUG — blocks_hash_ts still exposes the reorged block.
+        // After the fix these assertions should be inverted:
+        //   tip_height  == Some(1)
+        //   tip_hash    == Some(hash_1)
+        //   block_hash(2) == None
+        assert_eq!(state.tip_height().await, Some(2));
+        assert_eq!(state.tip_hash().await, Some(hash_2));
+        assert!(state.block_hash(2).await.is_some());
+    }
 }
