@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     server::{derivation_cache::DerivationCache, Mempool},
-    store::{AnyStore, BlockMeta},
+    store::{AnyStore, BlockMeta, Store},
     Timestamp,
 };
 use age::x25519::Identity;
@@ -110,6 +110,23 @@ impl State {
         let mut blocks_hash_ts = self.blocks_hash_ts.lock().await;
         update_hash_ts(&mut blocks_hash_ts, meta);
     }
+    /// Roll back `blocks_hash_ts` for a reorged block and invoke `store.reorg`.
+    ///
+    /// Returns the previous block's metadata so the caller can resume indexing
+    /// from there.
+    pub(crate) async fn handle_reorg(&self, reorged_height: u32) -> BlockMeta {
+        let previous_height = reorged_height - 1;
+        let mut blocks_hash_ts = self.blocks_hash_ts.lock().await;
+        let (hash, ts) = blocks_hash_ts
+            .get(previous_height as usize)
+            .cloned()
+            .expect("can't get previous block_hash");
+        blocks_hash_ts.truncate(reorged_height as usize);
+        drop(blocks_hash_ts);
+        self.store.reorg(reorged_height);
+        BlockMeta::new(previous_height, hash, ts)
+    }
+
     pub fn address(&self) -> bitcoin::Address {
         p2pkh(&self.secp, &self.wif_key)
     }
@@ -268,7 +285,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_reorg_truncates_blocks_hash_ts() {
-        use crate::store::{memory::MemoryStore, Store};
+        use crate::store::memory::MemoryStore;
         use bitcoin::NetworkKind;
         use std::collections::BTreeMap;
 
@@ -302,17 +319,14 @@ mod tests {
         assert_eq!(state.tip_height().await, Some(2));
         assert_eq!(state.tip_hash().await, Some(hash_2));
 
-        // Simulate reorg at height 2 as threads/blocks.rs currently does:
-        // only store.reorg() is called, blocks_hash_ts is NOT truncated.
-        state.store.reorg(2);
+        // Reorg height 2: store and blocks_hash_ts must both roll back
+        let prev = state.handle_reorg(2).await;
+        assert_eq!(prev.height, 1);
+        assert_eq!(prev.hash, hash_1);
 
-        // TODO: BUG — blocks_hash_ts still exposes the reorged block.
-        // After the fix these assertions should be inverted:
-        //   tip_height  == Some(1)
-        //   tip_hash    == Some(hash_1)
-        //   block_hash(2) == None
-        assert_eq!(state.tip_height().await, Some(2));
-        assert_eq!(state.tip_hash().await, Some(hash_2));
-        assert!(state.block_hash(2).await.is_some());
+        // blocks_hash_ts no longer contains the reorged block
+        assert_eq!(state.tip_height().await, Some(1));
+        assert_eq!(state.tip_hash().await, Some(hash_1));
+        assert_eq!(state.block_hash(2).await, None);
     }
 }
