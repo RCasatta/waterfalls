@@ -213,7 +213,10 @@ pub async fn index(
             let txid = tx.txid();
             for (j, output) in tx.outputs_iter().enumerate() {
                 if !output.skip_utxo() {
-                    // We skip utxos only when we are sure they are not spendable.
+                    // Use an empty-bytes hash as a placeholder: outputs that are spendable
+                    // but non-standard (e.g. bare OP_TRUE) won't pass skip_indexing() below,
+                    // so their real script hash never overwrites this. When spent, the
+                    // spending tx lands under this dummy hash that no wallet will ever query.
                     let out_point = OutPoint::new(txid, j as u32);
                     utxo_created.insert(out_point, db.hash(b""));
                 }
