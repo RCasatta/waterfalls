@@ -290,6 +290,10 @@ impl std::str::FromStr for Network {
             "liquid" => Ok(Self::Liquid),
             "liquid-testnet" => Ok(Self::LiquidTestnet),
             "elements-regtest" => Ok(Self::ElementsRegtest),
+            "bitcoin" => Ok(Self::Bitcoin),
+            "bitcoin-testnet" => Ok(Self::BitcoinTestnet),
+            "bitcoin-regtest" => Ok(Self::BitcoinRegtest),
+            "bitcoin-signet" => Ok(Self::BitcoinSignet),
             _ => Err(Error::String(format!("Invalid network: {}", s))),
         }
     }
@@ -689,4 +693,26 @@ fn report_header_timeouts_if_due(aggregation: &mut HeaderTimeoutAggregation) {
 struct HeaderTimeoutAggregation {
     counts: HashMap<IpAddr, u64>,
     last_report: Instant,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_network_from_str_roundtrip() {
+        for network in [
+            Network::Liquid,
+            Network::LiquidTestnet,
+            Network::ElementsRegtest,
+            Network::Bitcoin,
+            Network::BitcoinTestnet,
+            Network::BitcoinRegtest,
+            Network::BitcoinSignet,
+        ] {
+            let s = network.to_string();
+            let parsed: Network = s.parse().unwrap_or_else(|_| panic!("failed to parse {s}"));
+            assert_eq!(parsed, network);
+        }
+    }
 }
