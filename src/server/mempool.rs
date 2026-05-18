@@ -57,8 +57,9 @@ impl Mempool {
                 }
             }
         }
+        let txid_set: HashSet<crate::be::Txid> = txids.iter().copied().collect();
         self.outpoints_created
-            .retain(|k, _| !txids.contains(&k.txid.into()));
+            .retain(|k, _| !txid_set.contains(&k.txid));
     }
 
     fn add(&mut self, db: &AnyStore, txs: &[(crate::be::Txid, &be::MempoolTx)]) {
