@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     time::{Duration, Instant},
 };
 
@@ -125,6 +125,15 @@ impl State {
     pub async fn record_descriptor_max_derived_index(&self, id: u64, index: u32) {
         let mut descriptor_max_derived_index = self.descriptor_max_derived_index.lock().await;
         record_descriptor_max_derived_index(&mut descriptor_max_derived_index, id, index);
+    }
+
+    pub async fn descriptor_max_derived_index_snapshot(&self) -> BTreeMap<u64, u32> {
+        self.descriptor_max_derived_index
+            .lock()
+            .await
+            .iter()
+            .map(|(id, index)| (*id, *index))
+            .collect()
     }
 }
 

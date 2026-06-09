@@ -35,6 +35,7 @@ pub use mempool::Mempool;
 pub use state::State;
 
 const DEFAULT_MAX_TXS_SEEN: usize = 100;
+const PERIODIC_LOGGING_INTERVAL: Duration = Duration::from_secs(300);
 
 #[derive(Clone, clap::ValueEnum, Debug, PartialEq, Eq, Copy)]
 pub enum Network {
@@ -481,6 +482,18 @@ pub async fn inner_main(
         })
     });
 
+    let h4 = {
+        let state = state.clone();
+        let shutdown_rx = shutdown_tx.subscribe();
+        tokio::spawn(async move {
+            let shutdown_future = async {
+                let mut rx = shutdown_rx;
+                let _ = rx.recv().await;
+            };
+            periodic_logging(state, shutdown_future).await
+        })
+    };
+
     let addr = args.listen.unwrap_or(SocketAddr::from((
         [127, 0, 0, 1],
         args.network.default_listen_port(),
@@ -548,9 +561,41 @@ pub async fn inner_main(
     if let Some(h3) = h3 {
         h3.await.unwrap();
     }
+    h4.await.unwrap();
 
     log::info!("shutting down gracefully");
     Ok(())
+}
+
+async fn periodic_logging(state: Arc<State>, shutdown_signal: impl Future<Output = ()>) {
+    let mut interval = tokio::time::interval(PERIODIC_LOGGING_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval.tick().await;
+    let mut signal = std::pin::pin!(shutdown_signal);
+
+    loop {
+        tokio::select! {
+            _ = &mut signal => {
+                log::info!("periodic logging task received shutdown signal");
+                return;
+            }
+            _ = interval.tick() => {
+                log_periodic_state(&state).await;
+            }
+        }
+    }
+}
+
+async fn log_periodic_state(state: &State) {
+    let descriptor_max_derived_index = state.descriptor_max_derived_index_snapshot().await;
+    if !descriptor_max_derived_index.is_empty() {
+        let descriptor_max_derived_index: std::collections::BTreeMap<_, _> =
+            descriptor_max_derived_index
+                .into_iter()
+                .map(|(id, index)| (format!("{id:x}"), index))
+                .collect();
+        log::info!("descriptor max derived indexes: {descriptor_max_derived_index:?}");
+    }
 }
 
 fn report_header_timeouts_if_due(aggregation: &mut HeaderTimeoutAggregation) {
