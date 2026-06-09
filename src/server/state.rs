@@ -43,6 +43,7 @@ pub struct State {
     pub cached_fee_estimates: RwLock<(HashMap<u16, f64>, Option<Instant>)>,
 
     descriptor_metrics: Mutex<DescriptorMetrics>,
+    descriptor_max_derived_index: Mutex<HashMap<u64, u32>>,
 }
 
 impl State {
@@ -69,6 +70,7 @@ impl State {
             derivation_cache: Mutex::new(DerivationCache::new(derivation_cache_capacity)),
             cached_fee_estimates: RwLock::new((HashMap::new(), None)),
             descriptor_metrics: Mutex::new(DescriptorMetrics::new()),
+            descriptor_max_derived_index: Mutex::new(HashMap::new()),
         })
     }
 
@@ -119,6 +121,22 @@ impl State {
         descriptor_metrics.record(id, Instant::now());
         crate::set_unique_descriptors(descriptor_metrics.unique_count());
     }
+
+    pub async fn record_descriptor_max_derived_index(&self, id: u64, index: u32) {
+        let mut descriptor_max_derived_index = self.descriptor_max_derived_index.lock().await;
+        record_descriptor_max_derived_index(&mut descriptor_max_derived_index, id, index);
+    }
+}
+
+fn record_descriptor_max_derived_index(
+    descriptor_max_derived_index: &mut HashMap<u64, u32>,
+    id: u64,
+    index: u32,
+) {
+    descriptor_max_derived_index
+        .entry(id)
+        .and_modify(|max_index| *max_index = (*max_index).max(index))
+        .or_insert(index);
 }
 
 fn update_hash_ts(blocks_hash_ts: &mut Vec<(BlockHash, u32)>, meta: &BlockMeta) {
@@ -264,5 +282,18 @@ mod tests {
             base + DESCRIPTOR_METRICS_RETENTION + DESCRIPTOR_METRICS_PRUNE_INTERVAL,
         );
         assert_eq!(metrics.unique_count(), 1);
+    }
+
+    #[test]
+    fn test_record_descriptor_max_derived_index() {
+        let mut descriptor_max_derived_index = HashMap::new();
+
+        record_descriptor_max_derived_index(&mut descriptor_max_derived_index, 1, 20);
+        record_descriptor_max_derived_index(&mut descriptor_max_derived_index, 1, 10);
+        record_descriptor_max_derived_index(&mut descriptor_max_derived_index, 1, 40);
+        record_descriptor_max_derived_index(&mut descriptor_max_derived_index, 2, 30);
+
+        assert_eq!(descriptor_max_derived_index.get(&1), Some(&40));
+        assert_eq!(descriptor_max_derived_index.get(&2), Some(&30));
     }
 }

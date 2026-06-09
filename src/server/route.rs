@@ -633,12 +633,19 @@ async fn handle_waterfalls_req(
             }
             utxo_only_req = utxo_only;
             for desc in descriptor.into_single_descriptors().unwrap().iter() {
+                let single_descriptor_id = string_hash(&desc.to_string());
                 let is_single_address = !desc.has_wildcard();
                 let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
                 for batch in 0..MAX_BATCH {
                     let batch_start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
                     let (scripts, batch_derivations_duration) =
                         derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
+                    state
+                        .record_descriptor_max_derived_index(
+                            single_descriptor_id,
+                            batch_start + GAP_LIMIT,
+                        )
+                        .await;
                     derivations_duration += batch_derivations_duration;
 
                     let find_result = find_scripts(state, db, &mut result, scripts, 0, true).await;
