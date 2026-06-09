@@ -1,4 +1,5 @@
 /target
+.vscode/
 .direnv/
 db/
 result
