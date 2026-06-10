@@ -471,6 +471,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert!(result.tip_meta.is_none());
     let mut result_v4 = client.waterfalls_v4(&bitcoin_desc).await.unwrap().0;
     assert!(result_v4.tip_meta.is_some());
+    let initial_tip_height = result_v4.tip_meta.as_ref().unwrap().h;
     result_v4.tip = result_v4.tip_meta.map(|e| e.b);
     result_v4.tip_meta = None;
     assert_eq!(result, result_v4);
@@ -530,7 +531,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let first = &result.txs_seen.iter().next().unwrap().1[0][0];
     assert_eq!(first.txid, initial_txid);
 
-    assert_eq!(first.height, 103);
+    assert_eq!(first.height, initial_tip_height + 1);
     assert!(first.block_hash.is_some());
     assert!(first.block_timestamp.is_some());
 
