@@ -217,6 +217,7 @@ pub async fn route(
         (&Method::GET, "/metrics", None) => {
             let encoder = prometheus::TextEncoder::new();
 
+            state.update_descriptor_max_derived_index_metrics().await;
             let metric_families = prometheus::gather();
             let mut buffer = vec![];
             encoder

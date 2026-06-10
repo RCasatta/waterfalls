@@ -135,6 +135,13 @@ impl State {
             .map(|(id, index)| (*id, *index))
             .collect()
     }
+
+    pub async fn update_descriptor_max_derived_index_metrics(&self) {
+        let descriptor_max_derived_index = self.descriptor_max_derived_index.lock().await;
+        crate::set_descriptor_max_derived_index_buckets(
+            descriptor_max_derived_index.values().copied(),
+        );
+    }
 }
 
 fn record_descriptor_max_derived_index(

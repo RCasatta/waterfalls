@@ -8,8 +8,8 @@ use lazy_static::lazy_static;
 use minicbor::{Decode, Encode};
 use prometheus::{
     labels, opts, register_counter, register_histogram_vec, register_int_counter,
-    register_int_counter_vec, register_int_gauge, Counter, HistogramVec, IntCounter, IntCounterVec,
-    IntGauge,
+    register_int_counter_vec, register_int_gauge, register_int_gauge_vec, Counter, HistogramVec,
+    IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
 };
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +40,9 @@ pub mod test_env;
 type ScriptHash = u64;
 type Height = u32;
 type Timestamp = u32;
+
+const DESCRIPTOR_MAX_DERIVED_INDEX_BUCKET_SIZE: u32 = 20;
+const DESCRIPTOR_MAX_DERIVED_INDEX_BUCKET_LIMIT: u32 = 1000;
 
 /// Request to the waterfalls endpoint
 #[derive(Debug)]
@@ -355,6 +358,13 @@ lazy_static! {
         "Unique descriptor IDs seen within the last 24 hours."
     )
     .unwrap();
+    static ref WATERFALLS_DESCRIPTOR_MAX_DERIVED_INDEX_DESCRIPTORS: IntGaugeVec =
+        register_int_gauge_vec!(
+            "waterfalls_descriptor_max_derived_index_descriptors",
+            "Number of descriptors grouped by their max derived index bucket.",
+            &["range"]
+        )
+        .unwrap();
 }
 
 pub(crate) fn cache_counter(cache_name: &str, hit_miss: bool) {
@@ -372,6 +382,53 @@ pub(crate) fn inc_connection_error_counter(kind: &str) {
 
 pub(crate) fn set_unique_descriptors(count: usize) {
     crate::WATERFALLS_UNIQUE_DESCRIPTORS.set(count as i64);
+}
+
+pub(crate) fn set_descriptor_max_derived_index_buckets<I>(max_indexes: I)
+where
+    I: IntoIterator<Item = u32>,
+{
+    let mut counts = BTreeMap::new();
+    for index in max_indexes {
+        *counts
+            .entry(descriptor_max_derived_index_bucket_label(index))
+            .or_insert(0) += 1;
+    }
+
+    for upper in (DESCRIPTOR_MAX_DERIVED_INDEX_BUCKET_SIZE
+        ..=DESCRIPTOR_MAX_DERIVED_INDEX_BUCKET_LIMIT)
+        .step_by(DESCRIPTOR_MAX_DERIVED_INDEX_BUCKET_SIZE as usize)
+    {
+        let label = format!(
+            "{}-{upper}",
+            upper - DESCRIPTOR_MAX_DERIVED_INDEX_BUCKET_SIZE
+        );
+        let count = counts.get(label.as_str()).copied().unwrap_or(0);
+        crate::WATERFALLS_DESCRIPTOR_MAX_DERIVED_INDEX_DESCRIPTORS
+            .with_label_values(&[&label])
+            .set(count);
+    }
+
+    let overflow_label = format!("{DESCRIPTOR_MAX_DERIVED_INDEX_BUCKET_LIMIT}+");
+    let overflow_count = counts.get(overflow_label.as_str()).copied().unwrap_or(0);
+    crate::WATERFALLS_DESCRIPTOR_MAX_DERIVED_INDEX_DESCRIPTORS
+        .with_label_values(&[&overflow_label])
+        .set(overflow_count);
+}
+
+fn descriptor_max_derived_index_bucket_label(index: u32) -> String {
+    if index > DESCRIPTOR_MAX_DERIVED_INDEX_BUCKET_LIMIT {
+        return format!("{DESCRIPTOR_MAX_DERIVED_INDEX_BUCKET_LIMIT}+");
+    }
+
+    let upper = index
+        .max(1)
+        .div_ceil(DESCRIPTOR_MAX_DERIVED_INDEX_BUCKET_SIZE)
+        * DESCRIPTOR_MAX_DERIVED_INDEX_BUCKET_SIZE;
+    format!(
+        "{}-{upper}",
+        upper - DESCRIPTOR_MAX_DERIVED_INDEX_BUCKET_SIZE
+    )
 }
 
 /// Response from the last_used_index endpoint
@@ -469,6 +526,7 @@ mod tests {
     #[test]
     fn test_descriptor_metrics_registered() {
         set_unique_descriptors(7);
+        set_descriptor_max_derived_index_buckets([20, 30, 40, 1001]);
 
         let metric_names = prometheus::gather()
             .into_iter()
@@ -476,5 +534,19 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(metric_names.contains(&"waterfalls_unique_descriptors".to_string()));
+        assert!(metric_names
+            .contains(&"waterfalls_descriptor_max_derived_index_descriptors".to_string()));
+    }
+
+    #[test]
+    fn test_descriptor_max_derived_index_bucket_label() {
+        assert_eq!(descriptor_max_derived_index_bucket_label(0), "0-20");
+        assert_eq!(descriptor_max_derived_index_bucket_label(1), "0-20");
+        assert_eq!(descriptor_max_derived_index_bucket_label(20), "0-20");
+        assert_eq!(descriptor_max_derived_index_bucket_label(21), "20-40");
+        assert_eq!(descriptor_max_derived_index_bucket_label(40), "20-40");
+        assert_eq!(descriptor_max_derived_index_bucket_label(41), "40-60");
+        assert_eq!(descriptor_max_derived_index_bucket_label(1000), "980-1000");
+        assert_eq!(descriptor_max_derived_index_bucket_label(1001), "1000+");
     }
 }
