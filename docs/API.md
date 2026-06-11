@@ -162,6 +162,58 @@ This endpoint is optimized for applications that only need to know the next unus
 
 To get the next unused external address, use index `external + 1` (or index `0` if `external` is null).
 
+### Descriptor Subscription
+```
+GET /v1/subscribe?descriptor=<descriptor>
+```
+
+Opens a Server-Sent Events (SSE) stream that notifies the client when a previously scanned descriptor may have new activity. The notification is only a hint; clients should perform the normal Waterfalls scan after receiving an event.
+
+**Query Parameters:**
+
+- `descriptor` (string, required): Bitcoin/Elements descriptor (plain text or encrypted with server key)
+  - Supports encryption using age encryption with server's public key
+  - Network validation: mainnet descriptors (xpub) cannot be used on testnet/regtest
+  - Must have a wildcard
+
+**Precondition:**
+
+- The descriptor must have been scanned with `/v1/waterfalls`, `/v2/waterfalls`, or `/v4/waterfalls` before subscribing
+- If the descriptor has never been scanned, the server returns `400 DescriptorNotScanned`
+- The server tracks the highest used derivation index observed during scans
+- Subscriptions watch scripts up to `max_used_index + GAP_LIMIT`; if a descriptor was scanned but has no used index yet, the initial gap window is watched
+
+**Response:**
+
+- Status: `200 OK`
+- Content-Type: `text/event-stream`
+- The stream starts with a comment event:
+
+```text
+: ready
+
+```
+
+When activity is detected for a watched script, the server sends:
+
+```text
+event: changed
+data: {"reason":"mempool"}
+
+```
+
+**Event Reasons:**
+
+- `mempool`: a watched script appeared in a mempool transaction or changed mempool state
+- `block`: a watched script appeared in a newly indexed block
+- `reorg`: a chain reorganization happened; clients should rescan because affected scripts are not filtered precisely
+
+**Client Behavior:**
+
+- Treat events as invalidation hints, not as wallet updates
+- On any `changed` event, run the usual Waterfalls scan to obtain authoritative history and tip state
+- On reconnect, run a Waterfalls scan before relying on subscription events, because events may have been missed while disconnected
+
 ## Base Endpoints
 
 ### Server Information
