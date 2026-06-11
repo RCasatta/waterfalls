@@ -190,7 +190,6 @@ impl State {
         self.subscriptions.lock().await.subscribe(scripts)
     }
 
-    #[allow(dead_code)]
     pub(crate) async fn unsubscribe(&self, id: SubscriptionId) -> bool {
         self.subscriptions.lock().await.unsubscribe(id)
     }

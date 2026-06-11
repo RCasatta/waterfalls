@@ -9,9 +9,10 @@ use crate::{
 use age::x25519::Identity;
 use base64::prelude::{Engine, BASE64_STANDARD_NO_PAD};
 use elements::BlockHash;
-use http_body_util::{BodyExt, Full, Limited};
+use futures_util::{stream, StreamExt};
+use http_body_util::{combinators::BoxBody, BodyExt, Full, Limited, StreamBody};
 use hyper::{
-    body::{Bytes, Incoming},
+    body::{Bytes, Frame, Incoming},
     header::{self, CACHE_CONTROL, CONTENT_TYPE},
     Method, Request, Response, StatusCode,
 };
@@ -19,6 +20,7 @@ use prometheus::Encoder;
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, HashSet},
+    convert::Infallible,
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
     sync::Arc,
@@ -29,7 +31,7 @@ use tokio::sync::Mutex;
 use super::{
     encryption,
     sign::MsgSigAddress,
-    subscription::{SubscriptionId, SubscriptionReceiver},
+    subscription::{SubscriptionEvent, SubscriptionId, SubscriptionReceiver},
     Network,
 };
 
@@ -53,6 +55,9 @@ const MAX_TX_BODY_SIZE: usize = 1024 * 1024; // 1MB limit for transaction broadc
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30); // timeout for reading request body
 const FEE_ESTIMATES_TTL: u32 = 30; // cache fee estimates for 30 seconds
 
+type RespBody = BoxBody<Bytes, Infallible>;
+type Resp = Response<RespBody>;
+
 // needed endpoint to make this self-contained for testing, in prod they should probably be never hit cause proxied by nginx
 // https://waterfalls.liquidwebwallet.org/liquidtestnet/api/blocks/tip/hash
 // https://waterfalls.liquidwebwallet.org/liquidtestnet/api/block/bddf520b05c7552dca87289a035043a5c434133b3d1bb07b255fb1a30592b2d4/header
@@ -63,7 +68,7 @@ pub async fn route(
     client: &Arc<Mutex<Client>>,
     req: Request<Incoming>,
     network: Network,
-) -> Result<Response<Full<Bytes>>, Error> {
+) -> Result<Resp, Error> {
     let is_testnet_or_regtest = !matches!(network, Network::Liquid | Network::Bitcoin);
     log::debug!("---> {req:?}");
     let res = match (req.method(), req.uri().path(), req.uri().query()) {
@@ -143,6 +148,11 @@ pub async fn route(
             let descriptor =
                 parse_descriptor_query(query, &state.key, is_testnet_or_regtest, network)?;
             handle_last_used_index(state, descriptor).await
+        }
+        (&Method::GET, "/v1/subscribe", Some(query)) => {
+            let descriptor =
+                parse_descriptor_query(query, &state.key, is_testnet_or_regtest, network)?;
+            handle_subscribe_req(state, descriptor).await
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {
             // this method return the seconds since last block
@@ -375,9 +385,7 @@ pub async fn route(
     res
 }
 
-fn block_hash_resp(
-    block_hash: Option<elements::BlockHash>,
-) -> Result<Response<Full<Bytes>>, Error> {
+fn block_hash_resp(block_hash: Option<elements::BlockHash>) -> Result<Resp, Error> {
     match block_hash {
         Some(h) => str_resp(h.to_string(), StatusCode::OK),
         None => str_resp("cannot find it".to_string(), StatusCode::NOT_FOUND),
@@ -493,7 +501,7 @@ fn parse_descriptor_query(
     Ok(descriptor)
 }
 
-fn str_resp(s: String, status: StatusCode) -> Result<Response<Full<Bytes>>, Error> {
+fn str_resp(s: String, status: StatusCode) -> Result<Resp, Error> {
     any_resp(s.into_bytes(), status, Some("text/plain"), None, None)
 }
 fn any_resp(
@@ -502,7 +510,7 @@ fn any_resp(
     content: Option<&str>,
     cache: Option<u32>,
     msg_sig_adr: Option<MsgSigAddress>,
-) -> Result<Response<Full<Bytes>>, Error> {
+) -> Result<Resp, Error> {
     let mut builder = Response::builder().status(status);
     if let Some(content) = content {
         builder = builder.header(CONTENT_TYPE, content)
@@ -521,15 +529,36 @@ fn any_resp(
         builder = builder.header("X-Server-Address", msg_sig_adr.address.to_string());
     }
 
-    builder
-        .body(Full::new(bytes.into()))
-        .map_err(|_| Error::Other)
+    builder.body(full_body(bytes)).map_err(|_| Error::Other)
 }
 
-async fn handle_single_address(
-    state: &Arc<State>,
-    address: &be::Address,
-) -> Result<Response<Full<Bytes>>, Error> {
+fn full_body(bytes: Vec<u8>) -> RespBody {
+    Full::new(Bytes::from(bytes))
+        .map_err(|never| match never {})
+        .boxed()
+}
+
+fn error_resp(status: StatusCode, error: &Error) -> Resp {
+    Response::builder()
+        .status(status)
+        .body(full_body(error.to_string().into_bytes()))
+        .unwrap()
+}
+
+fn error_status(error: &Error) -> StatusCode {
+    match error {
+        Error::CannotDecrypt => StatusCode::UNPROCESSABLE_ENTITY,
+        Error::DescriptorMustHaveWildcard
+        | Error::AddressPageRequiresSingleAddress
+        | Error::UtxoOnlyHistoryTooLarge
+        | Error::DescriptorNotScanned => StatusCode::BAD_REQUEST,
+        Error::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+        Error::BodyReadTimeout => StatusCode::REQUEST_TIMEOUT,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+async fn handle_single_address(state: &Arc<State>, address: &be::Address) -> Result<Resp, Error> {
     #[derive(Serialize)]
     struct EsploraTx {
         txid: crate::be::Txid,
@@ -609,7 +638,7 @@ async fn handle_waterfalls_req(
     with_tip: WithTip,
     cbor: bool,
     network: Network,
-) -> Result<Response<Full<Bytes>>, Error> {
+) -> Result<Resp, Error> {
     let db = &state.store;
     let start = Instant::now();
     let page = inputs.page();
@@ -810,7 +839,7 @@ async fn handle_waterfalls_req(
 async fn handle_last_used_index(
     state: &Arc<State>,
     descriptor: be::Descriptor,
-) -> Result<Response<Full<Bytes>>, Error> {
+) -> Result<Resp, Error> {
     let db = &state.store;
     let start = Instant::now();
     let id = string_hash(&descriptor.to_string());
@@ -923,7 +952,14 @@ fn filter_utxo_only(result: &mut [Vec<TxSeen>], db: &crate::store::AnyStore) -> 
     Ok(())
 }
 
-#[allow(dead_code)]
+async fn handle_subscribe_req(
+    state: &Arc<State>,
+    descriptor: be::Descriptor,
+) -> Result<Resp, Error> {
+    let (id, receiver) = subscribe_descriptor(state, descriptor).await?;
+    sse_resp(state.clone(), id, receiver)
+}
+
 async fn subscribe_descriptor(
     state: &Arc<State>,
     descriptor: be::Descriptor,
@@ -947,6 +983,64 @@ async fn subscribe_descriptor(
         .subscribe_scripts(scripts)
         .await
         .map_err(|e| Error::String(format!("{e:?}")))
+}
+
+fn sse_resp(
+    state: Arc<State>,
+    id: SubscriptionId,
+    receiver: SubscriptionReceiver,
+) -> Result<Resp, Error> {
+    let cleanup = SubscriptionCleanup { state, id };
+    let ready = stream::once(async {
+        Ok::<Frame<Bytes>, Infallible>(Frame::data(Bytes::from_static(b": ready\n\n")))
+    });
+    let events = stream::unfold((receiver, cleanup), |(mut receiver, cleanup)| async move {
+        receiver.recv().await.map(|event| {
+            (
+                Ok::<Frame<Bytes>, Infallible>(Frame::data(Bytes::from(sse_event(event)))),
+                (receiver, cleanup),
+            )
+        })
+    });
+    let body = BodyExt::boxed(StreamBody::new(ready.chain(events)));
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "text/event-stream")
+        .header(CACHE_CONTROL, "no-cache")
+        .header("X-Accel-Buffering", "no")
+        .body(body)
+        .map_err(|_| Error::Other)
+}
+
+struct SubscriptionCleanup {
+    state: Arc<State>,
+    id: SubscriptionId,
+}
+
+impl Drop for SubscriptionCleanup {
+    fn drop(&mut self) {
+        let state = self.state.clone();
+        let id = self.id;
+        tokio::spawn(async move {
+            state.unsubscribe(id).await;
+        });
+    }
+}
+
+fn sse_event(event: SubscriptionEvent) -> String {
+    format!(
+        "event: changed\ndata: {{\"reason\":\"{}\"}}\n\n",
+        subscription_event_reason(event)
+    )
+}
+
+fn subscription_event_reason(event: SubscriptionEvent) -> &'static str {
+    match event {
+        SubscriptionEvent::Block => "block",
+        SubscriptionEvent::Mempool => "mempool",
+        SubscriptionEvent::Reorg => "reorg",
+    }
 }
 
 fn subscription_watch_count(max_derived_index: u32) -> Result<u32, Error> {
@@ -1067,53 +1161,10 @@ pub async fn infallible_route(
     req: Request<Incoming>,
     network: Network,
     add_cors: bool,
-) -> Result<Response<Full<Bytes>>, hyper::Error> {
+) -> Result<Resp, hyper::Error> {
     let mut response = match route(state, client, req, network).await {
         Ok(r) => r,
-        Err(e) => {
-            if matches!(e, Error::CannotDecrypt) {
-                Response::builder()
-                    .status(StatusCode::UNPROCESSABLE_ENTITY)
-                    .body(Full::new(e.to_string().into()))
-                    .unwrap()
-            } else if matches!(e, Error::DescriptorMustHaveWildcard) {
-                Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(Full::new(e.to_string().into()))
-                    .unwrap()
-            } else if matches!(e, Error::AddressPageRequiresSingleAddress) {
-                Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(Full::new(e.to_string().into()))
-                    .unwrap()
-            } else if matches!(e, Error::UtxoOnlyHistoryTooLarge) {
-                Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(Full::new(e.to_string().into()))
-                    .unwrap()
-            } else if matches!(e, Error::DescriptorNotScanned) {
-                Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(Full::new(e.to_string().into()))
-                    .unwrap()
-            } else if matches!(e, Error::BodyTooLarge) {
-                Response::builder()
-                    .status(StatusCode::PAYLOAD_TOO_LARGE)
-                    .body(Full::new(e.to_string().into()))
-                    .unwrap()
-            } else if matches!(e, Error::BodyReadTimeout) {
-                Response::builder()
-                    .status(StatusCode::REQUEST_TIMEOUT)
-                    .body(Full::new(e.to_string().into()))
-                    .unwrap()
-            } else {
-                // TODO map many errors to specific status codes
-                Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Full::new(e.to_string().into()))
-                    .unwrap()
-            }
-        }
+        Err(e) => error_resp(error_status(&e), &e),
     };
 
     // Add CORS headers if enabled
@@ -1335,6 +1386,22 @@ mod tests {
         );
         assert!(subscription_watch_count(u32::MAX).is_err());
         assert!(subscription_watch_count(u32::MAX - GAP_LIMIT).is_err());
+    }
+
+    #[test]
+    fn test_sse_event() {
+        assert_eq!(
+            sse_event(SubscriptionEvent::Block),
+            "event: changed\ndata: {\"reason\":\"block\"}\n\n"
+        );
+        assert_eq!(
+            sse_event(SubscriptionEvent::Mempool),
+            "event: changed\ndata: {\"reason\":\"mempool\"}\n\n"
+        );
+        assert_eq!(
+            sse_event(SubscriptionEvent::Reorg),
+            "event: changed\ndata: {\"reason\":\"reorg\"}\n\n"
+        );
     }
 
     #[test]

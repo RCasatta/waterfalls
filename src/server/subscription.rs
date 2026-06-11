@@ -14,10 +14,8 @@ pub(crate) enum SubscriptionEvent {
     Reorg,
 }
 
-#[allow(dead_code)]
 pub(crate) type SubscriptionReceiver = mpsc::Receiver<SubscriptionEvent>;
 
-#[allow(dead_code)]
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum SubscriptionError {
     Empty,
@@ -26,11 +24,8 @@ pub(crate) enum SubscriptionError {
 }
 
 pub(crate) struct Subscriptions {
-    #[allow(dead_code)]
     next_id: u64,
-    #[allow(dead_code)]
     max_active: usize,
-    #[allow(dead_code)]
     max_scripts_per_subscription: usize,
     by_id: HashMap<SubscriptionId, Subscription>,
     by_script: HashMap<ScriptHash, HashSet<SubscriptionId>>,
@@ -52,7 +47,6 @@ impl Subscriptions {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn subscribe(
         &mut self,
         scripts: Vec<ScriptHash>,
@@ -149,7 +143,6 @@ impl Subscriptions {
     }
 }
 
-#[allow(dead_code)]
 fn deduplicate(scripts: Vec<ScriptHash>) -> Vec<ScriptHash> {
     let mut seen = HashSet::new();
     scripts
