@@ -295,6 +295,58 @@ async fn integration_descriptor_has_more_contains_addresses() {
     test_env.shutdown().await;
 }
 
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn integration_subscribe_notifies_descriptor_change() {
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory(Family::Bitcoin).await;
+    let single_bitcoin_desc =
+        "wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/0/*)";
+
+    let result = test_env
+        .client()
+        .waterfalls_v2(single_bitcoin_desc)
+        .await
+        .unwrap()
+        .0;
+    assert!(result.is_empty());
+
+    let response = test_env
+        .client()
+        .subscribe(single_bitcoin_desc)
+        .await
+        .unwrap();
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .unwrap(),
+        "text/event-stream"
+    );
+    let mut response = response;
+
+    let desc = be::bitcoin_descriptor(single_bitcoin_desc).unwrap();
+    let addr = desc
+        .bitcoin()
+        .unwrap()
+        .at_derivation_index(21)
+        .unwrap()
+        .address(bitcoin::Network::Regtest)
+        .unwrap();
+    let addr = be::Address::Bitcoin(addr);
+
+    test_env.send_to(&addr, 10_000);
+
+    let event = wait_sse_changed_event(&mut response).await;
+    assert!(
+        event.contains("\"reason\":\"mempool\"") || event.contains("\"reason\":\"block\""),
+        "unexpected SSE event: {event}"
+    );
+
+    test_env.shutdown().await;
+}
+
 #[cfg(all(feature = "test_env", feature = "db"))]
 #[tokio::test]
 async fn integration_db_elements() {
@@ -332,6 +384,22 @@ async fn launch_memory(family: Family) -> waterfalls::test_env::TestEnv {
 async fn launch_memory() -> waterfalls::test_env::TestEnv<'static> {
     let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
     waterfalls::test_env::launch(exe).await
+}
+
+#[cfg(feature = "test_env")]
+async fn wait_sse_changed_event(response: &mut reqwest::Response) -> String {
+    timeout(Duration::from_secs(10), async {
+        let mut received = String::new();
+        while let Some(chunk) = response.chunk().await.unwrap() {
+            received.push_str(std::str::from_utf8(chunk.as_ref()).unwrap());
+            if received.contains("event: changed") {
+                return received;
+            }
+        }
+        panic!("SSE stream ended before changed event, received: {received}");
+    })
+    .await
+    .expect("timed out waiting for SSE changed event")
 }
 
 #[cfg(feature = "test_env")]

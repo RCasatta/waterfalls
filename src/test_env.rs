@@ -631,6 +631,25 @@ impl WaterfallClient {
         Ok(serde_json::from_str(&body)?)
     }
 
+    pub async fn subscribe(&self, desc: &str) -> anyhow::Result<reqwest::Response> {
+        let url = format!("{}/v1/subscribe", self.base_url);
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&[("descriptor", desc)])
+            .send()
+            .await?;
+
+        let status = response.status().as_u16();
+        if status != 200 {
+            let body = response.text().await?;
+            bail!("subscribe response is not 200 but: {status} body is: {body}");
+        }
+
+        Ok(response)
+    }
+
     pub async fn wait_waterfalls_non_empty(
         &self,
         bitcoin_desc: &str,
