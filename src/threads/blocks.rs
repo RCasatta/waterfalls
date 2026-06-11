@@ -1,7 +1,7 @@
 use crate::{
     be::Family,
     fetch::{ChainStatus, Client},
-    server::{Error, State},
+    server::{Error, State, SubscriptionEvent},
     store::{BlockMeta, Store},
     OutPoint, TxSeen, V,
 };
@@ -78,6 +78,9 @@ async fn get_next_block_to_index(
                     );
                     *last_indexed = Some(previous_block_meta);
                     state.store.reorg(reorged_height);
+                    state
+                        .notify_all_subscriptions(SubscriptionEvent::Reorg)
+                        .await;
                     log::info!(
                         "reorg: store.reorg() completed, will re-fetch block at height {}",
                         reorged_height
@@ -255,8 +258,12 @@ pub async fn index(
             }
         }
         state.set_hash_ts(&block_to_index).await;
+        let changed_script_hashes = history_map.keys().copied().collect::<Vec<_>>();
         db.update(&block_to_index, utxo_spent, history_map, utxo_created)
             .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
+        state
+            .notify_subscription_scripts(SubscriptionEvent::Block, changed_script_hashes)
+            .await;
 
         crate::BLOCKCHAIN_TIP.set(block_to_index.height as i64);
         last_indexed = Some(block_to_index);

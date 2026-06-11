@@ -30,9 +30,11 @@ pub mod preload;
 pub mod route;
 pub mod sign;
 mod state;
+mod subscription;
 
 pub use mempool::Mempool;
 pub use state::State;
+pub(crate) use subscription::SubscriptionEvent;
 
 const DEFAULT_MAX_TXS_SEEN: usize = 100;
 const PERIODIC_LOGGING_INTERVAL: Duration = Duration::from_secs(300);

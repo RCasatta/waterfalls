@@ -2,7 +2,7 @@ use crate::{
     be::Family,
     cache_counter,
     fetch::Client,
-    server::{Error, State},
+    server::{Error, State, SubscriptionEvent},
     store::Store,
 };
 use std::{
@@ -107,9 +107,9 @@ async fn sync_mempool_once(
                 .iter()
                 .filter_map(|txid| mempool_cache.get(txid).map(|tx| (*txid, tx)))
                 .collect();
-            {
+            let changed_script_hashes = {
                 let mut m = state.mempool.lock().await;
-                m.update(db, &removed, &txs);
+                let changed_script_hashes = m.update(db, &removed, &txs);
                 mempool_txids.clear();
                 mempool_txids.extend(m.txids_iter());
                 if is_big_delta {
@@ -123,7 +123,11 @@ async fn sync_mempool_once(
                         txs.len(),
                     );
                 }
-            }
+                changed_script_hashes
+            };
+            state
+                .notify_subscription_scripts(SubscriptionEvent::Mempool, changed_script_hashes)
+                .await;
             mempool_cache.clear();
             let processing_time = start.elapsed();
             if is_big_delta {

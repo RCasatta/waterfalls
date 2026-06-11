@@ -5,9 +5,13 @@ use std::{
 };
 
 use crate::{
-    server::{derivation_cache::DerivationCache, Mempool},
+    server::{
+        derivation_cache::DerivationCache,
+        subscription::{SubscriptionEvent, Subscriptions},
+        Mempool,
+    },
     store::{AnyStore, BlockMeta},
-    Timestamp,
+    ScriptHash, Timestamp,
 };
 use age::x25519::Identity;
 use bitcoin::{key::Secp256k1, secp256k1::All, PrivateKey};
@@ -18,6 +22,8 @@ use super::{sign::p2pkh, Error};
 
 const DESCRIPTOR_METRICS_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
 const DESCRIPTOR_METRICS_PRUNE_INTERVAL: Duration = Duration::from_secs(60 * 60);
+const MAX_ACTIVE_SUBSCRIPTIONS: usize = 10_000;
+const MAX_SCRIPTS_PER_SUBSCRIPTION: usize = 5_000;
 
 pub struct State {
     /// An asymmetric encryption key, the public key is used to optionally encrypt the descriptor field so that it's harder to leak it.
@@ -44,6 +50,7 @@ pub struct State {
 
     descriptor_metrics: Mutex<DescriptorMetrics>,
     descriptor_max_derived_index: Mutex<HashMap<u64, u32>>,
+    subscriptions: Mutex<Subscriptions>,
 }
 
 impl State {
@@ -71,6 +78,10 @@ impl State {
             cached_fee_estimates: RwLock::new((HashMap::new(), None)),
             descriptor_metrics: Mutex::new(DescriptorMetrics::new()),
             descriptor_max_derived_index: Mutex::new(HashMap::new()),
+            subscriptions: Mutex::new(Subscriptions::new(
+                MAX_ACTIVE_SUBSCRIPTIONS,
+                MAX_SCRIPTS_PER_SUBSCRIPTION,
+            )),
         })
     }
 
@@ -141,6 +152,24 @@ impl State {
         crate::set_descriptor_max_derived_index_buckets(
             descriptor_max_derived_index.values().copied(),
         );
+    }
+
+    pub(crate) async fn notify_subscription_scripts<I>(
+        &self,
+        event: SubscriptionEvent,
+        scripts: I,
+    ) -> usize
+    where
+        I: IntoIterator<Item = ScriptHash>,
+    {
+        self.subscriptions
+            .lock()
+            .await
+            .notify_scripts(event, scripts)
+    }
+
+    pub(crate) async fn notify_all_subscriptions(&self, event: SubscriptionEvent) -> usize {
+        self.subscriptions.lock().await.notify_all(event)
     }
 }
 

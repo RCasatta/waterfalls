@@ -39,15 +39,18 @@ impl Mempool {
         db: &AnyStore,
         removed_txids: &[crate::be::Txid],
         txs: &[(crate::be::Txid, &be::MempoolTx)],
-    ) {
-        self.remove(removed_txids);
-        self.add(db, txs);
+    ) -> HashSet<ScriptHash> {
+        let mut changed = self.remove(removed_txids);
+        changed.extend(self.add(db, txs));
+        changed
     }
 
-    fn remove(&mut self, txids: &[crate::be::Txid]) {
+    fn remove(&mut self, txids: &[crate::be::Txid]) -> HashSet<ScriptHash> {
+        let mut changed = HashSet::new();
         for txid in txids {
             if let Some(hashes) = self.txid_hashes.remove(txid) {
                 for hash in hashes {
+                    changed.insert(hash);
                     if let Some(txid_positions) = self.hash_txids.get_mut(&hash) {
                         txid_positions.retain(|(tx, _)| tx != txid);
                         if txid_positions.is_empty() {
@@ -59,9 +62,14 @@ impl Mempool {
         }
         self.outpoints_created
             .retain(|k, _| !txids.contains(&k.txid.into()));
+        changed
     }
 
-    fn add(&mut self, db: &AnyStore, txs: &[(crate::be::Txid, &be::MempoolTx)]) {
+    fn add(
+        &mut self,
+        db: &AnyStore,
+        txs: &[(crate::be::Txid, &be::MempoolTx)],
+    ) -> HashSet<ScriptHash> {
         // update the unconfirmed utxo set
         let outputs_created = txs.iter().flat_map(|(txid, tx)| {
             tx.output_script_hashes_iter()
@@ -118,7 +126,9 @@ impl Mempool {
             }
         }
 
+        let mut changed = HashSet::new();
         for (k, v) in txid_hashes {
+            changed.extend(v.iter().copied());
             self.txid_hashes.entry(k).or_default().extend(&v);
         }
 
@@ -131,6 +141,8 @@ impl Mempool {
                     .push((txid, position));
             }
         }
+
+        changed
     }
 
     pub fn append_seen(&self, script_hashes: &[ScriptHash], out: &mut [Vec<TxSeen>]) {
