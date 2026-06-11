@@ -297,48 +297,50 @@ async fn integration_descriptor_has_more_contains_addresses() {
 
 #[cfg(feature = "test_env")]
 #[tokio::test]
-async fn integration_subscribe_notifies_descriptor_change() {
+async fn integration_subscribe_notifies_descriptor_change_bitcoin() {
     let _ = env_logger::try_init();
 
     let test_env = launch_memory(Family::Bitcoin).await;
-    let single_bitcoin_desc =
-        "wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/0/*)";
+    do_test_subscribe_notifies_descriptor_change(test_env).await;
+}
 
-    let err = test_env
-        .client()
-        .subscribe(single_bitcoin_desc)
-        .await
-        .unwrap_err();
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn integration_subscribe_notifies_descriptor_change_liquid() {
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory(Family::Elements).await;
+    do_test_subscribe_notifies_descriptor_change(test_env).await;
+}
+
+#[cfg(feature = "test_env")]
+async fn do_test_subscribe_notifies_descriptor_change(test_env: waterfalls::test_env::TestEnv) {
+    let tpub = "tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M";
+    let prefix = match test_env.family {
+        Family::Bitcoin => "",
+        Family::Elements => "el",
+    };
+    let single_desc = format!("{prefix}wpkh({tpub}/0/*)");
+
+    let err = test_env.client().subscribe(&single_desc).await.unwrap_err();
     assert_eq!(
         format!("{err:?}"),
         "subscribe response is not 200 but: 400 body is: DescriptorNotScanned"
     );
 
-    let desc = be::bitcoin_descriptor(single_bitcoin_desc).unwrap();
-    let addr_0 = desc
-        .bitcoin()
-        .unwrap()
-        .at_derivation_index(0)
-        .unwrap()
-        .address(bitcoin::Network::Regtest)
-        .unwrap();
-    let addr_0 = be::Address::Bitcoin(addr_0);
+    let addr_0 = subscription_test_address(test_env.family, &single_desc, 0);
     test_env.send_to(&addr_0, 10_000);
     test_env.node_generate(1).await;
 
     let result = test_env
         .client()
-        .waterfalls_v2(single_bitcoin_desc)
+        .waterfalls_v2(&single_desc)
         .await
         .unwrap()
         .0;
     assert!(!result.is_empty());
 
-    let response = test_env
-        .client()
-        .subscribe(single_bitcoin_desc)
-        .await
-        .unwrap();
+    let response = test_env.client().subscribe(&single_desc).await.unwrap();
     assert_eq!(
         response
             .headers()
@@ -348,15 +350,7 @@ async fn integration_subscribe_notifies_descriptor_change() {
     );
     let mut response = response;
 
-    let addr = desc
-        .bitcoin()
-        .unwrap()
-        .at_derivation_index(20)
-        .unwrap()
-        .address(bitcoin::Network::Regtest)
-        .unwrap();
-    let addr = be::Address::Bitcoin(addr);
-
+    let addr = subscription_test_address(test_env.family, &single_desc, 20);
     test_env.send_to(&addr, 10_000);
 
     let event = wait_sse_changed_event(&mut response).await;
@@ -366,6 +360,39 @@ async fn integration_subscribe_notifies_descriptor_change() {
     );
 
     test_env.shutdown().await;
+}
+
+#[cfg(feature = "test_env")]
+fn subscription_test_address(family: Family, descriptor: &str, index: u32) -> be::Address {
+    match family {
+        Family::Bitcoin => {
+            let desc = be::bitcoin_descriptor(descriptor).unwrap();
+            let addr = desc
+                .bitcoin()
+                .unwrap()
+                .at_derivation_index(index)
+                .unwrap()
+                .address(bitcoin::Network::Regtest)
+                .unwrap();
+            be::Address::Bitcoin(addr)
+        }
+        Family::Elements => {
+            use elements_miniscript::{ConfidentialDescriptor, DescriptorPublicKey};
+            use std::str::FromStr;
+
+            let blinding =
+                "slip77(9c8e4f05c7711a98c838be228bcb84924d4570ca53f35fa1c793e58841d47023)";
+            let desc_str = format!("ct({blinding},{descriptor})");
+            let desc = ConfidentialDescriptor::<DescriptorPublicKey>::from_str(&desc_str).unwrap();
+            let secp = elements::bitcoin::secp256k1::Secp256k1::new();
+            let addr = desc
+                .at_derivation_index(index)
+                .unwrap()
+                .address(&secp, &AddressParams::ELEMENTS)
+                .unwrap();
+            be::Address::Elements(addr)
+        }
+    }
 }
 
 #[cfg(all(feature = "test_env", feature = "db"))]
