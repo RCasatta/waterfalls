@@ -304,13 +304,25 @@ async fn integration_subscribe_notifies_descriptor_change() {
     let single_bitcoin_desc =
         "wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/0/*)";
 
+    let desc = be::bitcoin_descriptor(single_bitcoin_desc).unwrap();
+    let addr_0 = desc
+        .bitcoin()
+        .unwrap()
+        .at_derivation_index(0)
+        .unwrap()
+        .address(bitcoin::Network::Regtest)
+        .unwrap();
+    let addr_0 = be::Address::Bitcoin(addr_0);
+    test_env.send_to(&addr_0, 10_000);
+    test_env.node_generate(1).await;
+
     let result = test_env
         .client()
         .waterfalls_v2(single_bitcoin_desc)
         .await
         .unwrap()
         .0;
-    assert!(result.is_empty());
+    assert!(!result.is_empty());
 
     let response = test_env
         .client()
@@ -326,11 +338,10 @@ async fn integration_subscribe_notifies_descriptor_change() {
     );
     let mut response = response;
 
-    let desc = be::bitcoin_descriptor(single_bitcoin_desc).unwrap();
     let addr = desc
         .bitcoin()
         .unwrap()
-        .at_derivation_index(21)
+        .at_derivation_index(20)
         .unwrap()
         .address(bitcoin::Network::Regtest)
         .unwrap();

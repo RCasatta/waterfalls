@@ -590,14 +590,13 @@ async fn periodic_logging(state: Arc<State>, shutdown_signal: impl Future<Output
 }
 
 async fn log_periodic_state(state: &State) {
-    let descriptor_max_derived_index = state.descriptor_max_derived_index_snapshot().await;
-    if !descriptor_max_derived_index.is_empty() {
-        let descriptor_max_derived_index: std::collections::BTreeMap<_, _> =
-            descriptor_max_derived_index
-                .into_iter()
-                .map(|(id, index)| (format!("{id:x}"), index))
-                .collect();
-        log::info!("descriptor max derived indexes: {descriptor_max_derived_index:?}");
+    let descriptor_max_used_index = state.descriptor_max_used_index_snapshot().await;
+    if !descriptor_max_used_index.is_empty() {
+        let descriptor_max_used_index: std::collections::BTreeMap<_, _> = descriptor_max_used_index
+            .into_iter()
+            .map(|(id, index)| (format!("{id:x}"), index))
+            .collect();
+        log::info!("descriptor max used indexes: {descriptor_max_used_index:?}");
     }
 }
 

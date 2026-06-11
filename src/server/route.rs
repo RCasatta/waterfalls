@@ -232,7 +232,7 @@ pub async fn route(
         (&Method::GET, "/metrics", None) => {
             let encoder = prometheus::TextEncoder::new();
 
-            state.update_descriptor_max_derived_index_metrics().await;
+            state.update_descriptor_max_used_index_metrics().await;
             let metric_families = prometheus::gather();
             let mut buffer = vec![];
             encoder
@@ -675,16 +675,15 @@ async fn handle_waterfalls_req(
                     let batch_start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
                     let (scripts, batch_derivations_duration) =
                         derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
-                    let max_derived_index = batch_start + scripts.len() as u32 - 1;
-                    state
-                        .record_descriptor_max_derived_index(
-                            single_descriptor_id,
-                            max_derived_index,
-                        )
-                        .await;
                     derivations_duration += batch_derivations_duration;
 
                     let find_result = find_scripts(state, db, &mut result, scripts, 0, true).await;
+                    let max_used_index = find_result
+                        .max_used_offset
+                        .map(|offset| batch_start + offset);
+                    state
+                        .record_descriptor_scan_max_used_index(single_descriptor_id, max_used_index)
+                        .await;
                     if utxo_only && find_result.has_more.iter().any(|has_more| *has_more) {
                         return Err(Error::UtxoOnlyHistoryTooLarge);
                     }
@@ -967,11 +966,11 @@ async fn subscribe_descriptor(
     let mut scripts = Vec::new();
     for desc in descriptor.into_single_descriptors().unwrap().iter() {
         let single_descriptor_id = string_hash(&desc.to_string());
-        let max_derived_index = state
-            .descriptor_max_derived_index(single_descriptor_id)
+        let max_used_index = state
+            .descriptor_max_used_index(single_descriptor_id)
             .await
             .ok_or(Error::DescriptorNotScanned)?;
-        let watch_count = subscription_watch_count(max_derived_index)?;
+        let watch_count = subscription_watch_count(max_used_index)?;
         scripts.extend(
             derive_script_hashes_batch(state, desc, 0, watch_count)
                 .await
@@ -1043,11 +1042,14 @@ fn subscription_event_reason(event: SubscriptionEvent) -> &'static str {
     }
 }
 
-fn subscription_watch_count(max_derived_index: u32) -> Result<u32, Error> {
-    max_derived_index
-        .checked_add(GAP_LIMIT)
-        .and_then(|max_watch_index| max_watch_index.checked_add(1))
-        .ok_or_else(|| Error::String("subscription derivation range overflow".to_string()))
+fn subscription_watch_count(max_used_index: Option<u32>) -> Result<u32, Error> {
+    match max_used_index {
+        Some(max_used_index) => max_used_index
+            .checked_add(GAP_LIMIT)
+            .and_then(|max_watch_index| max_watch_index.checked_add(1))
+            .ok_or_else(|| Error::String("subscription derivation range overflow".to_string())),
+        None => Ok(GAP_LIMIT),
+    }
 }
 
 async fn find_scripts(
@@ -1071,9 +1073,24 @@ async fn find_scripts(
             .await
             .append_seen(&scripts, &mut seen_blockchain);
     }
+    let max_used_offset = seen_blockchain
+        .iter()
+        .enumerate()
+        .filter_map(|(index, txs_seen)| {
+            if txs_seen.is_empty() {
+                None
+            } else {
+                Some(index as u32)
+            }
+        })
+        .max();
     let is_last = seen_blockchain.iter().all(|e| e.is_empty());
     result.extend(seen_blockchain);
-    FindScriptsResult { is_last, has_more }
+    FindScriptsResult {
+        is_last,
+        has_more,
+        max_used_offset,
+    }
 }
 
 fn truncate_history_page(
@@ -1099,6 +1116,7 @@ fn truncate_history_page(
 struct FindScriptsResult {
     is_last: bool,
     has_more: Vec<bool>,
+    max_used_offset: Option<u32>,
 }
 
 fn calculate_script_pubkey_with_timing(
@@ -1379,13 +1397,14 @@ mod tests {
 
     #[test]
     fn test_subscription_watch_count() {
-        assert_eq!(subscription_watch_count(0).unwrap(), GAP_LIMIT + 1);
+        assert_eq!(subscription_watch_count(None).unwrap(), GAP_LIMIT);
+        assert_eq!(subscription_watch_count(Some(0)).unwrap(), GAP_LIMIT + 1);
         assert_eq!(
-            subscription_watch_count(GAP_LIMIT).unwrap(),
+            subscription_watch_count(Some(GAP_LIMIT)).unwrap(),
             GAP_LIMIT * 2 + 1
         );
-        assert!(subscription_watch_count(u32::MAX).is_err());
-        assert!(subscription_watch_count(u32::MAX - GAP_LIMIT).is_err());
+        assert!(subscription_watch_count(Some(u32::MAX)).is_err());
+        assert!(subscription_watch_count(Some(u32::MAX - GAP_LIMIT)).is_err());
     }
 
     #[test]

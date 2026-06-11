@@ -52,7 +52,7 @@ pub struct State {
     pub cached_fee_estimates: RwLock<(HashMap<u16, f64>, Option<Instant>)>,
 
     descriptor_metrics: Mutex<DescriptorMetrics>,
-    descriptor_max_derived_index: Mutex<HashMap<u64, u32>>,
+    descriptor_max_used_index: Mutex<HashMap<u64, Option<u32>>>,
     subscriptions: Mutex<Subscriptions>,
 }
 
@@ -80,7 +80,7 @@ impl State {
             derivation_cache: Mutex::new(DerivationCache::new(derivation_cache_capacity)),
             cached_fee_estimates: RwLock::new((HashMap::new(), None)),
             descriptor_metrics: Mutex::new(DescriptorMetrics::new()),
-            descriptor_max_derived_index: Mutex::new(HashMap::new()),
+            descriptor_max_used_index: Mutex::new(HashMap::new()),
             subscriptions: Mutex::new(Subscriptions::new(
                 MAX_ACTIVE_SUBSCRIPTIONS,
                 MAX_SCRIPTS_PER_SUBSCRIPTION,
@@ -136,21 +136,21 @@ impl State {
         crate::set_unique_descriptors(descriptor_metrics.unique_count());
     }
 
-    pub async fn record_descriptor_max_derived_index(&self, id: u64, index: u32) {
-        let mut descriptor_max_derived_index = self.descriptor_max_derived_index.lock().await;
-        record_descriptor_max_derived_index(&mut descriptor_max_derived_index, id, index);
+    pub async fn record_descriptor_scan_max_used_index(&self, id: u64, index: Option<u32>) {
+        let mut descriptor_max_used_index = self.descriptor_max_used_index.lock().await;
+        record_descriptor_scan_max_used_index(&mut descriptor_max_used_index, id, index);
     }
 
-    pub(crate) async fn descriptor_max_derived_index(&self, id: u64) -> Option<u32> {
-        self.descriptor_max_derived_index
+    pub(crate) async fn descriptor_max_used_index(&self, id: u64) -> Option<Option<u32>> {
+        self.descriptor_max_used_index
             .lock()
             .await
             .get(&id)
             .copied()
     }
 
-    pub async fn descriptor_max_derived_index_snapshot(&self) -> BTreeMap<u64, u32> {
-        self.descriptor_max_derived_index
+    pub async fn descriptor_max_used_index_snapshot(&self) -> BTreeMap<u64, Option<u32>> {
+        self.descriptor_max_used_index
             .lock()
             .await
             .iter()
@@ -158,10 +158,12 @@ impl State {
             .collect()
     }
 
-    pub async fn update_descriptor_max_derived_index_metrics(&self) {
-        let descriptor_max_derived_index = self.descriptor_max_derived_index.lock().await;
-        crate::set_descriptor_max_derived_index_buckets(
-            descriptor_max_derived_index.values().copied(),
+    pub async fn update_descriptor_max_used_index_metrics(&self) {
+        let descriptor_max_used_index = self.descriptor_max_used_index.lock().await;
+        crate::set_descriptor_max_used_index_buckets(
+            descriptor_max_used_index
+                .values()
+                .filter_map(|index| *index),
         );
     }
 
@@ -195,14 +197,18 @@ impl State {
     }
 }
 
-fn record_descriptor_max_derived_index(
-    descriptor_max_derived_index: &mut HashMap<u64, u32>,
+fn record_descriptor_scan_max_used_index(
+    descriptor_max_used_index: &mut HashMap<u64, Option<u32>>,
     id: u64,
-    index: u32,
+    index: Option<u32>,
 ) {
-    descriptor_max_derived_index
+    descriptor_max_used_index
         .entry(id)
-        .and_modify(|max_index| *max_index = (*max_index).max(index))
+        .and_modify(|max_index| {
+            if let Some(index) = index {
+                *max_index = Some(max_index.map_or(index, |max_index| max_index.max(index)));
+            }
+        })
         .or_insert(index);
 }
 
@@ -352,15 +358,18 @@ mod tests {
     }
 
     #[test]
-    fn test_record_descriptor_max_derived_index() {
-        let mut descriptor_max_derived_index = HashMap::new();
+    fn test_record_descriptor_scan_max_used_index() {
+        let mut descriptor_max_used_index = HashMap::new();
 
-        record_descriptor_max_derived_index(&mut descriptor_max_derived_index, 1, 20);
-        record_descriptor_max_derived_index(&mut descriptor_max_derived_index, 1, 10);
-        record_descriptor_max_derived_index(&mut descriptor_max_derived_index, 1, 40);
-        record_descriptor_max_derived_index(&mut descriptor_max_derived_index, 2, 30);
+        record_descriptor_scan_max_used_index(&mut descriptor_max_used_index, 1, Some(20));
+        record_descriptor_scan_max_used_index(&mut descriptor_max_used_index, 1, Some(10));
+        record_descriptor_scan_max_used_index(&mut descriptor_max_used_index, 1, None);
+        record_descriptor_scan_max_used_index(&mut descriptor_max_used_index, 1, Some(40));
+        record_descriptor_scan_max_used_index(&mut descriptor_max_used_index, 2, None);
+        record_descriptor_scan_max_used_index(&mut descriptor_max_used_index, 3, Some(30));
 
-        assert_eq!(descriptor_max_derived_index.get(&1), Some(&40));
-        assert_eq!(descriptor_max_derived_index.get(&2), Some(&30));
+        assert_eq!(descriptor_max_used_index.get(&1), Some(&Some(40)));
+        assert_eq!(descriptor_max_used_index.get(&2), Some(&None));
+        assert_eq!(descriptor_max_used_index.get(&3), Some(&Some(30)));
     }
 }
