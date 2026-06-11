@@ -20,13 +20,19 @@ pub(crate) enum SubscriptionEvent {
     Reorg,
 }
 
-impl std::fmt::Display for SubscriptionEvent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
+impl SubscriptionEvent {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
             SubscriptionEvent::Block => "block",
             SubscriptionEvent::Mempool => "mempool",
             SubscriptionEvent::Reorg => "reorg",
-        })
+        }
+    }
+}
+
+impl std::fmt::Display for SubscriptionEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -153,13 +159,18 @@ impl Subscriptions {
             match subscription.sender.try_send(event) {
                 Ok(()) => {
                     sent += 1;
+                    crate::inc_subscription_notification_counter(event.as_str(), "queued");
                     log::info!("subscription notification queued: id={id}, event={event}");
                 }
                 Err(mpsc::error::TrySendError::Full(_)) => {
                     coalesced += 1;
+                    crate::inc_subscription_notification_counter(event.as_str(), "coalesced");
                     log::info!("subscription notification coalesced: id={id}, event={event}");
                 }
-                Err(mpsc::error::TrySendError::Closed(_)) => closed.push(id),
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    crate::inc_subscription_notification_counter(event.as_str(), "closed");
+                    closed.push(id);
+                }
             }
         }
 

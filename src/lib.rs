@@ -355,6 +355,13 @@ lazy_static! {
         &["kind"]
     )
     .unwrap();
+    static ref WATERFALLS_SUBSCRIPTION_NOTIFICATIONS_COUNTER: IntCounterVec =
+        register_int_counter_vec!(
+            "waterfalls_subscription_notifications_total",
+            "Subscription notifications by event type and delivery result.",
+            &["event", "result"]
+        )
+        .unwrap();
     pub(crate) static ref WATERFALLS_UNIQUE_DESCRIPTORS: IntGauge = register_int_gauge!(
         "waterfalls_unique_descriptors",
         "Unique descriptor IDs seen within the last 24 hours."
@@ -379,6 +386,12 @@ pub(crate) fn cache_counter(cache_name: &str, hit_miss: bool) {
 pub(crate) fn inc_connection_error_counter(kind: &str) {
     crate::WATERFALLS_CONNECTION_ERROR_COUNTER
         .with_label_values(&[kind])
+        .inc();
+}
+
+pub(crate) fn inc_subscription_notification_counter(event: &str, result: &str) {
+    crate::WATERFALLS_SUBSCRIPTION_NOTIFICATIONS_COUNTER
+        .with_label_values(&[event, result])
         .inc();
 }
 
@@ -536,9 +549,10 @@ mod tests {
     }
 
     #[test]
-    fn test_descriptor_metrics_registered() {
+    fn test_metrics_registered() {
         set_unique_descriptors(7);
         set_descriptor_max_used_index_buckets([20, 30, 40, 1001]);
+        inc_subscription_notification_counter("mempool", "queued");
 
         let metric_names = prometheus::gather()
             .into_iter()
@@ -549,6 +563,7 @@ mod tests {
         assert!(
             metric_names.contains(&"waterfalls_descriptor_max_used_index_descriptors".to_string())
         );
+        assert!(metric_names.contains(&"waterfalls_subscription_notifications_total".to_string()));
     }
 
     #[test]

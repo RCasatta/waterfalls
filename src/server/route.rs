@@ -995,6 +995,7 @@ fn sse_resp(
     });
     let events = stream::unfold((receiver, cleanup), |(mut receiver, cleanup)| async move {
         receiver.recv().await.map(|event| {
+            crate::inc_subscription_notification_counter(event.as_str(), "sent");
             log::info!(
                 "subscription notification sent: id={}, event={event}",
                 cleanup.id
