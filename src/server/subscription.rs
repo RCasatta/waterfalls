@@ -7,11 +7,27 @@ use crate::ScriptHash;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct SubscriptionId(u64);
 
+impl std::fmt::Display for SubscriptionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SubscriptionEvent {
     Block,
     Mempool,
     Reorg,
+}
+
+impl std::fmt::Display for SubscriptionEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            SubscriptionEvent::Block => "block",
+            SubscriptionEvent::Mempool => "mempool",
+            SubscriptionEvent::Reorg => "reorg",
+        })
+    }
 }
 
 pub(crate) type SubscriptionReceiver = mpsc::Receiver<SubscriptionEvent>;
@@ -70,7 +86,12 @@ impl Subscriptions {
         for script in scripts.iter().copied() {
             self.by_script.entry(script).or_default().insert(id);
         }
+        let scripts_len = scripts.len();
         self.by_id.insert(id, Subscription { scripts, sender });
+        log::info!(
+            "subscription registered: id={id}, scripts={scripts_len}, active={}",
+            self.by_id.len()
+        );
 
         Ok((id, receiver))
     }
@@ -80,6 +101,7 @@ impl Subscriptions {
             return false;
         };
 
+        let scripts_len = subscription.scripts.len();
         for script in subscription.scripts {
             if let Some(ids) = self.by_script.get_mut(&script) {
                 ids.remove(&id);
@@ -88,6 +110,10 @@ impl Subscriptions {
                 }
             }
         }
+        log::info!(
+            "subscription closed: id={id}, scripts={scripts_len}, active={}",
+            self.by_id.len()
+        );
 
         true
     }
@@ -117,6 +143,7 @@ impl Subscriptions {
         subscriptions: HashSet<SubscriptionId>,
     ) -> usize {
         let mut sent = 0;
+        let mut coalesced = 0;
         let mut closed = Vec::new();
 
         for id in subscriptions {
@@ -124,10 +151,23 @@ impl Subscriptions {
                 continue;
             };
             match subscription.sender.try_send(event) {
-                Ok(()) => sent += 1,
-                Err(mpsc::error::TrySendError::Full(_)) => {}
+                Ok(()) => {
+                    sent += 1;
+                    log::info!("subscription notification queued: id={id}, event={event}");
+                }
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    coalesced += 1;
+                    log::info!("subscription notification coalesced: id={id}, event={event}");
+                }
                 Err(mpsc::error::TrySendError::Closed(_)) => closed.push(id),
             }
+        }
+
+        if sent > 0 || coalesced > 0 || !closed.is_empty() {
+            log::info!(
+                "subscription notify summary: event={event}, sent={sent}, coalesced={coalesced}, closed={}",
+                closed.len()
+            );
         }
 
         for id in closed {

@@ -995,6 +995,10 @@ fn sse_resp(
     });
     let events = stream::unfold((receiver, cleanup), |(mut receiver, cleanup)| async move {
         receiver.recv().await.map(|event| {
+            log::info!(
+                "subscription notification sent: id={}, event={event}",
+                cleanup.id
+            );
             (
                 Ok::<Frame<Bytes>, Infallible>(Frame::data(Bytes::from(sse_event(event)))),
                 (receiver, cleanup),
@@ -1022,7 +1026,9 @@ impl Drop for SubscriptionCleanup {
         let state = self.state.clone();
         let id = self.id;
         tokio::spawn(async move {
-            state.unsubscribe(id).await;
+            if !state.unsubscribe(id).await {
+                log::info!("subscription close requested for unknown id={id}");
+            }
         });
     }
 }
