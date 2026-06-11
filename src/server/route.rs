@@ -641,10 +641,11 @@ async fn handle_waterfalls_req(
                     let batch_start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
                     let (scripts, batch_derivations_duration) =
                         derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
+                    let max_derived_index = batch_start + scripts.len() as u32 - 1;
                     state
                         .record_descriptor_max_derived_index(
                             single_descriptor_id,
-                            batch_start + GAP_LIMIT,
+                            max_derived_index,
                         )
                         .await;
                     derivations_duration += batch_derivations_duration;
