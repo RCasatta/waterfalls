@@ -7,7 +7,10 @@ use std::{
 use crate::{
     server::{
         derivation_cache::DerivationCache,
-        subscription::{SubscriptionEvent, Subscriptions},
+        subscription::{
+            SubscriptionError, SubscriptionEvent, SubscriptionId, SubscriptionReceiver,
+            Subscriptions,
+        },
         Mempool,
     },
     store::{AnyStore, BlockMeta},
@@ -138,6 +141,14 @@ impl State {
         record_descriptor_max_derived_index(&mut descriptor_max_derived_index, id, index);
     }
 
+    pub(crate) async fn descriptor_max_derived_index(&self, id: u64) -> Option<u32> {
+        self.descriptor_max_derived_index
+            .lock()
+            .await
+            .get(&id)
+            .copied()
+    }
+
     pub async fn descriptor_max_derived_index_snapshot(&self) -> BTreeMap<u64, u32> {
         self.descriptor_max_derived_index
             .lock()
@@ -170,6 +181,18 @@ impl State {
 
     pub(crate) async fn notify_all_subscriptions(&self, event: SubscriptionEvent) -> usize {
         self.subscriptions.lock().await.notify_all(event)
+    }
+
+    pub(crate) async fn subscribe_scripts(
+        &self,
+        scripts: Vec<ScriptHash>,
+    ) -> Result<(SubscriptionId, SubscriptionReceiver), SubscriptionError> {
+        self.subscriptions.lock().await.subscribe(scripts)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn unsubscribe(&self, id: SubscriptionId) -> bool {
+        self.subscriptions.lock().await.unsubscribe(id)
     }
 }
 

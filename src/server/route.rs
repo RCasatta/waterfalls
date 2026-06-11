@@ -26,7 +26,12 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-use super::{encryption, sign::MsgSigAddress, Network};
+use super::{
+    encryption,
+    sign::MsgSigAddress,
+    subscription::{SubscriptionId, SubscriptionReceiver},
+    Network,
+};
 
 /// Check if a string looks like it might be an age-encrypted payload
 pub fn is_likely_age_encrypted(s: &str) -> bool {
@@ -918,6 +923,39 @@ fn filter_utxo_only(result: &mut [Vec<TxSeen>], db: &crate::store::AnyStore) -> 
     Ok(())
 }
 
+#[allow(dead_code)]
+async fn subscribe_descriptor(
+    state: &Arc<State>,
+    descriptor: be::Descriptor,
+) -> Result<(SubscriptionId, SubscriptionReceiver), Error> {
+    let mut scripts = Vec::new();
+    for desc in descriptor.into_single_descriptors().unwrap().iter() {
+        let single_descriptor_id = string_hash(&desc.to_string());
+        let max_derived_index = state
+            .descriptor_max_derived_index(single_descriptor_id)
+            .await
+            .ok_or(Error::DescriptorNotScanned)?;
+        let watch_count = subscription_watch_count(max_derived_index)?;
+        scripts.extend(
+            derive_script_hashes_batch(state, desc, 0, watch_count)
+                .await
+                .0,
+        );
+    }
+
+    state
+        .subscribe_scripts(scripts)
+        .await
+        .map_err(|e| Error::String(format!("{e:?}")))
+}
+
+fn subscription_watch_count(max_derived_index: u32) -> Result<u32, Error> {
+    max_derived_index
+        .checked_add(GAP_LIMIT)
+        .and_then(|max_watch_index| max_watch_index.checked_add(1))
+        .ok_or_else(|| Error::String("subscription derivation range overflow".to_string()))
+}
+
 async fn find_scripts(
     state: &Arc<State>,
     db: &crate::store::AnyStore,
@@ -1049,6 +1087,11 @@ pub async fn infallible_route(
                     .body(Full::new(e.to_string().into()))
                     .unwrap()
             } else if matches!(e, Error::UtxoOnlyHistoryTooLarge) {
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Full::new(e.to_string().into()))
+                    .unwrap()
+            } else if matches!(e, Error::DescriptorNotScanned) {
                 Response::builder()
                     .status(StatusCode::BAD_REQUEST)
                     .body(Full::new(e.to_string().into()))
@@ -1281,6 +1324,17 @@ mod tests {
             serializer.append_pair("page", &page.to_string());
         }
         serializer.finish()
+    }
+
+    #[test]
+    fn test_subscription_watch_count() {
+        assert_eq!(subscription_watch_count(0).unwrap(), GAP_LIMIT + 1);
+        assert_eq!(
+            subscription_watch_count(GAP_LIMIT).unwrap(),
+            GAP_LIMIT * 2 + 1
+        );
+        assert!(subscription_watch_count(u32::MAX).is_err());
+        assert!(subscription_watch_count(u32::MAX - GAP_LIMIT).is_err());
     }
 
     #[test]

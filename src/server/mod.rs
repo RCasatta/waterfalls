@@ -322,6 +322,7 @@ pub enum Error {
     TooManyAddresses,
     AddressPageRequiresSingleAddress,
     DescriptorMustHaveWildcard,
+    DescriptorNotScanned,
     UtxoOnlyHistoryTooLarge,
     BodyTooLarge,
     BodyReadTimeout,
