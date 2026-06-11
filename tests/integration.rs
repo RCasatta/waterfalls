@@ -348,16 +348,19 @@ async fn do_test_subscribe_notifies_descriptor_change(test_env: waterfalls::test
             .unwrap(),
         "text/event-stream"
     );
-    let mut response = response;
+    let mut sse = SseTestReader::new(response);
 
     let addr = subscription_test_address(test_env.family, &single_desc, 20);
     test_env.send_to(&addr, 10_000);
 
-    let event = wait_sse_changed_event(&mut response).await;
+    let event = sse.next_changed_event().await;
     assert!(
-        event.contains("\"reason\":\"mempool\"") || event.contains("\"reason\":\"block\""),
+        event.contains("\"reason\":\"mempool\""),
         "unexpected SSE event: {event}"
     );
+
+    test_env.node_generate(1).await;
+    sse.wait_changed_reason("block").await;
 
     test_env.shutdown().await;
 }
@@ -435,19 +438,64 @@ async fn launch_memory() -> waterfalls::test_env::TestEnv<'static> {
 }
 
 #[cfg(feature = "test_env")]
-async fn wait_sse_changed_event(response: &mut reqwest::Response) -> String {
-    timeout(Duration::from_secs(10), async {
-        let mut received = String::new();
-        while let Some(chunk) = response.chunk().await.unwrap() {
-            received.push_str(std::str::from_utf8(chunk.as_ref()).unwrap());
-            if received.contains("event: changed") {
-                return received;
-            }
+struct SseTestReader {
+    response: reqwest::Response,
+    buffer: String,
+}
+
+#[cfg(feature = "test_env")]
+impl SseTestReader {
+    fn new(response: reqwest::Response) -> Self {
+        Self {
+            response,
+            buffer: String::new(),
         }
-        panic!("SSE stream ended before changed event, received: {received}");
-    })
-    .await
-    .expect("timed out waiting for SSE changed event")
+    }
+
+    async fn next_changed_event(&mut self) -> String {
+        timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(event) = self.pop_event() {
+                    if event.contains("event: changed") {
+                        return event;
+                    }
+                    continue;
+                }
+
+                let Some(chunk) = self.response.chunk().await.unwrap() else {
+                    panic!(
+                        "SSE stream ended before changed event, buffered: {}",
+                        self.buffer
+                    );
+                };
+                self.buffer
+                    .push_str(std::str::from_utf8(chunk.as_ref()).unwrap());
+            }
+        })
+        .await
+        .expect("timed out waiting for SSE changed event")
+    }
+
+    async fn wait_changed_reason(&mut self, reason: &str) -> String {
+        let expected = format!("\"reason\":\"{reason}\"");
+        timeout(Duration::from_secs(10), async {
+            loop {
+                let event = self.next_changed_event().await;
+                if event.contains(&expected) {
+                    return event;
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for SSE changed event reason {reason}"))
+    }
+
+    fn pop_event(&mut self) -> Option<String> {
+        let end = self.buffer.find("\n\n")?;
+        let event = self.buffer[..end + 2].to_string();
+        self.buffer.drain(..end + 2);
+        Some(event)
+    }
 }
 
 #[cfg(feature = "test_env")]
