@@ -304,6 +304,16 @@ async fn integration_subscribe_notifies_descriptor_change() {
     let single_bitcoin_desc =
         "wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/0/*)";
 
+    let err = test_env
+        .client()
+        .subscribe(single_bitcoin_desc)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        format!("{err:?}"),
+        "subscribe response is not 200 but: 400 body is: DescriptorNotScanned"
+    );
+
     let desc = be::bitcoin_descriptor(single_bitcoin_desc).unwrap();
     let addr_0 = desc
         .bitcoin()
