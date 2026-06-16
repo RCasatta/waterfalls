@@ -52,7 +52,7 @@ pub trait Store {
         utxo_spent: Vec<(u32, OutPoint, crate::be::Txid)>,
         history_map: BTreeMap<ScriptHash, Vec<TxSeen>>, // We want this sorted because when inserted in the write batch it's faster (see benches and test guaranteeing encoding order match struct ordering)
         utxo_created: BTreeMap<OutPoint, ScriptHash>, // We want this sorted because when inserted in the write batch it's faster (see benches and test guaranteeing encoding order match struct ordering)
-    ) -> Result<()>;
+    ) -> Result<Vec<ScriptHash>>;
 
     /// Reorg, reinsert the last block unspent utxos
     /// height: the height of the block that was reorged (needs to be rolled back)
@@ -109,7 +109,7 @@ impl Store for AnyStore {
         utxo_spent: Vec<(u32, OutPoint, crate::be::Txid)>,
         history_map: BTreeMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: BTreeMap<OutPoint, ScriptHash>,
-    ) -> Result<()> {
+    ) -> Result<Vec<ScriptHash>> {
         match self {
             #[cfg(feature = "db")]
             AnyStore::Db(d) => d.update(block_meta, utxo_spent, history_map, utxo_created),

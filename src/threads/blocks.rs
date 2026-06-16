@@ -258,8 +258,8 @@ pub async fn index(
             }
         }
         state.set_hash_ts(&block_to_index).await;
-        let changed_script_hashes = history_map.keys().copied().collect::<Vec<_>>();
-        db.update(&block_to_index, utxo_spent, history_map, utxo_created)
+        let changed_script_hashes = db
+            .update(&block_to_index, utxo_spent, history_map, utxo_created)
             .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
         state
             .notify_subscription_scripts(SubscriptionEvent::Block, changed_script_hashes)

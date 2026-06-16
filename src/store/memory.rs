@@ -72,7 +72,7 @@ impl Store for MemoryStore {
         utxo_spent: Vec<(u32, OutPoint, crate::be::Txid)>,
         history_map: std::collections::BTreeMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: std::collections::BTreeMap<OutPoint, ScriptHash>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Vec<ScriptHash>> {
         let mut history_map = history_map;
         let only_outpoints: Vec<_> = utxo_spent.iter().map(|e| e.1).collect();
         let script_hashes = self.remove_utxos(&only_outpoints);
@@ -89,6 +89,8 @@ impl Store for MemoryStore {
             el.push(TxSeen::new(txid, block_meta.height(), V::Vin(vin)));
         }
 
+        let changed_script_hashes = history_map.keys().copied().collect::<Vec<_>>();
+
         // TODO: handle unwraps on the lock
         self.reorg_data.lock().unwrap().insert(
             block_meta.height(),
@@ -100,7 +102,7 @@ impl Store for MemoryStore {
         );
         self.update_history(history_map);
         self.insert_utxos(&utxo_created);
-        Ok(())
+        Ok(changed_script_hashes)
     }
 
     fn reorg(&self, height: crate::Height) {
@@ -229,7 +231,7 @@ mod tests {
         let mut utxo_created = BTreeMap::new();
         utxo_created.insert(created_outpoint, recipient_script_hash);
 
-        store
+        let changed_script_hashes = store
             .update(
                 &block_meta,
                 vec![(0, source_outpoint, spending_txid)],
@@ -237,6 +239,7 @@ mod tests {
                 utxo_created,
             )
             .unwrap();
+        assert_eq!(changed_script_hashes, vec![source_script_hash, recipient_script_hash]);
 
         assert_eq!(store.utxos.lock().unwrap().get(&source_outpoint), None);
         assert_eq!(

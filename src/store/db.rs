@@ -652,7 +652,7 @@ impl Store for DBStore {
         utxo_spent: Vec<(u32, OutPoint, crate::be::Txid)>,
         history_map: BTreeMap<ScriptHash, Vec<TxSeen>>,
         utxo_created: BTreeMap<OutPoint, ScriptHash>,
-    ) -> Result<()> {
+    ) -> Result<Vec<ScriptHash>> {
         let mut history_map = history_map;
 
         // First, read the script hashes for spent UTXOs (read-only operation)
@@ -665,6 +665,8 @@ impl Store for DBStore {
             let el = history_map.entry(script_hash).or_default();
             el.push(TxSeen::new(txid, block_meta.height(), V::Vin(vin)));
         }
+
+        let changed_script_hashes = history_map.keys().copied().collect::<Vec<_>>();
 
         // Create a single batch for ALL writes (atomic operation)
         // This ensures that either all data is written or none, preventing
@@ -715,7 +717,7 @@ impl Store for DBStore {
         // Single atomic write (includes reorg data)
         self.write(batch)?;
 
-        Ok(())
+        Ok(changed_script_hashes)
     }
 
     fn reorg(&self, height: Height) {
