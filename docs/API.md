@@ -210,6 +210,11 @@ data: {"reason":"mempool"}
 
 Mempool removals do not emit `mempool` events. In the common confirmation path, the server emits `mempool` when the transaction first appears and `block` after the confirming block is indexed.
 
+**Limitations:**
+
+- At the moment active subscriptions do not expand when later scans increase the descriptor's highest used index
+- To watch the expanded range, clients should close the current SSE stream and re-open a new subscription
+
 **Client Behavior:**
 
 - Treat events as invalidation hints, not as wallet updates
