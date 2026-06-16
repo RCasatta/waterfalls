@@ -360,7 +360,11 @@ async fn do_test_subscribe_notifies_descriptor_change(test_env: waterfalls::test
     );
 
     test_env.node_generate(1).await;
-    sse.wait_changed_reason("block").await;
+    let event = sse.next_changed_event().await;
+    assert!(
+        event.contains("\"reason\":\"block\""),
+        "unexpected SSE event: {event}"
+    );
 
     test_env.shutdown().await;
 }
@@ -474,20 +478,6 @@ impl SseTestReader {
         })
         .await
         .expect("timed out waiting for SSE changed event")
-    }
-
-    async fn wait_changed_reason(&mut self, reason: &str) -> String {
-        let expected = format!("\"reason\":\"{reason}\"");
-        timeout(Duration::from_secs(10), async {
-            loop {
-                let event = self.next_changed_event().await;
-                if event.contains(&expected) {
-                    return event;
-                }
-            }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("timed out waiting for SSE changed event reason {reason}"))
     }
 
     fn pop_event(&mut self) -> Option<String> {

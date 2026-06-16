@@ -40,17 +40,14 @@ impl Mempool {
         removed_txids: &[crate::be::Txid],
         txs: &[(crate::be::Txid, &be::MempoolTx)],
     ) -> HashSet<ScriptHash> {
-        let mut changed = self.remove(removed_txids);
-        changed.extend(self.add(db, txs));
-        changed
+        self.remove(removed_txids);
+        self.add(db, txs)
     }
 
-    fn remove(&mut self, txids: &[crate::be::Txid]) -> HashSet<ScriptHash> {
-        let mut changed = HashSet::new();
+    fn remove(&mut self, txids: &[crate::be::Txid]) {
         for txid in txids {
             if let Some(hashes) = self.txid_hashes.remove(txid) {
                 for hash in hashes {
-                    changed.insert(hash);
                     if let Some(txid_positions) = self.hash_txids.get_mut(&hash) {
                         txid_positions.retain(|(tx, _)| tx != txid);
                         if txid_positions.is_empty() {
@@ -62,7 +59,6 @@ impl Mempool {
         }
         self.outpoints_created
             .retain(|k, _| !txids.contains(&k.txid.into()));
-        changed
     }
 
     fn add(

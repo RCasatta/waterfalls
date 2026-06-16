@@ -204,9 +204,11 @@ data: {"reason":"mempool"}
 
 **Event Reasons:**
 
-- `mempool`: a watched script appeared in a mempool transaction or changed mempool state
+- `mempool`: a watched script appeared in a newly observed mempool transaction
 - `block`: a watched script appeared in a newly indexed block
 - `reorg`: a chain reorganization happened; clients should rescan because affected scripts are not filtered precisely
+
+Mempool removals do not emit `mempool` events. In the common confirmation path, the server emits `mempool` when the transaction first appears and `block` after the confirming block is indexed.
 
 **Client Behavior:**
 
