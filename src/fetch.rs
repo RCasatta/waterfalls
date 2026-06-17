@@ -583,7 +583,7 @@ fn parse_fee_estimates_rpc_reply(text: &str) -> anyhow::Result<HashMap<u16, f64>
 
 fn parse_broadcast_response(text: &str, use_esplora: bool) -> anyhow::Result<crate::be::Txid> {
     if use_esplora {
-        return crate::be::Txid::from_str(text.trim()).map_err(Into::into);
+        return crate::be::Txid::from_str(text.trim());
     }
 
     let value: serde_json::Value = serde_json::from_str(text)?;
@@ -592,7 +592,7 @@ fn parse_broadcast_response(text: &str, use_esplora: bool) -> anyhow::Result<cra
         .ok_or(anyhow!("unexpected json without result"))?
         .as_str()
         .ok_or(anyhow!("unexpected non-string result"))?;
-    crate::be::Txid::from_str(txid_text).map_err(Into::into)
+    crate::be::Txid::from_str(txid_text)
 }
 
 #[derive(Debug)]
@@ -692,9 +692,11 @@ mod test {
     #[ignore = "connects to prod server"]
     async fn test_client_esplora() {
         let _ = env_logger::try_init();
-        let mut args = Arguments::default();
-        args.use_esplora = true;
-        args.request_timeout_seconds = 30;
+        let mut args = Arguments {
+            use_esplora: true,
+            request_timeout_seconds: 30,
+            ..Arguments::default()
+        };
         for network in [Network::Bitcoin, Network::Liquid, Network::LiquidTestnet] {
             args.network = network;
             let client = Client::new(&args).unwrap();
@@ -726,9 +728,11 @@ mod test {
 
     #[cfg(feature = "synced_node")]
     fn init_client(network: Network) -> Client {
-        let mut args = Arguments::default();
-        args.use_esplora = false;
-        args.network = network;
+        let args = Arguments {
+            use_esplora: false,
+            network,
+            ..Arguments::default()
+        };
         Client::new(&args).unwrap()
     }
 
@@ -763,8 +767,8 @@ mod test {
             Network::BitcoinSignet => todo!(),
         };
 
-        let genesis_hash = BlockHash::from_str(&genesis_hash).unwrap();
-        let genesis_txid = crate::be::Txid::from_str(&genesis_txid).unwrap();
+        let genesis_hash = BlockHash::from_str(genesis_hash).unwrap();
+        let genesis_txid = crate::be::Txid::from_str(genesis_txid).unwrap();
 
         let fetched = client.block_hash(0).await.unwrap().unwrap();
         assert_eq!(genesis_hash, fetched, "network:{network}");

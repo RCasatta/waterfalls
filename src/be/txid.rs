@@ -179,7 +179,7 @@ mod tests {
 
         // Test encoding
         let mut buffer = Vec::new();
-        minicbor::encode(&txid, &mut buffer).unwrap();
+        minicbor::encode(txid, &mut buffer).unwrap();
 
         // Test decoding
         let decoded_txid: Txid = minicbor::decode(&buffer).unwrap();
@@ -198,7 +198,7 @@ mod tests {
         let txid = Txid::from_str(txid_str).unwrap();
 
         let mut buffer = Vec::new();
-        minicbor::encode(&txid, &mut buffer).unwrap();
+        minicbor::encode(txid, &mut buffer).unwrap();
 
         // Should be encoded as bytes (32 bytes + CBOR overhead)
         assert_eq!(buffer.len(), 34); // 1 byte for type + 1 byte for length + 32 bytes for hash

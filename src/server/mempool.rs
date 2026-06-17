@@ -58,7 +58,7 @@ impl Mempool {
             }
         }
         self.outpoints_created
-            .retain(|k, _| !txids.contains(&k.txid.into()));
+            .retain(|k, _| !txids.contains(&k.txid));
     }
 
     fn add(
