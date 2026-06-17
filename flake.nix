@@ -58,6 +58,7 @@
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
           bin = craneLib.buildPackage (commonArgs // {
             inherit cargoArtifacts;
+            cargoTestExtraArgs = "-- --test-threads=1";
           });
 
           # Docker image configuration
