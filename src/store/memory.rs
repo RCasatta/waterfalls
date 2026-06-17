@@ -239,7 +239,10 @@ mod tests {
                 utxo_created,
             )
             .unwrap();
-        assert_eq!(changed_script_hashes, vec![source_script_hash, recipient_script_hash]);
+        assert_eq!(
+            changed_script_hashes,
+            vec![source_script_hash, recipient_script_hash]
+        );
 
         assert_eq!(store.utxos.lock().unwrap().get(&source_outpoint), None);
         assert_eq!(
