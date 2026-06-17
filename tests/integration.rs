@@ -77,13 +77,13 @@ async fn integration_addresses_txs_seen_truncation() {
             loop {
                 let result_page_0 = test_env
                     .client()
-                    .waterfalls_addresses(&vec![addr.clone()])
+                    .waterfalls_addresses(&[addr.clone()])
                     .await
                     .unwrap()
                     .0;
                 let result_page_1 = test_env
                     .client()
-                    .waterfalls_addresses_with_page(&vec![addr.clone()], 1)
+                    .waterfalls_addresses_with_page(&[addr.clone()], 1)
                     .await
                     .unwrap()
                     .0;
@@ -102,7 +102,7 @@ async fn integration_addresses_txs_seen_truncation() {
     }
     let confirmed_page_0 = test_env
         .client()
-        .waterfalls_addresses(&vec![addr.clone()])
+        .waterfalls_addresses(&[addr.clone()])
         .await
         .unwrap()
         .0;
@@ -124,7 +124,7 @@ async fn integration_addresses_txs_seen_truncation() {
 
     let result_page_1 = test_env
         .client()
-        .waterfalls_addresses_with_page(&vec![addr.clone()], 1)
+        .waterfalls_addresses_with_page(&[addr.clone()], 1)
         .await
         .unwrap()
         .0;
@@ -147,7 +147,7 @@ async fn integration_addresses_txs_seen_truncation() {
         loop {
             let result = test_env
                 .client()
-                .waterfalls_addresses(&vec![addr.clone()])
+                .waterfalls_addresses(&[addr.clone()])
                 .await
                 .unwrap()
                 .0;
@@ -195,7 +195,7 @@ async fn integration_addresses_txs_seen_truncation() {
 
     let result_page_1 = test_env
         .client()
-        .waterfalls_addresses_with_page(&vec![addr.clone()], 1)
+        .waterfalls_addresses_with_page(&[addr.clone()], 1)
         .await
         .unwrap()
         .0;
@@ -218,7 +218,7 @@ async fn integration_addresses_txs_seen_truncation() {
 
     let err = test_env
         .client()
-        .waterfalls_addresses_utxo_only(&vec![addr.clone()], true)
+        .waterfalls_addresses_utxo_only(&[addr.clone()], true)
         .await
         .unwrap_err();
     assert_eq!(
@@ -228,7 +228,7 @@ async fn integration_addresses_txs_seen_truncation() {
 
     let err = test_env
         .client()
-        .waterfalls_addresses_with_page_utxo_only(&vec![addr.clone()], Some(1), true)
+        .waterfalls_addresses_with_page_utxo_only(&[addr.clone()], Some(1), true)
         .await
         .unwrap_err();
     assert_eq!(
@@ -520,17 +520,19 @@ fn send_to_address(
 
 #[cfg(feature = "test_env")]
 fn fetch_client_for_node(node: &bitcoind::BitcoinD, network: Network) -> FetchClient {
-    let mut args = Arguments::default();
-    args.use_esplora = false;
-    args.network = network;
-    args.node_url = Some(node.rpc_url());
-    args.request_timeout_seconds = 10;
-    args.rpc_user_password = Some(
-        std::fs::read_to_string(&node.params.cookie_file)
-            .unwrap()
-            .trim()
-            .to_string(),
-    );
+    let args = Arguments {
+        use_esplora: false,
+        network,
+        node_url: Some(node.rpc_url()),
+        request_timeout_seconds: 10,
+        rpc_user_password: Some(
+            std::fs::read_to_string(&node.params.cookie_file)
+                .unwrap()
+                .trim()
+                .to_string(),
+        ),
+        ..Arguments::default()
+    };
     FetchClient::new(&args).unwrap()
 }
 
@@ -750,13 +752,13 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
             // assert_eq!(txid, tx_blind.txid()); // TODO: fix this
         }
         Family::Elements => {
-            assert_eq!(txid, tx_blind.txid().into());
+            assert_eq!(txid, tx_blind.txid());
         }
     }
 
     // Test getting tx
     let tx = client.tx(txid).await.unwrap();
-    assert_eq!(crate::be::Txid::from(tx.txid()), txid);
+    assert_eq!(tx.txid(), txid);
 
     // Test server_address
     let server_address = test_env.server_address();
@@ -779,7 +781,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
 
     // Test v3
     let (result_v3, _headers) = client.waterfalls(&bitcoin_desc).await.unwrap();
-    let result_v2: WaterfallResponse = result_v3.try_into().unwrap();
+    let result_v2: WaterfallResponse = result_v3;
     assert_eq!(result, result_v2);
 
     // Test addresses
@@ -788,7 +790,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
         Family::Elements => addr.to_unconfidential().unwrap(),
     };
     let (result, _) = client
-        .waterfalls_addresses(&vec![addr.clone()])
+        .waterfalls_addresses(&[addr.clone()])
         .await
         .unwrap();
     assert_eq!(result.count_non_empty(), 1);
@@ -855,12 +857,12 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     // Test utxo_only on addresses endpoint, we just test the results are different because of v since we are not spending in this test
     test_env.node_generate(1).await;
     let mut result_utxo_only = client
-        .waterfalls_addresses_utxo_only(&vec![addr.clone()], true)
+        .waterfalls_addresses_utxo_only(&[addr.clone()], true)
         .await
         .unwrap()
         .0;
     let mut result_full_history = client
-        .waterfalls_addresses(&vec![addr.clone()])
+        .waterfalls_addresses(&[addr.clone()])
         .await
         .unwrap()
         .0;
@@ -889,7 +891,6 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     assert!(fee_estimates.values().all(|&f| f > 0.0));
 
     test_env.shutdown().await;
-    assert!(true);
 }
 
 #[cfg(feature = "test_env")]
@@ -1768,7 +1769,7 @@ async fn test_lwk_wollet() {
     // Test with utxo_only=false (full history)
     let result_full_history = test_env
         .client()
-        .waterfalls_addresses(&vec![unconfidential_address.clone()])
+        .waterfalls_addresses(&[unconfidential_address.clone()])
         .await
         .unwrap()
         .0;
@@ -1776,7 +1777,7 @@ async fn test_lwk_wollet() {
     // Test with utxo_only=true (only transactions with unspent outputs)
     let result_utxo_only = test_env
         .client()
-        .waterfalls_addresses_utxo_only(&vec![unconfidential_address.clone()], true)
+        .waterfalls_addresses_utxo_only(&[unconfidential_address.clone()], true)
         .await
         .unwrap()
         .0;
@@ -1787,7 +1788,6 @@ async fn test_lwk_wollet() {
     assert_eq!(utxo_only_txs.len(), 0);
 
     test_env.shutdown().await;
-    assert!(true);
 }
 
 #[tokio::test]
@@ -2044,7 +2044,7 @@ async fn test_waterfalls_descriptor_vs_addresses() {
         let descriptor = be::Descriptor::from_str(descriptor_str, Network::LiquidTestnet).unwrap();
         let descriptor = descriptor.elements().unwrap();
 
-        let (resp, _) = client.waterfalls(&descriptor_str).await.unwrap();
+        let (resp, _) = client.waterfalls(descriptor_str).await.unwrap();
         println!("resp: {:?}", resp);
         let len = resp.txs_seen.get(&descriptor.to_string()).unwrap().len();
 

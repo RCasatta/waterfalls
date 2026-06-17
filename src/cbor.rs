@@ -112,7 +112,7 @@ mod tests {
 
         let s = include_str!("../tests/data/waterfall_response_v2.json");
         assert_eq!(s.len(), 8065);
-        let resp: WaterfallResponse = serde_json::from_str(&s).unwrap();
+        let resp: WaterfallResponse = serde_json::from_str(s).unwrap();
         let mut buffer = vec![];
         minicbor::encode(&resp, &mut buffer).unwrap();
         assert_eq!(buffer.len(), 3349);

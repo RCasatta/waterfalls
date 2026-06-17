@@ -227,10 +227,10 @@ fn update_hash_ts(blocks_hash_ts: &mut Vec<(BlockHash, u32)>, meta: &BlockMeta) 
         }
         Ordering::Greater => {
             // We are reorging
-            blocks_hash_ts.get_mut(meta.height() as usize).map(|e| {
+            if let Some(e) = blocks_hash_ts.get_mut(meta.height() as usize) {
                 e.0 = meta.hash();
                 e.1 = meta.timestamp();
-            });
+            }
             blocks_hash_ts.truncate(meta.height() as usize + 1); // if the reorg is longer than one block, we need to truncate the vector
         }
     }

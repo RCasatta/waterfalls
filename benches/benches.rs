@@ -13,7 +13,6 @@ use elements_miniscript::DescriptorPublicKey;
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, DBCompressionType, Options, WriteBatch, DB,
 };
-use tempfile;
 use waterfalls::{OutPoint, WaterfallResponse};
 
 criterion_group!(

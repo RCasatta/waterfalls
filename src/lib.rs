@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn test_prefix_uvarint_concat() {
-        let mut vec = vec![0u8; 32];
+        let mut vec = [0u8; 32];
         let len1 = 1u32.encode_prefix_varint(&mut vec[..]);
         assert_eq!(len1, 1);
         let len2 = 10u32.encode_prefix_varint(&mut vec[len1..]);
