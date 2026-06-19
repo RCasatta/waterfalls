@@ -97,9 +97,14 @@ impl Client {
             node_url.unwrap_or(format!("{LOCAL}:{port}"))
         };
         log::info!("connecting to {base_url}");
-        let client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(args.request_timeout_seconds))
-            .connect_timeout(Duration::from_secs(args.request_timeout_seconds)) // Connection establishment timeout
+            .connect_timeout(Duration::from_secs(args.request_timeout_seconds)); // Connection establishment timeout
+        if args.node_disable_conn_pool {
+            // No keep-alive reuse: each request opens a fresh connection.
+            builder = builder.pool_max_idle_per_host(0);
+        }
+        let client = builder
             .build()
             .with_context(|| "Failed to create HTTP client with timeout")?;
 

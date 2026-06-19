@@ -140,6 +140,10 @@ pub struct Arguments {
     #[arg(env, long, default_value = "30")]
     pub request_timeout_seconds: u64,
 
+    /// Disable HTTP keep-alive connection pooling to the node, forcing a fresh connection per request.
+    #[arg(env, long)]
+    pub node_disable_conn_pool: bool,
+
     /// Timeout in seconds for reading incoming HTTP request headers (protects against slowloris attacks)
     #[arg(env, long, default_value = "10")]
     pub header_read_timeout_seconds: u64,
@@ -187,6 +191,7 @@ impl std::fmt::Debug for Arguments {
             .field("enable_db_statistics", &self.enable_db_statistics)
             .field("cache_control_seconds", &self.cache_control_seconds)
             .field("request_timeout_seconds", &self.request_timeout_seconds)
+            .field("node_disable_conn_pool", &self.node_disable_conn_pool)
             .field(
                 "header_read_timeout_seconds",
                 &self.header_read_timeout_seconds,
