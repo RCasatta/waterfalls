@@ -693,6 +693,129 @@ mod test {
         assert_eq!(result[&6], 2.0);
     }
 
+    #[test]
+    fn test_node_disable_conn_pool_flag() {
+        use clap::Parser;
+
+        // Defaults to pooled (keep-alive) when the flag is absent.
+        let args = Arguments::try_parse_from(["waterfalls", "--network", "bitcoin"]).unwrap();
+        assert!(!args.node_disable_conn_pool);
+
+        // The long flag opts into a fresh connection per request.
+        let args = Arguments::try_parse_from([
+            "waterfalls",
+            "--network",
+            "bitcoin",
+            "--node-disable-conn-pool",
+        ])
+        .unwrap();
+        assert!(args.node_disable_conn_pool);
+    }
+
+    /// Spawn a minimal HTTP/1.1 server on loopback that counts the TCP
+    /// connections it accepts and answers every request with the same canned
+    /// blockhash, keeping the connection alive for any follow-up requests.
+    /// Returns the bound address and the accept counter.
+    async fn spawn_counting_node() -> (
+        std::net::SocketAddr,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let connections = Arc::new(AtomicUsize::new(0));
+        let counter = connections.clone();
+
+        tokio::spawn(async move {
+            // A valid 64-hex blockhash so `block_hash` parses the body successfully.
+            const HASH_HEX: &str =
+                "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{HASH_HEX}",
+                HASH_HEX.len()
+            );
+            loop {
+                let (mut socket, _) = match listener.accept().await {
+                    Ok(pair) => pair,
+                    Err(_) => break,
+                };
+                counter.fetch_add(1, Ordering::SeqCst);
+                let response = response.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 1024];
+                    // Serve each request on this connection until the client closes it,
+                    // so a reused keep-alive connection is counted only once.
+                    'conn: loop {
+                        let mut req = Vec::new();
+                        loop {
+                            match socket.read(&mut buf).await {
+                                Ok(0) | Err(_) => break 'conn, // client closed the connection
+                                Ok(n) => {
+                                    req.extend_from_slice(&buf[..n]);
+                                    if req.windows(4).any(|w| w == b"\r\n\r\n") {
+                                        break; // full request headers received
+                                    }
+                                }
+                            }
+                        }
+                        if socket.write_all(response.as_bytes()).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+
+        (addr, connections)
+    }
+
+    fn node_client(addr: std::net::SocketAddr, disable_conn_pool: bool) -> Client {
+        let mut args = Arguments::default();
+        args.network = Network::Bitcoin;
+        args.use_esplora = false;
+        args.node_url = Some(format!("http://{addr}"));
+        args.rpc_user_password = Some("user:pass".to_string()); // satisfies is_valid()
+        args.request_timeout_seconds = 30; // Default::default() leaves this 0, which is_valid() rejects
+        args.node_disable_conn_pool = disable_conn_pool;
+        Client::new(&args).unwrap()
+    }
+
+    /// Default (pooled) behavior: sequential requests reuse a single keep-alive connection.
+    #[tokio::test]
+    async fn test_conn_pool_enabled_reuses_connection() {
+        use std::sync::atomic::Ordering;
+
+        let (addr, connections) = spawn_counting_node().await;
+        let client = node_client(addr, false);
+
+        for _ in 0..3 {
+            client.block_hash(0).await.unwrap().unwrap();
+        }
+
+        assert_eq!(connections.load(Ordering::SeqCst), 1);
+    }
+
+    /// With the pool disabled, every request establishes its own connection, so a
+    /// locality-aware L4 proxy re-evaluates the upstream on each request instead of
+    /// staying pinned to whichever backend the first connection landed on.
+    #[tokio::test]
+    async fn test_conn_pool_disabled_opens_fresh_connection_each_request() {
+        use std::sync::atomic::Ordering;
+
+        let (addr, connections) = spawn_counting_node().await;
+        let client = node_client(addr, true);
+
+        for _ in 0..3 {
+            client.block_hash(0).await.unwrap().unwrap();
+        }
+
+        assert_eq!(connections.load(Ordering::SeqCst), 3);
+    }
+
     #[tokio::test]
     #[ignore = "connects to prod server"]
     async fn test_client_esplora() {
