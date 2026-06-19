@@ -141,6 +141,7 @@ pub struct Arguments {
     pub request_timeout_seconds: u64,
 
     /// Disable HTTP keep-alive connection pooling to the node, forcing a fresh connection per request.
+    /// Node-only: ignored (with a warning) when --use-esplora is set.
     #[arg(env, long)]
     pub node_disable_conn_pool: bool,
 

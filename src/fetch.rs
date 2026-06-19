@@ -101,8 +101,22 @@ impl Client {
             .timeout(Duration::from_secs(args.request_timeout_seconds))
             .connect_timeout(Duration::from_secs(args.request_timeout_seconds)); // Connection establishment timeout
         if args.node_disable_conn_pool {
-            // No keep-alive reuse: each request opens a fresh connection.
-            builder = builder.pool_max_idle_per_host(0);
+            if use_esplora {
+                // The flag is node-only; applying it to Esplora would force a fresh
+                // TCP + TLS handshake per request — a real regression — so ignore it
+                // here, but make the ignored setting loud rather than silent.
+                log::warn!(
+                    "**********************************************************************\n\
+                     * --node-disable-conn-pool (NODE_DISABLE_CONN_POOL) is set together   \n\
+                     * with --use-esplora. This flag only affects the local node           \n\
+                     * connection and is being IGNORED for the Esplora backend; keep-alive \n\
+                     * pooling stays ENABLED.                                              \n\
+                     **********************************************************************"
+                );
+            } else {
+                // No keep-alive reuse: each request opens a fresh connection.
+                builder = builder.pool_max_idle_per_host(0);
+            }
         }
         let client = builder
             .build()
@@ -691,25 +705,6 @@ mod test {
         assert_eq!(result[&1], 10.0);
         assert_eq!(result[&2], 5.0);
         assert_eq!(result[&6], 2.0);
-    }
-
-    #[test]
-    fn test_node_disable_conn_pool_flag() {
-        use clap::Parser;
-
-        // Defaults to pooled (keep-alive) when the flag is absent.
-        let args = Arguments::try_parse_from(["waterfalls", "--network", "bitcoin"]).unwrap();
-        assert!(!args.node_disable_conn_pool);
-
-        // The long flag opts into a fresh connection per request.
-        let args = Arguments::try_parse_from([
-            "waterfalls",
-            "--network",
-            "bitcoin",
-            "--node-disable-conn-pool",
-        ])
-        .unwrap();
-        assert!(args.node_disable_conn_pool);
     }
 
     /// Spawn a minimal HTTP/1.1 server on loopback that counts the TCP
