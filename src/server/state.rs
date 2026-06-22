@@ -25,8 +25,6 @@ use super::{sign::p2pkh, Error};
 
 const DESCRIPTOR_METRICS_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
 const DESCRIPTOR_METRICS_PRUNE_INTERVAL: Duration = Duration::from_secs(60 * 60);
-const MAX_ACTIVE_SUBSCRIPTIONS: usize = 10_000;
-const MAX_SCRIPTS_PER_SUBSCRIPTION: usize = 5_000;
 
 pub struct State {
     /// An asymmetric encryption key, the public key is used to optionally encrypt the descriptor field so that it's harder to leak it.
@@ -61,10 +59,7 @@ impl State {
         store: AnyStore,
         key: Identity,
         wif_key: PrivateKey,
-        max_addresses: usize,
-        max_txs_seen: usize,
-        cache_control_seconds: u32,
-        derivation_cache_capacity: usize,
+        config: StateConfig,
     ) -> Result<Self, Error> {
         Ok(State {
             key,
@@ -74,16 +69,16 @@ impl State {
             mempool_cache: Mutex::new(HashMap::new()),
             blocks_hash_ts: Mutex::new(Vec::new()),
             secp: bitcoin::key::Secp256k1::new(),
-            max_addresses,
-            max_txs_seen,
-            cache_control_seconds,
-            derivation_cache: Mutex::new(DerivationCache::new(derivation_cache_capacity)),
+            max_addresses: config.max_addresses,
+            max_txs_seen: config.max_txs_seen,
+            cache_control_seconds: config.cache_control_seconds,
+            derivation_cache: Mutex::new(DerivationCache::new(config.derivation_cache_capacity)),
             cached_fee_estimates: RwLock::new((HashMap::new(), None)),
             descriptor_metrics: Mutex::new(DescriptorMetrics::new()),
             descriptor_max_used_index: Mutex::new(HashMap::new()),
             subscriptions: Mutex::new(Subscriptions::new(
-                MAX_ACTIVE_SUBSCRIPTIONS,
-                MAX_SCRIPTS_PER_SUBSCRIPTION,
+                config.subscription_limits.max_active_subscriptions,
+                config.subscription_limits.max_scripts_per_subscription,
             )),
         })
     }
@@ -267,6 +262,19 @@ impl DescriptorMetrics {
     fn unique_count(&self) -> usize {
         self.last_seen.len()
     }
+}
+
+pub struct SubscriptionLimits {
+    pub max_active_subscriptions: usize,
+    pub max_scripts_per_subscription: usize,
+}
+
+pub struct StateConfig {
+    pub max_addresses: usize,
+    pub max_txs_seen: usize,
+    pub cache_control_seconds: u32,
+    pub derivation_cache_capacity: usize,
+    pub subscription_limits: SubscriptionLimits,
 }
 
 #[cfg(test)]
