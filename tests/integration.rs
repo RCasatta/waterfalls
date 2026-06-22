@@ -789,10 +789,7 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
         Family::Bitcoin => addr,
         Family::Elements => addr.to_unconfidential().unwrap(),
     };
-    let (result, _) = client
-        .waterfalls_addresses(&[addr.clone()])
-        .await
-        .unwrap();
+    let (result, _) = client.waterfalls_addresses(&[addr.clone()]).await.unwrap();
     assert_eq!(result.count_non_empty(), 1);
 
     // Test address_txs
