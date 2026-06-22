@@ -132,14 +132,20 @@ impl std::fmt::Display for Descriptor {
 pub fn bitcoin_descriptor(s: &str) -> Result<Descriptor, Error> {
     let desc = s
         .parse::<miniscript::descriptor::Descriptor<miniscript::DescriptorPublicKey>>()
-        .map_err(|e| Error::String(format!("{e:?}")))?;
+        .map_err(|e| Error::InvalidDescriptor(format!("{e:?}")))?;
     Ok(Descriptor::Bitcoin(desc))
 }
 
 fn elements_descriptor(s: &str) -> Result<Descriptor, Error> {
+    if s.trim_start().starts_with("ct(") {
+        return Err(Error::InvalidDescriptor(
+            "Confidential descriptors with blinding keys are refused to preserve your privacy; pass the inner descriptor without ct(...)".to_string(),
+        ));
+    }
+
     let desc = s
         .parse::<elements_miniscript::descriptor::Descriptor<elements_miniscript::DescriptorPublicKey>>()
-        .map_err(|e| Error::String(format!("{e:?}")))?;
+        .map_err(|e| Error::InvalidDescriptor(format!("{e:?}")))?;
     Ok(Descriptor::Elements(desc))
 }
 
@@ -226,18 +232,30 @@ mod tests {
     fn test_invalid_descriptors() {
         // Completely invalid descriptor
         let result = Descriptor::from_str("invalid_descriptor", Network::Bitcoin);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidDescriptor(_))));
 
         let result = Descriptor::from_str("invalid_descriptor", Network::Liquid);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidDescriptor(_))));
 
         // Empty string
         let result = Descriptor::from_str("", Network::Bitcoin);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidDescriptor(_))));
 
         // Malformed descriptor
         let result = Descriptor::from_str("wpkh(", Network::Bitcoin);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidDescriptor(_))));
+    }
+
+    #[test]
+    fn test_confidential_descriptor_rejected() {
+        let desc_str = "ct(slip77(1bda6cd71a1e206e3eb793e5a4d98a46c3fa473c9ab7bdef9bb9c814764d6614),elwpkh([cb4ba44a/84'/1'/0']tpubDDrybtUajFcgXC85rvwPsh1oU7Azx4kJ9BAiRzMbByqK7UnVXY3gDRJPwEDfaQwguNUZFzrhavJGgEhbsfuebyxUSZQnjLezWVm2Vdqb7UM/<0;1>/*))#za9ktavp";
+        let result = Descriptor::from_str(desc_str, Network::LiquidTestnet);
+
+        assert!(matches!(
+            result,
+            Err(Error::InvalidDescriptor(message))
+                if message.contains("without ct(...)")
+        ));
     }
 
     #[test]

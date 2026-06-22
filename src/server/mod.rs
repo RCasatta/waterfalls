@@ -314,6 +314,7 @@ pub enum Error {
     InvalidTx,
     InvalidOutpoint,
     String(String),
+    InvalidDescriptor(String),
     InvalidAddress(String),
     CannotSpecifyBothDescriptorAndAddresses,
     AtLeastOneFieldMandatory,

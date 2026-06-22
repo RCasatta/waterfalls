@@ -504,6 +504,7 @@ fn parse_descriptor_query(
 fn str_resp(s: String, status: StatusCode) -> Result<Resp, Error> {
     any_resp(s.into_bytes(), status, Some("text/plain"), None, None)
 }
+
 fn any_resp(
     bytes: Vec<u8>,
     status: StatusCode,
@@ -548,7 +549,19 @@ fn error_resp(status: StatusCode, error: &Error) -> Resp {
 fn error_status(error: &Error) -> StatusCode {
     match error {
         Error::CannotDecrypt => StatusCode::UNPROCESSABLE_ENTITY,
-        Error::DescriptorMustHaveWildcard
+        Error::WrongNetwork
+        | Error::CannotParseHeight
+        | Error::InvalidTxid
+        | Error::InvalidBlockHash
+        | Error::InvalidTx
+        | Error::InvalidOutpoint
+        | Error::InvalidDescriptor(_)
+        | Error::InvalidAddress(_)
+        | Error::CannotSpecifyBothDescriptorAndAddresses
+        | Error::AtLeastOneFieldMandatory
+        | Error::AddressCannotBeBlinded
+        | Error::TooManyAddresses
+        | Error::DescriptorMustHaveWildcard
         | Error::AddressPageRequiresSingleAddress
         | Error::UtxoOnlyHistoryTooLarge
         | Error::DescriptorNotScanned => StatusCode::BAD_REQUEST,
@@ -1236,6 +1249,7 @@ mod tests {
     const TESTNET_DESC: &str = "elwpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)#v7pu3vak";
     const BITCOIN_MAINNET_DESC: &str = "wpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#20ufqv7z";
     const BITCOIN_TESTNET_DESC: &str = "wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)#v7pu3vak";
+    const CONFIDENTIAL_TESTNET_DESC: &str = "ct(slip77(1bda6cd71a1e206e3eb793e5a4d98a46c3fa473c9ab7bdef9bb9c814764d6614),elwpkh([cb4ba44a/84'/1'/0']tpubDDrybtUajFcgXC85rvwPsh1oU7Azx4kJ9BAiRzMbByqK7UnVXY3gDRJPwEDfaQwguNUZFzrhavJGgEhbsfuebyxUSZQnjLezWVm2Vdqb7UM/<0;1>/*))#za9ktavp";
 
     #[test]
     fn test_parse_query() {
@@ -1248,11 +1262,11 @@ mod tests {
         let result =
             parse_query("descriptor=invalid", &key, false, 100, Network::Liquid).unwrap_err();
         let bad_descriptor = "BadDescriptor(\"Not an Elements Descriptor\")".to_string();
-        assert_eq!(result, Error::String(bad_descriptor.clone()));
+        assert_eq!(result, Error::InvalidDescriptor(bad_descriptor.clone()));
 
         // Test empty descriptor
         let result = parse_query("descriptor=", &key, false, 100, Network::Liquid).unwrap_err();
-        assert_eq!(result, Error::String(bad_descriptor));
+        assert_eq!(result, Error::InvalidDescriptor(bad_descriptor));
 
         // Test valid clear descriptor
         let query = encode_query(MAINNET_DESC, None);
@@ -1363,34 +1377,54 @@ mod tests {
         let query = encode_query(BITCOIN_MAINNET_DESC, None);
         let result = parse_query(&query, &key, false, 100, Network::Liquid).unwrap_err();
         let bad_descriptor = "BadDescriptor(\"Not an Elements Descriptor\")".to_string();
-        assert_eq!(result, Error::String(bad_descriptor.clone()));
+        assert_eq!(result, Error::InvalidDescriptor(bad_descriptor.clone()));
 
         // Test Bitcoin testnet descriptor (should fail as it's not an Elements descriptor)
         let query = encode_query(BITCOIN_TESTNET_DESC, None);
         let result = parse_query(&query, &key, true, 100, Network::LiquidTestnet).unwrap_err();
-        assert_eq!(result, Error::String(bad_descriptor.clone()));
+        assert_eq!(result, Error::InvalidDescriptor(bad_descriptor.clone()));
 
         // Test Bitcoin mainnet descriptor on testnet network (should fail as it's not an Elements descriptor)
         let query = encode_query(BITCOIN_MAINNET_DESC, None);
         let result = parse_query(&query, &key, true, 100, Network::LiquidTestnet).unwrap_err();
-        assert_eq!(result, Error::String(bad_descriptor.clone()));
+        assert_eq!(result, Error::InvalidDescriptor(bad_descriptor.clone()));
 
         // Test Bitcoin testnet descriptor on mainnet network (should fail as it's not an Elements descriptor)
         let query = encode_query(BITCOIN_TESTNET_DESC, None);
         let result = parse_query(&query, &key, false, 100, Network::Liquid).unwrap_err();
-        assert_eq!(result, Error::String(bad_descriptor.clone()));
+        assert_eq!(result, Error::InvalidDescriptor(bad_descriptor.clone()));
 
         // Test encrypted Bitcoin mainnet descriptor (should fail as it's not an Elements descriptor)
         let encrypted = encryption::encrypt(BITCOIN_MAINNET_DESC, key.to_public()).unwrap();
         let query = encode_query(&encrypted, None);
         let result = parse_query(&query, &key, false, 100, Network::Liquid).unwrap_err();
-        assert_eq!(result, Error::String(bad_descriptor.clone()));
+        assert_eq!(result, Error::InvalidDescriptor(bad_descriptor.clone()));
 
         // Test encrypted Bitcoin testnet descriptor (should fail as it's not an Elements descriptor)
         let encrypted = encryption::encrypt(BITCOIN_TESTNET_DESC, key.to_public()).unwrap();
         let query = encode_query(&encrypted, None);
         let result = parse_query(&query, &key, true, 100, Network::LiquidTestnet).unwrap_err();
-        assert_eq!(result, Error::String(bad_descriptor));
+        assert_eq!(result, Error::InvalidDescriptor(bad_descriptor));
+    }
+
+    #[test]
+    fn test_invalid_descriptor_is_bad_request() {
+        let error = Error::InvalidDescriptor("BadDescriptor".to_string());
+        assert_eq!(error_status(&error), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_confidential_descriptor_is_bad_request() {
+        let key = age::x25519::Identity::generate();
+        let query = encode_query(CONFIDENTIAL_TESTNET_DESC, None);
+        let result = parse_query(&query, &key, true, 100, Network::LiquidTestnet).unwrap_err();
+
+        assert!(matches!(
+            result,
+            Error::InvalidDescriptor(ref message)
+                if message.contains("without ct(...)")
+        ));
+        assert_eq!(error_status(&result), StatusCode::BAD_REQUEST);
     }
 
     fn encode_query(descriptor: &str, page: Option<u16>) -> String {
