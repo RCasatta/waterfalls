@@ -674,14 +674,14 @@ async fn handle_waterfalls_req(
             to_index,
             utxo_only,
         }) => {
-            id = string_hash(&descriptor.to_string());
+            id = string_hash(&descriptor.normalized_id_string());
             state.record_descriptor_access(id).await;
             if page != 0 || to_index != 0 || utxo_only {
                 log::info!("{id:x}: page={page}, to_index={to_index}, utxo_only={utxo_only}");
             }
             utxo_only_req = utxo_only;
             for desc in descriptor.into_single_descriptors().unwrap().iter() {
-                let single_descriptor_id = string_hash(&desc.to_string());
+                let single_descriptor_id = string_hash(&desc.normalized_id_string());
                 let is_single_address = !desc.has_wildcard();
                 let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
                 for batch in 0..MAX_BATCH {
@@ -854,7 +854,7 @@ async fn handle_last_used_index(
 ) -> Result<Resp, Error> {
     let db = &state.store;
     let start = Instant::now();
-    let id = string_hash(&descriptor.to_string());
+    let id = string_hash(&descriptor.normalized_id_string());
     state.record_descriptor_access(id).await;
 
     let timer = crate::WATERFALLS_HISTOGRAM
@@ -978,7 +978,7 @@ async fn subscribe_descriptor(
 ) -> Result<(SubscriptionId, SubscriptionReceiver), Error> {
     let mut scripts = Vec::new();
     for desc in descriptor.into_single_descriptors().unwrap().iter() {
-        let single_descriptor_id = string_hash(&desc.to_string());
+        let single_descriptor_id = string_hash(&desc.normalized_id_string());
         let max_used_index = state
             .descriptor_max_used_index(single_descriptor_id)
             .await
