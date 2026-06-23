@@ -261,7 +261,7 @@ impl Arguments {
 }
 
 #[cfg(test)]
-mod tests {
+mod argument_tests {
     use super::*;
 
     #[test]

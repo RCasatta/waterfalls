@@ -284,3 +284,120 @@ fn generate_skip_outpoint() -> HashSet<OutPoint> {
 
     skip_outpoint
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, net::SocketAddr, sync::Arc};
+
+    use age::x25519::Identity;
+    use bitcoin::{NetworkKind, PrivateKey};
+    use elements::BlockHash;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    use super::*;
+    use crate::{
+        server::{Arguments, Network, StateConfig, SubscriptionLimits},
+        store::{memory::MemoryStore, AnyStore},
+    };
+
+    #[tokio::test]
+    async fn test_reorg_truncates_blocks_hash_ts() {
+        let state = Arc::new(test_state());
+        let hash_0 =
+            BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000")
+                .unwrap();
+        let hash_1 =
+            BlockHash::from_str("1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap();
+        let hash_2 =
+            BlockHash::from_str("2222222222222222222222222222222222222222222222222222222222222222")
+                .unwrap();
+
+        for meta in [
+            BlockMeta::new(0, hash_0, 100),
+            BlockMeta::new(1, hash_1, 200),
+            BlockMeta::new(2, hash_2, 300),
+        ] {
+            state.set_hash_ts(&meta).await;
+            state
+                .store
+                .update(&meta, vec![], BTreeMap::new(), BTreeMap::new())
+                .unwrap();
+        }
+        assert_eq!(state.tip_height().await, Some(2));
+        assert_eq!(state.tip_hash().await, Some(hash_2));
+
+        let client = reorg_client().await;
+        let mut last_indexed = Some(BlockMeta::new(2, hash_2, 300));
+        let mut initial_sync_tx = None;
+
+        assert!(get_next_block_to_index(
+            &mut last_indexed,
+            &client,
+            Family::Bitcoin,
+            &state,
+            &mut initial_sync_tx,
+        )
+        .await
+        .is_none());
+
+        let last_indexed = last_indexed.expect("last indexed block");
+        assert_eq!(last_indexed.height, 1);
+        assert_eq!(last_indexed.hash, hash_1);
+        assert_eq!(last_indexed.timestamp, 200);
+        assert_eq!(state.tip_height().await, Some(1));
+        assert_eq!(state.tip_hash().await, Some(hash_1));
+        assert_eq!(state.block_hash(2).await, None);
+    }
+
+    fn test_state() -> State {
+        State::new(
+            AnyStore::Mem(MemoryStore::new()),
+            Identity::generate(),
+            PrivateKey::generate(NetworkKind::Test),
+            StateConfig {
+                max_addresses: 100,
+                max_txs_seen: 100,
+                cache_control_seconds: 5,
+                derivation_cache_capacity: 1000,
+                subscription_limits: SubscriptionLimits {
+                    max_active_subscriptions: 100,
+                    max_scripts_per_subscription: 100,
+                },
+            },
+        )
+        .unwrap()
+    }
+
+    async fn reorg_client() -> Client {
+        let address = spawn_reorg_server().await;
+        Client::new(&Arguments {
+            network: Network::BitcoinRegtest,
+            use_esplora: true,
+            esplora_url: Some(format!("http://{address}")),
+            request_timeout_seconds: 30,
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    async fn spawn_reorg_server() -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buffer = [0; 1024];
+            let _ = stream.read(&mut buffer).await.unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+        });
+        address
+    }
+}
