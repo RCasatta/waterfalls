@@ -1946,7 +1946,8 @@ async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> Vec<TestResult> 
     use waterfalls::{be, server::Network};
 
     // Parse as Liquid to check network - parsing works the same for Liquid/LiquidTestnet
-    let parsed = be::Descriptor::from_str(desc, Network::Liquid).unwrap();
+    let parsed =
+        be::Descriptor::from_str(unconfidential_descriptor(desc), Network::Liquid).unwrap();
     let network = if parsed.is_mainnet() {
         ElementsNetwork::Liquid
     } else {
@@ -2005,6 +2006,31 @@ async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> Vec<TestResult> 
         wollets[1].transactions().unwrap()
     );
     results
+}
+
+#[cfg(feature = "bench_test")]
+fn unconfidential_descriptor(desc: &str) -> &str {
+    let desc = desc.trim();
+    let Some(args) = desc.strip_prefix("ct(") else {
+        return desc;
+    };
+
+    let mut depth = 0;
+    let mut separator = None;
+    for (index, char) in args.char_indices() {
+        match char {
+            '(' => depth += 1,
+            ')' if depth == 0 => {
+                let separator = separator.expect("ct descriptor must contain a separator");
+                return &args[separator + 1..index];
+            }
+            ')' => depth -= 1,
+            ',' if depth == 0 => separator = Some(index),
+            _ => {}
+        }
+    }
+
+    panic!("ct descriptor must contain an inner descriptor");
 }
 
 #[tokio::test]
