@@ -63,15 +63,15 @@ async fn get_next_block_to_index(
 
                     let reorged_height = last.height;
                     let previous_height = reorged_height - 1;
-                    let blocks_hash_ts = state
-                        .blocks_hash_ts
-                        .lock()
-                        .await
-                        .get(previous_height as usize)
-                        .cloned()
-                        .expect("can't get previous block_hash");
-                    let previous_block_meta =
-                        BlockMeta::new(previous_height, blocks_hash_ts.0, blocks_hash_ts.1);
+                    let previous_block_meta = {
+                        let mut blocks_hash_ts = state.blocks_hash_ts.lock().await;
+                        let (hash, ts) = blocks_hash_ts
+                            .get(previous_height as usize)
+                            .cloned()
+                            .expect("can't get previous block_hash");
+                        blocks_hash_ts.truncate(reorged_height as usize);
+                        BlockMeta::new(previous_height, hash, ts)
+                    };
                     log::info!(
                         "reorg: rolling back to previous block {:?}, calling store.reorg()",
                         previous_block_meta
