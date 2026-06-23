@@ -1,5 +1,8 @@
+use std::convert::Infallible;
+
 use crate::server::{Error, Network};
-use miniscript::ForEachKey;
+use elements_miniscript::TranslatePk as ElementsTranslatePk;
+use miniscript::{ForEachKey, TranslatePk as BitcoinTranslatePk};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Descriptor {
@@ -94,6 +97,22 @@ impl Descriptor {
         }
     }
 
+    pub(crate) fn normalized_id_string(&self) -> String {
+        // ELIP-0152 DWID is the better wallet-level identifier for CT descriptors, but
+        // computing it requires the blinding key. Waterfalls intentionally receives only
+        // the unblinded descriptor, so we normalize just enough for server-side scan ids.
+        match self {
+            Descriptor::Bitcoin(desc) => desc
+                .translate_pk(&mut BitcoinOriginStripper)
+                .expect("removing key origin from bitcoin descriptor cannot fail")
+                .to_string(),
+            Descriptor::Elements(desc) => desc
+                .translate_pk(&mut ElementsOriginStripper)
+                .expect("removing key origin from elements descriptor cannot fail")
+                .to_string(),
+        }
+    }
+
     /// Returns true if all the xpubs in the descriptor are for mainnet.
     /// Returns true if there are no xpubs (e.g., only single keys).
     pub fn is_mainnet(&self) -> bool {
@@ -120,6 +139,156 @@ impl Descriptor {
     }
 }
 
+struct BitcoinOriginStripper;
+
+impl
+    miniscript::Translator<
+        miniscript::DescriptorPublicKey,
+        miniscript::DescriptorPublicKey,
+        Infallible,
+    > for BitcoinOriginStripper
+{
+    fn pk(
+        &mut self,
+        pk: &miniscript::DescriptorPublicKey,
+    ) -> Result<miniscript::DescriptorPublicKey, Infallible> {
+        Ok(strip_bitcoin_key_origin(pk))
+    }
+
+    fn sha256(
+        &mut self,
+        sha256: &<miniscript::DescriptorPublicKey as miniscript::MiniscriptKey>::Sha256,
+    ) -> Result<<miniscript::DescriptorPublicKey as miniscript::MiniscriptKey>::Sha256, Infallible>
+    {
+        Ok(*sha256)
+    }
+
+    fn hash256(
+        &mut self,
+        hash256: &<miniscript::DescriptorPublicKey as miniscript::MiniscriptKey>::Hash256,
+    ) -> Result<<miniscript::DescriptorPublicKey as miniscript::MiniscriptKey>::Hash256, Infallible>
+    {
+        Ok(*hash256)
+    }
+
+    fn ripemd160(
+        &mut self,
+        ripemd160: &<miniscript::DescriptorPublicKey as miniscript::MiniscriptKey>::Ripemd160,
+    ) -> Result<<miniscript::DescriptorPublicKey as miniscript::MiniscriptKey>::Ripemd160, Infallible>
+    {
+        Ok(*ripemd160)
+    }
+
+    fn hash160(
+        &mut self,
+        hash160: &<miniscript::DescriptorPublicKey as miniscript::MiniscriptKey>::Hash160,
+    ) -> Result<<miniscript::DescriptorPublicKey as miniscript::MiniscriptKey>::Hash160, Infallible>
+    {
+        Ok(*hash160)
+    }
+}
+
+fn strip_bitcoin_key_origin(
+    key: &miniscript::DescriptorPublicKey,
+) -> miniscript::DescriptorPublicKey {
+    match key {
+        miniscript::DescriptorPublicKey::Single(single) => {
+            let mut single = single.clone();
+            single.origin = None;
+            miniscript::DescriptorPublicKey::Single(single)
+        }
+        miniscript::DescriptorPublicKey::XPub(xpub) => {
+            let mut xpub = xpub.clone();
+            xpub.origin = None;
+            miniscript::DescriptorPublicKey::XPub(xpub)
+        }
+        miniscript::DescriptorPublicKey::MultiXPub(xpub) => {
+            let mut xpub = xpub.clone();
+            xpub.origin = None;
+            miniscript::DescriptorPublicKey::MultiXPub(xpub)
+        }
+    }
+}
+
+struct ElementsOriginStripper;
+
+impl
+    elements_miniscript::Translator<
+        elements_miniscript::DescriptorPublicKey,
+        elements_miniscript::DescriptorPublicKey,
+        Infallible,
+    > for ElementsOriginStripper
+{
+    fn pk(
+        &mut self,
+        pk: &elements_miniscript::DescriptorPublicKey,
+    ) -> Result<elements_miniscript::DescriptorPublicKey, Infallible> {
+        Ok(strip_elements_key_origin(pk))
+    }
+
+    fn sha256(
+        &mut self,
+        sha256: &<elements_miniscript::DescriptorPublicKey as elements_miniscript::MiniscriptKey>::Sha256,
+    ) -> Result<
+        <elements_miniscript::DescriptorPublicKey as elements_miniscript::MiniscriptKey>::Sha256,
+        Infallible,
+    > {
+        Ok(*sha256)
+    }
+
+    fn hash256(
+        &mut self,
+        hash256: &<elements_miniscript::DescriptorPublicKey as elements_miniscript::MiniscriptKey>::Hash256,
+    ) -> Result<
+        <elements_miniscript::DescriptorPublicKey as elements_miniscript::MiniscriptKey>::Hash256,
+        Infallible,
+    > {
+        Ok(*hash256)
+    }
+
+    fn ripemd160(
+        &mut self,
+        ripemd160: &<elements_miniscript::DescriptorPublicKey as elements_miniscript::MiniscriptKey>::Ripemd160,
+    ) -> Result<
+        <elements_miniscript::DescriptorPublicKey as elements_miniscript::MiniscriptKey>::Ripemd160,
+        Infallible,
+    > {
+        Ok(*ripemd160)
+    }
+
+    fn hash160(
+        &mut self,
+        hash160: &<elements_miniscript::DescriptorPublicKey as elements_miniscript::MiniscriptKey>::Hash160,
+    ) -> Result<
+        <elements_miniscript::DescriptorPublicKey as elements_miniscript::MiniscriptKey>::Hash160,
+        Infallible,
+    > {
+        Ok(*hash160)
+    }
+}
+
+fn strip_elements_key_origin(
+    key: &elements_miniscript::DescriptorPublicKey,
+) -> elements_miniscript::DescriptorPublicKey {
+    match key {
+        elements_miniscript::DescriptorPublicKey::Single(single) => {
+            let mut single = single.clone();
+            single.origin = None;
+            elements_miniscript::DescriptorPublicKey::Single(single)
+        }
+        elements_miniscript::DescriptorPublicKey::XPub(xpub) => {
+            let mut xpub = xpub.clone();
+            xpub.origin = None;
+            elements_miniscript::DescriptorPublicKey::XPub(xpub)
+        }
+        elements_miniscript::DescriptorPublicKey::MultiXPub(xpub) => {
+            let mut xpub = xpub.clone();
+            xpub.origin = None;
+            elements_miniscript::DescriptorPublicKey::MultiXPub(xpub)
+        }
+    }
+}
+
 impl std::fmt::Display for Descriptor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -132,14 +301,20 @@ impl std::fmt::Display for Descriptor {
 pub fn bitcoin_descriptor(s: &str) -> Result<Descriptor, Error> {
     let desc = s
         .parse::<miniscript::descriptor::Descriptor<miniscript::DescriptorPublicKey>>()
-        .map_err(|e| Error::String(format!("{e:?}")))?;
+        .map_err(|e| Error::InvalidDescriptor(format!("{e:?}")))?;
     Ok(Descriptor::Bitcoin(desc))
 }
 
 fn elements_descriptor(s: &str) -> Result<Descriptor, Error> {
+    if s.trim_start().starts_with("ct(") {
+        return Err(Error::InvalidDescriptor(
+            "Confidential descriptors with blinding keys are refused to preserve your privacy; pass the inner descriptor without ct(...)".to_string(),
+        ));
+    }
+
     let desc = s
         .parse::<elements_miniscript::descriptor::Descriptor<elements_miniscript::DescriptorPublicKey>>()
-        .map_err(|e| Error::String(format!("{e:?}")))?;
+        .map_err(|e| Error::InvalidDescriptor(format!("{e:?}")))?;
     Ok(Descriptor::Elements(desc))
 }
 
@@ -226,18 +401,60 @@ mod tests {
     fn test_invalid_descriptors() {
         // Completely invalid descriptor
         let result = Descriptor::from_str("invalid_descriptor", Network::Bitcoin);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidDescriptor(_))));
 
         let result = Descriptor::from_str("invalid_descriptor", Network::Liquid);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidDescriptor(_))));
 
         // Empty string
         let result = Descriptor::from_str("", Network::Bitcoin);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidDescriptor(_))));
 
         // Malformed descriptor
         let result = Descriptor::from_str("wpkh(", Network::Bitcoin);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidDescriptor(_))));
+    }
+
+    #[test]
+    fn test_confidential_descriptor_rejected() {
+        let desc_str = "ct(slip77(1bda6cd71a1e206e3eb793e5a4d98a46c3fa473c9ab7bdef9bb9c814764d6614),elwpkh([cb4ba44a/84'/1'/0']tpubDDrybtUajFcgXC85rvwPsh1oU7Azx4kJ9BAiRzMbByqK7UnVXY3gDRJPwEDfaQwguNUZFzrhavJGgEhbsfuebyxUSZQnjLezWVm2Vdqb7UM/<0;1>/*))#za9ktavp";
+        let result = Descriptor::from_str(desc_str, Network::LiquidTestnet);
+
+        assert!(matches!(
+            result,
+            Err(Error::InvalidDescriptor(message))
+                if message.contains("without ct(...)")
+        ));
+    }
+
+    #[test]
+    fn test_normalized_id_string_ignores_elements_key_origin() {
+        let with_origin = "elwpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)";
+        let without_origin = "elwpkh(xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)";
+
+        let with_origin = Descriptor::from_str(with_origin, Network::Liquid).unwrap();
+        let without_origin = Descriptor::from_str(without_origin, Network::Liquid).unwrap();
+
+        assert_ne!(with_origin.to_string(), without_origin.to_string());
+        assert_eq!(
+            with_origin.normalized_id_string(),
+            without_origin.normalized_id_string()
+        );
+    }
+
+    #[test]
+    fn test_normalized_id_string_ignores_bitcoin_key_origin() {
+        let with_origin = "wpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)";
+        let without_origin = "wpkh(xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)";
+
+        let with_origin = Descriptor::from_str(with_origin, Network::Bitcoin).unwrap();
+        let without_origin = Descriptor::from_str(without_origin, Network::Bitcoin).unwrap();
+
+        assert_ne!(with_origin.to_string(), without_origin.to_string());
+        assert_eq!(
+            with_origin.normalized_id_string(),
+            without_origin.normalized_id_string()
+        );
     }
 
     #[test]

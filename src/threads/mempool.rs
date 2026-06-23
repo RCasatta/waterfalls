@@ -197,8 +197,8 @@ async fn mempool_sync(
     }
 
     let mut mempool_txids = HashSet::new();
-    let support_vebose = client.mempool(true).await.is_ok();
-    log::info!("mempool support verbose: {support_vebose}");
+    let support_verbose = client.mempool(true).await.is_ok();
+    log::info!("mempool support verbose: {support_verbose}");
     let mut last_summary = Instant::now();
     let mut processing_since_last_summary = Duration::ZERO;
     let mut latest_stats = None;
@@ -211,7 +211,7 @@ async fn mempool_sync(
             }
             _ = async {
                 if let Ok(stats) =
-                    sync_mempool_once(&client, support_vebose, &mut mempool_txids, &state, family)
+                    sync_mempool_once(&client, support_verbose, &mut mempool_txids, &state, family)
                         .await
                 {
                     processing_since_last_summary += stats.processing_time;

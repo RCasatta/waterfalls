@@ -33,10 +33,12 @@ mod state;
 mod subscription;
 
 pub use mempool::Mempool;
-pub use state::State;
+pub use state::{State, StateConfig, SubscriptionLimits};
 pub(crate) use subscription::SubscriptionEvent;
 
 const DEFAULT_MAX_TXS_SEEN: usize = 100;
+const DEFAULT_MAX_ACTIVE_SUBSCRIPTIONS: usize = 5_000;
+const DEFAULT_MAX_SCRIPTS_PER_SUBSCRIPTION: usize = 2_000;
 const PERIODIC_LOGGING_INTERVAL: Duration = Duration::from_secs(300);
 
 #[derive(Clone, clap::ValueEnum, Debug, PartialEq, Eq, Copy)]
@@ -115,6 +117,14 @@ pub struct Arguments {
     #[arg(env, long, default_value = "1000000")]
     pub derivation_cache_capacity: usize,
 
+    /// Maximum number of concurrently active SSE subscriptions.
+    #[arg(env, long, default_value = "100")]
+    pub max_active_subscriptions: Option<usize>,
+
+    /// Maximum number of scripts watched by a single SSE subscription.
+    #[arg(env, long, default_value = "500")]
+    pub max_scripts_per_subscription: Option<usize>,
+
     /// Interval in minutes to log RocksDB statistics
     #[arg(env, long, default_value = "120")]
     pub logs_rocksdb_stat_every: u64,
@@ -186,6 +196,11 @@ impl std::fmt::Debug for Arguments {
             .field("max_txs_seen", &self.max_txs_seen)
             .field("add_cors", &self.add_cors)
             .field("derivation_cache_capacity", &self.derivation_cache_capacity)
+            .field("max_active_subscriptions", &self.max_active_subscriptions)
+            .field(
+                "max_scripts_per_subscription",
+                &self.max_scripts_per_subscription,
+            )
             .field("logs_rocksdb_stat_every", &self.logs_rocksdb_stat_every)
             .field("do_compaction", &self.do_compaction)
             .field("shared_db_cache_mb", &self.shared_db_cache_mb)
@@ -231,9 +246,39 @@ impl Arguments {
             Err(Error::String(
                 "Mempool sleep between cycles must be greater than 0".to_string(),
             ))
+        } else if self.max_active_subscriptions == Some(0) {
+            Err(Error::String(
+                "Max active subscriptions must be greater than 0".to_string(),
+            ))
+        } else if self.max_scripts_per_subscription == Some(0) {
+            Err(Error::String(
+                "Max scripts per subscription must be greater than 0".to_string(),
+            ))
         } else {
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subscription_limits_must_be_non_zero() {
+        let args = Arguments {
+            use_esplora: true,
+            max_active_subscriptions: Some(0),
+            ..Default::default()
+        };
+        assert!(args.is_valid().is_err());
+
+        let args = Arguments {
+            use_esplora: true,
+            max_scripts_per_subscription: Some(0),
+            ..Default::default()
+        };
+        assert!(args.is_valid().is_err());
     }
 }
 
@@ -320,6 +365,7 @@ pub enum Error {
     InvalidTx,
     InvalidOutpoint,
     String(String),
+    InvalidDescriptor(String),
     InvalidAddress(String),
     CannotSpecifyBothDescriptorAndAddresses,
     AtLeastOneFieldMandatory,
@@ -405,10 +451,20 @@ pub async fn inner_main(
         store,
         key,
         wif_key,
-        args.max_addresses,
-        args.max_txs_seen.unwrap_or(DEFAULT_MAX_TXS_SEEN),
-        args.cache_control_seconds,
-        args.derivation_cache_capacity,
+        StateConfig {
+            max_addresses: args.max_addresses,
+            max_txs_seen: args.max_txs_seen.unwrap_or(DEFAULT_MAX_TXS_SEEN),
+            cache_control_seconds: args.cache_control_seconds,
+            derivation_cache_capacity: args.derivation_cache_capacity,
+            subscription_limits: SubscriptionLimits {
+                max_active_subscriptions: args
+                    .max_active_subscriptions
+                    .unwrap_or(DEFAULT_MAX_ACTIVE_SUBSCRIPTIONS),
+                max_scripts_per_subscription: args
+                    .max_scripts_per_subscription
+                    .unwrap_or(DEFAULT_MAX_SCRIPTS_PER_SUBSCRIPTION),
+            },
+        },
     )?);
 
     {

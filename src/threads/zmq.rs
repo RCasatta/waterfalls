@@ -1,17 +1,16 @@
-use std::{
-    future::Future,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use futures_util::StreamExt;
 use tmq::{subscribe, Context, Multipart};
+use tokio::time::{interval_at, Instant as TokioInstant, MissedTickBehavior};
 
 use crate::{
     be::Family,
     server::{Error, State},
     store::Store,
 };
+
+const RAWTX_SUMMARY_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 pub(crate) async fn rawtx_listener_infallible(
     state: Arc<State>,
@@ -31,7 +30,6 @@ async fn rawtx_listener(
     shutdown_signal: impl Future<Output = ()>,
 ) -> Result<(), Error> {
     let mut received_txs = 0u64;
-    let mut last_summary = Instant::now();
     let ctx = Context::new();
     let socket_builder = subscribe(&ctx)
         .connect(&endpoint)
@@ -43,6 +41,11 @@ async fn rawtx_listener(
     log::info!("ZMQ rawtx thread listening on {endpoint}");
 
     let mut signal = std::pin::pin!(shutdown_signal);
+    let mut summary_interval = interval_at(
+        TokioInstant::now() + RAWTX_SUMMARY_INTERVAL,
+        RAWTX_SUMMARY_INTERVAL,
+    );
+    summary_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
@@ -55,11 +58,6 @@ async fn rawtx_listener(
                     Some(Ok(message)) => {
                         process_rawtx_message(&state, message, family).await?;
                         received_txs += 1;
-                        if last_summary.elapsed() >= Duration::from_secs(5 * 60) {
-                            log::info!("zmq rawtx summary: received_txs={received_txs}");
-                            last_summary = Instant::now();
-                            received_txs = 0;
-                        }
                     }
                     Some(Err(e)) => log::error!("error receiving ZMQ message from {endpoint}: {e}"),
                     None => {
@@ -68,6 +66,10 @@ async fn rawtx_listener(
                         )));
                     }
                 }
+            }
+            _ = summary_interval.tick() => {
+                log::info!("zmq rawtx summary: received_txs={received_txs}");
+                received_txs = 0;
             }
         }
     }
