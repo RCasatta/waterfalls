@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     time::{Duration, Instant},
 };
 
@@ -144,13 +144,9 @@ impl State {
             .copied()
     }
 
-    pub async fn descriptor_max_used_index_snapshot(&self) -> BTreeMap<u64, Option<u32>> {
-        self.descriptor_max_used_index
-            .lock()
-            .await
-            .iter()
-            .map(|(id, index)| (*id, *index))
-            .collect()
+    pub async fn descriptor_max_used_index_snapshot(&self) -> (usize, Vec<(u64, u32)>) {
+        let descriptor_max_used_index = self.descriptor_max_used_index.lock().await;
+        descriptor_max_used_index_snapshot(&descriptor_max_used_index)
     }
 
     pub async fn update_descriptor_max_used_index_metrics(&self) {
@@ -205,6 +201,21 @@ fn record_descriptor_scan_max_used_index(
             }
         })
         .or_insert(index);
+}
+
+fn descriptor_max_used_index_snapshot(
+    descriptor_max_used_index: &HashMap<u64, Option<u32>>,
+) -> (usize, Vec<(u64, u32)>) {
+    let mut top_indexes: Vec<_> = descriptor_max_used_index
+        .iter()
+        .filter_map(|(id, index)| index.map(|index| (*id, index)))
+        .collect();
+    top_indexes.sort_unstable_by(|(a_id, a_index), (b_id, b_index)| {
+        b_index.cmp(a_index).then_with(|| a_id.cmp(b_id))
+    });
+    top_indexes.truncate(3);
+
+    (descriptor_max_used_index.len(), top_indexes)
 }
 
 fn update_hash_ts(blocks_hash_ts: &mut Vec<(BlockHash, u32)>, meta: &BlockMeta) {
@@ -379,5 +390,23 @@ mod tests {
         assert_eq!(descriptor_max_used_index.get(&1), Some(&Some(40)));
         assert_eq!(descriptor_max_used_index.get(&2), Some(&None));
         assert_eq!(descriptor_max_used_index.get(&3), Some(&Some(30)));
+    }
+
+    #[test]
+    fn test_descriptor_max_used_index_snapshot_returns_total_and_top_three() {
+        let descriptor_max_used_index = HashMap::from([
+            (1, Some(20)),
+            (2, None),
+            (3, Some(30)),
+            (4, Some(10)),
+            (5, Some(40)),
+            (6, Some(40)),
+        ]);
+
+        let (total_descriptors, top_indexes) =
+            descriptor_max_used_index_snapshot(&descriptor_max_used_index);
+
+        assert_eq!(total_descriptors, 6);
+        assert_eq!(top_indexes, vec![(5, 40), (6, 40), (3, 30)]);
     }
 }

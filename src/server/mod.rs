@@ -656,13 +656,16 @@ async fn periodic_logging(state: Arc<State>, shutdown_signal: impl Future<Output
 }
 
 async fn log_periodic_state(state: &State) {
-    let descriptor_max_used_index = state.descriptor_max_used_index_snapshot().await;
-    if !descriptor_max_used_index.is_empty() {
-        let descriptor_max_used_index: std::collections::BTreeMap<_, _> = descriptor_max_used_index
+    let (total_descriptors, top_descriptor_max_used_indexes) =
+        state.descriptor_max_used_index_snapshot().await;
+    if total_descriptors > 0 {
+        let top_descriptor_max_used_indexes: Vec<_> = top_descriptor_max_used_indexes
             .into_iter()
             .map(|(id, index)| (format!("{id:x}"), index))
             .collect();
-        log::info!("descriptor max used indexes: {descriptor_max_used_index:?}");
+        log::info!(
+            "descriptor max used indexes: total_descriptors={total_descriptors}, top_descriptor_max_used_indexes={top_descriptor_max_used_indexes:?}"
+        );
     }
 }
 
