@@ -39,7 +39,8 @@ pub struct DBStore {
     salt: u64,
 
     /// Whether we are in Initial Block Download mode.
-    /// during initial block download we do something different to speed up initial indexing, like writing disabling the wal.
+    /// During initial block download we skip reorg data writes, since reorgs are
+    /// extremely unlikely for old blocks and the data is only needed near tip.
     ibd: AtomicBool,
 
     /// Number of recent block heights to keep reorg data for. Older reorg data is automatically deleted.
@@ -492,11 +493,7 @@ impl DBStore {
     }
 
     fn write(&self, batch: rocksdb::WriteBatch) -> Result<()> {
-        if self.ibd.load(Ordering::Relaxed) {
-            self.db.write_without_wal(batch)?
-        } else {
-            self.db.write(batch)?
-        };
+        self.db.write(batch)?;
         Ok(())
     }
 
@@ -727,15 +724,7 @@ impl Store for DBStore {
     }
 
     fn ibd_finished(&self) {
-        log::info!("Initial block download finished, flushing memtables before enabling WAL...");
-        for cf_name in COLUMN_FAMILIES {
-            if let Some(cf) = self.db.cf_handle(cf_name) {
-                self.db
-                    .flush_cf(&cf)
-                    .unwrap_or_else(|e| log::error!("failed to flush CF {cf_name}: {e}"));
-            }
-        }
-        log::info!("Memtables flushed, setting ibd to false");
+        log::info!("Initial block download finished, enabling reorg data writes");
         self.ibd.store(false, Ordering::Relaxed);
     }
 }
