@@ -15,6 +15,7 @@ impl std::fmt::Display for SubscriptionId {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SubscriptionEvent {
+    Tip,
     Block,
     Mempool,
     Reorg,
@@ -23,6 +24,7 @@ pub(crate) enum SubscriptionEvent {
 impl SubscriptionEvent {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            SubscriptionEvent::Tip => "tip",
             SubscriptionEvent::Block => "block",
             SubscriptionEvent::Mempool => "mempool",
             SubscriptionEvent::Reorg => "reorg",

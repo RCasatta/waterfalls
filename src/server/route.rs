@@ -17,7 +17,7 @@ use hyper::{
     Method, Request, Response, StatusCode,
 };
 use prometheus::Encoder;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
     convert::Infallible,
@@ -1013,12 +1013,19 @@ fn sse_resp(
                 "subscription notification sent: id={}, event={event}",
                 cleanup.id
             );
+            let state = cleanup.state.clone();
             (
-                Ok::<Frame<Bytes>, Infallible>(Frame::data(Bytes::from(sse_event(event)))),
+                async move {
+                    Ok::<Frame<Bytes>, Infallible>(Frame::data(Bytes::from(sse_event(
+                        event,
+                        state.tip().await,
+                    ))))
+                },
                 (receiver, cleanup),
             )
         })
     });
+    let events = events.then(|frame| frame);
     let body = BodyExt::boxed(StreamBody::new(ready.chain(events)));
 
     Response::builder()
@@ -1047,18 +1054,58 @@ impl Drop for SubscriptionCleanup {
     }
 }
 
-fn sse_event(event: SubscriptionEvent) -> String {
-    format!(
-        "event: changed\ndata: {{\"reason\":\"{}\"}}\n\n",
-        subscription_event_reason(event)
-    )
+fn sse_event(event: SubscriptionEvent, tip: Option<crate::BlockMeta>) -> String {
+    let data = SseEvent {
+        event_type: SseEventType::from(event),
+        tip: tip.map(SseTip::from),
+    };
+    let data = serde_json::to_string(&data).expect("SSE event serialization cannot fail");
+    format!("event: update\ndata: {data}\n\n")
 }
 
-fn subscription_event_reason(event: SubscriptionEvent) -> &'static str {
-    match event {
-        SubscriptionEvent::Block => "block",
-        SubscriptionEvent::Mempool => "mempool",
-        SubscriptionEvent::Reorg => "reorg",
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SseEvent {
+    #[serde(rename = "type")]
+    pub event_type: SseEventType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<SseTip>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SseEventType {
+    #[serde(rename = "tip")]
+    Tip,
+    #[serde(rename = "block")]
+    Block,
+    #[serde(rename = "mempool")]
+    Mempool,
+    #[serde(rename = "reorg")]
+    Reorg,
+}
+
+impl From<SubscriptionEvent> for SseEventType {
+    fn from(event: SubscriptionEvent) -> Self {
+        match event {
+            SubscriptionEvent::Tip => SseEventType::Tip,
+            SubscriptionEvent::Block => SseEventType::Block,
+            SubscriptionEvent::Mempool => SseEventType::Mempool,
+            SubscriptionEvent::Reorg => SseEventType::Reorg,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SseTip {
+    pub height: u32,
+    pub block_hash: BlockHash,
+}
+
+impl From<crate::BlockMeta> for SseTip {
+    fn from(tip: crate::BlockMeta) -> Self {
+        Self {
+            height: tip.h,
+            block_hash: tip.b,
+        }
     }
 }
 
@@ -1451,17 +1498,41 @@ mod tests {
     #[test]
     fn test_sse_event() {
         assert_eq!(
-            sse_event(SubscriptionEvent::Block),
-            "event: changed\ndata: {\"reason\":\"block\"}\n\n"
+            sse_event(SubscriptionEvent::Tip, Some(test_tip())),
+            format!(
+                "event: update\ndata: {{\"type\":\"tip\",\"tip\":{{\"height\":42,\"block_hash\":\"{}\"}}}}\n\n",
+                test_tip().b
+            )
         );
         assert_eq!(
-            sse_event(SubscriptionEvent::Mempool),
-            "event: changed\ndata: {\"reason\":\"mempool\"}\n\n"
+            sse_event(SubscriptionEvent::Block, Some(test_tip())),
+            format!(
+                "event: update\ndata: {{\"type\":\"block\",\"tip\":{{\"height\":42,\"block_hash\":\"{}\"}}}}\n\n",
+                test_tip().b
+            )
         );
         assert_eq!(
-            sse_event(SubscriptionEvent::Reorg),
-            "event: changed\ndata: {\"reason\":\"reorg\"}\n\n"
+            sse_event(SubscriptionEvent::Mempool, None),
+            "event: update\ndata: {\"type\":\"mempool\"}\n\n"
         );
+        assert_eq!(
+            sse_event(SubscriptionEvent::Reorg, Some(test_tip())),
+            format!(
+                "event: update\ndata: {{\"type\":\"reorg\",\"tip\":{{\"height\":42,\"block_hash\":\"{}\"}}}}\n\n",
+                test_tip().b
+            )
+        );
+    }
+
+    fn test_tip() -> crate::BlockMeta {
+        crate::BlockMeta {
+            h: 42,
+            b: BlockHash::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000042",
+            )
+            .unwrap(),
+            t: 123,
+        }
     }
 
     #[test]

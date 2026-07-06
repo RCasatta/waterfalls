@@ -11,7 +11,11 @@ use elements::AddressParams;
 use tokio::time::{sleep, timeout};
 use waterfalls::Family;
 #[cfg(feature = "test_env")]
-use waterfalls::{be, fetch::Client as FetchClient, server::Arguments, server::Network};
+use waterfalls::{
+    be,
+    fetch::Client as FetchClient,
+    server::{route::SseEvent, route::SseEventType, Arguments, Network},
+};
 
 #[cfg(feature = "test_env")]
 #[tokio::test]
@@ -353,18 +357,14 @@ async fn do_test_subscribe_notifies_descriptor_change(test_env: waterfalls::test
     let addr = subscription_test_address(test_env.family, &single_desc, 20);
     test_env.send_to(&addr, 10_000);
 
-    let event = sse.next_changed_event().await;
-    assert!(
-        event.contains("\"reason\":\"mempool\""),
-        "unexpected SSE event: {event}"
-    );
+    let event = sse.next_update_event().await;
+    assert_eq!(event.event_type, SseEventType::Mempool);
+    assert_sse_tip(event.tip.as_ref());
 
     test_env.node_generate(1).await;
-    let event = sse.next_changed_event().await;
-    assert!(
-        event.contains("\"reason\":\"block\""),
-        "unexpected SSE event: {event}"
-    );
+    let event = sse.next_update_event().await;
+    assert_eq!(event.event_type, SseEventType::Block);
+    assert_sse_tip(event.tip.as_ref());
 
     test_env.shutdown().await;
 }
@@ -456,19 +456,19 @@ impl SseTestReader {
         }
     }
 
-    async fn next_changed_event(&mut self) -> String {
+    async fn next_update_event(&mut self) -> SseEvent {
         timeout(Duration::from_secs(10), async {
             loop {
                 if let Some(event) = self.pop_event() {
-                    if event.contains("event: changed") {
-                        return event;
+                    if event.contains("event: update") {
+                        return parse_sse_event(&event);
                     }
                     continue;
                 }
 
                 let Some(chunk) = self.response.chunk().await.unwrap() else {
                     panic!(
-                        "SSE stream ended before changed event, buffered: {}",
+                        "SSE stream ended before update event, buffered: {}",
                         self.buffer
                     );
                 };
@@ -477,7 +477,7 @@ impl SseTestReader {
             }
         })
         .await
-        .expect("timed out waiting for SSE changed event")
+        .expect("timed out waiting for SSE update event")
     }
 
     fn pop_event(&mut self) -> Option<String> {
@@ -486,6 +486,26 @@ impl SseTestReader {
         self.buffer.drain(..end + 2);
         Some(event)
     }
+}
+
+#[cfg(feature = "test_env")]
+fn parse_sse_event(event: &str) -> SseEvent {
+    let data = event
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .unwrap_or_else(|| panic!("SSE update event without data line: {event}"));
+    serde_json::from_str(data).unwrap_or_else(|e| panic!("invalid SSE update JSON: {e}: {data}"))
+}
+
+#[cfg(feature = "test_env")]
+fn assert_sse_tip(tip: Option<&waterfalls::server::route::SseTip>) {
+    let tip = tip.expect("SSE event should include tip");
+    assert!(tip.height > 0, "unexpected SSE tip: {tip:?}");
+    assert_eq!(
+        tip.block_hash.to_string().len(),
+        64,
+        "unexpected SSE tip: {tip:?}"
+    );
 }
 
 #[cfg(feature = "test_env")]
