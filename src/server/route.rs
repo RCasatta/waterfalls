@@ -1098,6 +1098,7 @@ impl From<SubscriptionEvent> for SseEventType {
 pub struct SseTip {
     pub height: u32,
     pub block_hash: BlockHash,
+    pub timestamp: u32,
 }
 
 impl From<crate::BlockMeta> for SseTip {
@@ -1105,6 +1106,7 @@ impl From<crate::BlockMeta> for SseTip {
         Self {
             height: tip.h,
             block_hash: tip.b,
+            timestamp: tip.t,
         }
     }
 }
@@ -1500,14 +1502,14 @@ mod tests {
         assert_eq!(
             sse_event(SubscriptionEvent::Tip, Some(test_tip())),
             format!(
-                "event: update\ndata: {{\"type\":\"tip\",\"tip\":{{\"height\":42,\"block_hash\":\"{}\"}}}}\n\n",
+                "event: update\ndata: {{\"type\":\"tip\",\"tip\":{{\"height\":42,\"block_hash\":\"{}\",\"timestamp\":123}}}}\n\n",
                 test_tip().b
             )
         );
         assert_eq!(
             sse_event(SubscriptionEvent::Block, Some(test_tip())),
             format!(
-                "event: update\ndata: {{\"type\":\"block\",\"tip\":{{\"height\":42,\"block_hash\":\"{}\"}}}}\n\n",
+                "event: update\ndata: {{\"type\":\"block\",\"tip\":{{\"height\":42,\"block_hash\":\"{}\",\"timestamp\":123}}}}\n\n",
                 test_tip().b
             )
         );
@@ -1518,7 +1520,7 @@ mod tests {
         assert_eq!(
             sse_event(SubscriptionEvent::Reorg, Some(test_tip())),
             format!(
-                "event: update\ndata: {{\"type\":\"reorg\",\"tip\":{{\"height\":42,\"block_hash\":\"{}\"}}}}\n\n",
+                "event: update\ndata: {{\"type\":\"reorg\",\"tip\":{{\"height\":42,\"block_hash\":\"{}\",\"timestamp\":123}}}}\n\n",
                 test_tip().b
             )
         );

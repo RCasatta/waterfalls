@@ -506,6 +506,7 @@ fn parse_sse_event(event: &str) -> SseEvent {
 fn assert_sse_tip(tip: Option<&waterfalls::server::route::SseTip>) {
     let tip = tip.expect("SSE event should include tip");
     assert!(tip.height > 0, "unexpected SSE tip: {tip:?}");
+    assert!(tip.timestamp > 0, "unexpected SSE tip: {tip:?}");
     assert_eq!(
         tip.block_hash.to_string().len(),
         64,

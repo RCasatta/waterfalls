@@ -198,7 +198,7 @@ When an update is available, the server sends:
 
 ```text
 event: update
-data: {"type":"mempool","tip":{"height":12345,"block_hash":"current_tip_hash"}}
+data: {"type":"mempool","tip":{"height":12345,"block_hash":"current_tip_hash","timestamp":1234567890}}
 
 ```
 
@@ -208,6 +208,7 @@ data: {"type":"mempool","tip":{"height":12345,"block_hash":"current_tip_hash"}}
 - `tip` (object, optional): Latest known chain tip when the event is sent
   - `height` (number): Tip block height
   - `block_hash` (string): Tip block hash
+  - `timestamp` (number): Tip block timestamp as Unix epoch seconds
 
 **Event Types:**
 
