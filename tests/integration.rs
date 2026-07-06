@@ -366,6 +366,11 @@ async fn do_test_subscribe_notifies_descriptor_change(test_env: waterfalls::test
     assert_eq!(event.event_type, SseEventType::Block);
     assert_sse_tip(event.tip.as_ref());
 
+    test_env.node_generate(1).await;
+    let event = sse.next_update_event().await;
+    assert_eq!(event.event_type, SseEventType::Tip);
+    assert_sse_tip(event.tip.as_ref());
+
     test_env.shutdown().await;
 }
 
