@@ -147,6 +147,15 @@ impl Client {
         })
     }
 
+    fn rpc_url(&self) -> String {
+        let rpc_auth = self
+            .rpc_user_password
+            .as_ref()
+            .expect("validated by Arguments");
+        self.base_url
+            .replace("http://", &format!("http://{rpc_auth}@",))
+    }
+
     // `curl http://127.0.0.1:7041/rest/blockhashbyheight/0.hex`
     // GET /block-height/:height
     pub async fn block_hash(&self, height: u32) -> Result<Option<BlockHash>> {
@@ -472,13 +481,7 @@ impl Client {
 
             self.client.post(&url).body(tx_hex).send().await?
         } else {
-            let rpc_auth = self
-                .rpc_user_password
-                .as_ref()
-                .expect("validated by Arguments");
-            let url = self
-                .base_url
-                .replace("http://", &format!("http://{rpc_auth}@",));
+            let url = self.rpc_url();
             log::info!("broadcasting to url {}", self.base_url);
 
             let data = json!({
@@ -543,13 +546,7 @@ impl Client {
 
             serde_json::from_str::<HashMap<u16, f64>>(&text)?
         } else {
-            let rpc_auth = self
-                .rpc_user_password
-                .as_ref()
-                .expect("validated by Arguments");
-            let url = self
-                .base_url
-                .replace("http://", &format!("http://{rpc_auth}@",));
+            let url = self.rpc_url();
             log::info!("fetching fee estimates from {}", self.base_url);
 
             let batch: Vec<serde_json::Value> = CONF_TARGETS
