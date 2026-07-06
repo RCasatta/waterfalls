@@ -235,6 +235,29 @@ impl Subscriptions {
         self.notify_subscriptions(event, subscriptions)
     }
 
+    pub(crate) fn notify_block_tip<I>(&mut self, scripts: I) -> usize
+    where
+        I: IntoIterator<Item = ScriptHash>,
+    {
+        let mut block_subscriptions = HashSet::new();
+        for script in scripts {
+            if let Some(ids) = self.by_script.get(&script) {
+                block_subscriptions.extend(ids.iter().copied());
+            }
+        }
+
+        let tip_subscriptions = self
+            .by_id
+            .keys()
+            .copied()
+            .filter(|id| !block_subscriptions.contains(id))
+            .collect();
+
+        let block_sent = self.notify_subscriptions(SubscriptionEvent::Block, block_subscriptions);
+        let tip_sent = self.notify_subscriptions(SubscriptionEvent::Tip, tip_subscriptions);
+        block_sent + tip_sent
+    }
+
     pub(crate) fn notify_all(&mut self, event: SubscriptionEvent) -> usize {
         let subscriptions = self.by_id.keys().copied().collect();
         self.notify_subscriptions(event, subscriptions)

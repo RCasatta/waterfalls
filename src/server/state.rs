@@ -176,6 +176,13 @@ impl State {
         self.subscriptions.lock().await.notify_all(event)
     }
 
+    pub(crate) async fn notify_block_tip_subscriptions<I>(&self, scripts: I) -> usize
+    where
+        I: IntoIterator<Item = ScriptHash>,
+    {
+        self.subscriptions.lock().await.notify_block_tip(scripts)
+    }
+
     pub(crate) async fn subscribe_scripts(
         &self,
         scripts: Vec<ScriptHash>,

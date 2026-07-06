@@ -262,7 +262,7 @@ pub async fn index(
             .update(&block_to_index, utxo_spent, history_map, utxo_created)
             .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
         state
-            .notify_subscription_scripts(SubscriptionEvent::Block, changed_script_hashes)
+            .notify_block_tip_subscriptions(changed_script_hashes)
             .await;
 
         crate::BLOCKCHAIN_TIP.set(block_to_index.height as i64);
