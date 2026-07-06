@@ -1,6 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex},
+};
 
-use tokio::sync::mpsc;
+use tokio::sync::Notify;
 
 use crate::ScriptHash;
 
@@ -30,6 +33,23 @@ impl SubscriptionEvent {
             SubscriptionEvent::Reorg => "reorg",
         }
     }
+
+    fn priority(self) -> u8 {
+        match self {
+            SubscriptionEvent::Tip => 0,
+            SubscriptionEvent::Mempool => 1,
+            SubscriptionEvent::Block => 2,
+            SubscriptionEvent::Reorg => 3,
+        }
+    }
+
+    fn merge(self, incoming: SubscriptionEvent) -> SubscriptionEvent {
+        if incoming.priority() > self.priority() {
+            incoming
+        } else {
+            self
+        }
+    }
 }
 
 impl std::fmt::Display for SubscriptionEvent {
@@ -38,7 +58,33 @@ impl std::fmt::Display for SubscriptionEvent {
     }
 }
 
-pub(crate) type SubscriptionReceiver = mpsc::Receiver<SubscriptionEvent>;
+pub(crate) struct SubscriptionReceiver {
+    queue: Arc<SubscriptionQueue>,
+}
+
+impl std::fmt::Debug for SubscriptionReceiver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SubscriptionReceiver")
+            .finish_non_exhaustive()
+    }
+}
+
+impl SubscriptionReceiver {
+    pub(crate) async fn recv(&mut self) -> Option<SubscriptionEvent> {
+        loop {
+            let notified = self.queue.notify.notified();
+            if let Some(event) = self.queue.take() {
+                return Some(event);
+            }
+            notified.await;
+        }
+    }
+
+    #[cfg(test)]
+    fn try_recv(&mut self) -> Result<SubscriptionEvent, ()> {
+        self.queue.take().ok_or(())
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum SubscriptionError {
@@ -57,7 +103,53 @@ pub(crate) struct Subscriptions {
 
 struct Subscription {
     scripts: Vec<ScriptHash>,
-    sender: mpsc::Sender<SubscriptionEvent>,
+    queue: Arc<SubscriptionQueue>,
+}
+
+struct SubscriptionQueue {
+    pending: Mutex<Option<SubscriptionEvent>>,
+    notify: Notify,
+}
+
+impl SubscriptionQueue {
+    fn new() -> Self {
+        Self {
+            pending: Mutex::new(None),
+            notify: Notify::new(),
+        }
+    }
+
+    fn push(&self, event: SubscriptionEvent) -> PushResult {
+        let mut pending = self
+            .pending
+            .lock()
+            .expect("subscription pending event mutex poisoned");
+        let result = match *pending {
+            Some(existing) => {
+                *pending = Some(existing.merge(event));
+                PushResult::Coalesced
+            }
+            None => {
+                *pending = Some(event);
+                PushResult::Queued
+            }
+        };
+        drop(pending);
+        self.notify.notify_one();
+        result
+    }
+
+    fn take(&self) -> Option<SubscriptionEvent> {
+        self.pending
+            .lock()
+            .expect("subscription pending event mutex poisoned")
+            .take()
+    }
+}
+
+enum PushResult {
+    Queued,
+    Coalesced,
 }
 
 impl Subscriptions {
@@ -90,12 +182,15 @@ impl Subscriptions {
         let id = SubscriptionId(self.next_id);
         self.next_id = self.next_id.wrapping_add(1);
 
-        let (sender, receiver) = mpsc::channel(1);
+        let queue = Arc::new(SubscriptionQueue::new());
+        let receiver = SubscriptionReceiver {
+            queue: queue.clone(),
+        };
         for script in scripts.iter().copied() {
             self.by_script.entry(script).or_default().insert(id);
         }
         let scripts_len = scripts.len();
-        self.by_id.insert(id, Subscription { scripts, sender });
+        self.by_id.insert(id, Subscription { scripts, queue });
         log::info!(
             "subscription registered: id={id}, scripts={scripts_len}, active={}",
             self.by_id.len()
@@ -158,20 +253,22 @@ impl Subscriptions {
             let Some(subscription) = self.by_id.get(&id) else {
                 continue;
             };
-            match subscription.sender.try_send(event) {
-                Ok(()) => {
+            if Arc::strong_count(&subscription.queue) == 1 {
+                crate::inc_subscription_notification_counter(event.as_str(), "closed");
+                closed.push(id);
+                continue;
+            }
+
+            match subscription.queue.push(event) {
+                PushResult::Queued => {
                     sent += 1;
                     crate::inc_subscription_notification_counter(event.as_str(), "queued");
                     log::info!("subscription notification queued: id={id}, event={event}");
                 }
-                Err(mpsc::error::TrySendError::Full(_)) => {
+                PushResult::Coalesced => {
                     coalesced += 1;
                     crate::inc_subscription_notification_counter(event.as_str(), "coalesced");
                     log::info!("subscription notification coalesced: id={id}, event={event}");
-                }
-                Err(mpsc::error::TrySendError::Closed(_)) => {
-                    crate::inc_subscription_notification_counter(event.as_str(), "closed");
-                    closed.push(id);
                 }
             }
         }
@@ -262,6 +359,28 @@ mod tests {
         );
         assert_eq!(
             subscriptions.notify_scripts(SubscriptionEvent::Mempool, vec![1]),
+            0
+        );
+
+        assert_eq!(rx.try_recv().unwrap(), SubscriptionEvent::Block);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn notify_scripts_coalesces_to_highest_priority_event() {
+        let mut subscriptions = Subscriptions::new(10, 10);
+        let (_id, mut rx) = subscriptions.subscribe(vec![1]).unwrap();
+
+        assert_eq!(
+            subscriptions.notify_scripts(SubscriptionEvent::Tip, vec![1]),
+            1
+        );
+        assert_eq!(
+            subscriptions.notify_scripts(SubscriptionEvent::Block, vec![1]),
+            0
+        );
+        assert_eq!(
+            subscriptions.notify_scripts(SubscriptionEvent::Tip, vec![1]),
             0
         );
 
