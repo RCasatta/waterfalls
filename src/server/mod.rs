@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -90,10 +91,15 @@ pub struct Arguments {
     #[arg(long, env)]
     pub wif_key: Option<PrivateKey>,
 
-    /// Elements node rpc user and password, separated by ':' (same as the content of the cookie file)
+    /// File containing the Elements node rpc user and password, separated by ':' (same as the content of the cookie file)
     ///
     /// RPC connection is needed for broadcasting transaction via the `sendrawtransaction` call which is not present in the REST interface.
     /// It's an error if `use_esplora` is false and this is missing.
+    #[arg(long, env)]
+    pub rpc_user_password_file: Option<PathBuf>,
+
+    /// Deprecated: Elements node rpc user and password, separated by ':'.
+    /// Use `--rpc-user-password-file` instead.
     #[arg(long, env)]
     pub rpc_user_password: Option<String>,
 
@@ -187,6 +193,7 @@ impl std::fmt::Debug for Arguments {
                 "wif_key",
                 &self.wif_key.as_ref().map(|_| "Some(<redacted>)"),
             ) // Show presence without revealing key
+            .field("rpc_user_password_file", &self.rpc_user_password_file)
             .field(
                 "rpc_user_password",
                 &self.rpc_user_password.as_ref().map(|_| "Some(<redacted>)"),
@@ -230,9 +237,12 @@ impl std::fmt::Debug for Arguments {
 
 impl Arguments {
     pub fn is_valid(&self) -> Result<(), Error> {
-        if !self.use_esplora && self.rpc_user_password.is_none() {
+        if !self.use_esplora
+            && self.rpc_user_password_file.is_none()
+            && self.rpc_user_password.is_none()
+        {
             Err(Error::String(
-                "When using the node you must specify --rpc-user-password".to_string(),
+                "When using the node you must specify --rpc-user-password-file".to_string(),
             ))
         } else if self.max_txs_seen == Some(0) {
             Err(Error::String(
@@ -263,6 +273,18 @@ impl Arguments {
 #[cfg(test)]
 mod argument_tests {
     use super::*;
+
+    #[test]
+    fn deprecated_rpc_user_password_keeps_node_mode_valid() {
+        let args = Arguments {
+            use_esplora: false,
+            rpc_user_password: Some("user:pass".to_string()),
+            request_timeout_seconds: 1,
+            ..Default::default()
+        };
+
+        assert!(args.is_valid().is_ok());
+    }
 
     #[test]
     fn subscription_limits_must_be_non_zero() {

@@ -525,12 +525,7 @@ fn fetch_client_for_node(node: &bitcoind::BitcoinD, network: Network) -> FetchCl
         network,
         node_url: Some(node.rpc_url()),
         request_timeout_seconds: 10,
-        rpc_user_password: Some(
-            std::fs::read_to_string(&node.params.cookie_file)
-                .unwrap()
-                .trim()
-                .to_string(),
-        ),
+        rpc_user_password_file: Some(node.params.cookie_file.clone()),
         ..Arguments::default()
     };
     FetchClient::new(&args).unwrap()

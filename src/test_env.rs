@@ -139,8 +139,7 @@ async fn inner_launch_with_node_no_generate(
     args.max_addresses = 100;
     args.max_txs_seen = max_txs_seen;
 
-    let cookie = std::fs::read_to_string(&node.params.cookie_file).unwrap();
-    args.rpc_user_password = Some(cookie);
+    args.rpc_user_password_file = Some(node.params.cookie_file.clone());
 
     #[cfg(feature = "db")]
     {

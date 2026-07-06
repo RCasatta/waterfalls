@@ -66,6 +66,22 @@ const LOCAL: &str = "http://127.0.0.1";
 impl Client {
     pub fn new(args: &Arguments) -> Result<Client> {
         args.is_valid()?;
+        let rpc_user_password = if let Some(path) = args.rpc_user_password_file.as_ref() {
+            if args.rpc_user_password.is_some() {
+                log::warn!(
+                    "--rpc-user-password is deprecated and ignored because --rpc-user-password-file is set"
+                );
+            }
+            let content = std::fs::read_to_string(path).with_context(|| {
+                format!("Failed to read rpc user password file {}", path.display())
+            })?;
+            Some(content.trim().to_string())
+        } else if let Some(rpc_user_password) = args.rpc_user_password.as_ref() {
+            log::warn!("--rpc-user-password is deprecated; use --rpc-user-password-file instead");
+            Some(rpc_user_password.trim().to_string())
+        } else {
+            None
+        };
         let esplora_url = match args.network {
             Network::Liquid => args
                 .esplora_url
@@ -127,7 +143,7 @@ impl Client {
             use_esplora,
             base_url,
             esplora_url,
-            rpc_user_password: args.rpc_user_password.clone(),
+            rpc_user_password,
         })
     }
 
@@ -640,7 +656,7 @@ pub struct ChainInfo {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
+    use std::{io::Write, str::FromStr};
 
     use elements::BlockHash;
 
@@ -773,7 +789,9 @@ mod test {
         args.network = Network::Bitcoin;
         args.use_esplora = false;
         args.node_url = Some(format!("http://{addr}"));
-        args.rpc_user_password = Some("user:pass".to_string()); // satisfies is_valid()
+        let mut rpc_user_password_file = tempfile::NamedTempFile::new().unwrap();
+        write!(rpc_user_password_file, "user:pass").unwrap();
+        args.rpc_user_password_file = Some(rpc_user_password_file.path().to_path_buf());
         args.request_timeout_seconds = 30; // Default::default() leaves this 0, which is_valid() rejects
         args.node_disable_conn_pool = disable_conn_pool;
         Client::new(&args).unwrap()
