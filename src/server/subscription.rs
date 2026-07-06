@@ -412,6 +412,20 @@ mod tests {
     }
 
     #[test]
+    fn notify_block_tip_sends_block_or_tip_once_per_subscription() {
+        let mut subscriptions = Subscriptions::new(10, 10);
+        let (_first_id, mut first_rx) = subscriptions.subscribe(vec![1, 2]).unwrap();
+        let (_second_id, mut second_rx) = subscriptions.subscribe(vec![3]).unwrap();
+
+        assert_eq!(subscriptions.notify_block_tip(vec![2]), 2);
+
+        assert_eq!(first_rx.try_recv().unwrap(), SubscriptionEvent::Block);
+        assert_eq!(second_rx.try_recv().unwrap(), SubscriptionEvent::Tip);
+        assert!(first_rx.try_recv().is_err());
+        assert!(second_rx.try_recv().is_err());
+    }
+
+    #[test]
     fn unsubscribe_removes_script_index_entries() {
         let mut subscriptions = Subscriptions::new(10, 10);
         let (id, mut rx) = subscriptions.subscribe(vec![1, 2]).unwrap();
