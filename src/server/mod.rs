@@ -454,6 +454,8 @@ pub async fn inner_main(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log::info!("starting waterfalls with args: {:?}", args);
 
+    Client::new(&args)?.authenticated_rpc_preflight().await?;
+
     let store = get_store(&args)?;
 
     let key = args.server_key.clone().unwrap_or_else(Identity::generate);

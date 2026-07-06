@@ -147,6 +147,49 @@ impl Client {
         })
     }
 
+    pub async fn authenticated_rpc_preflight(&self) -> Result<()> {
+        if self.use_esplora {
+            return Ok(());
+        }
+
+        log::info!("checking rpc authentication against {}", self.base_url);
+        let data = json!({
+            "jsonrpc": "1.0",
+            "id": "waterfalls-rpc-preflight",
+            "method": "getnetworkinfo",
+            "params": [],
+        });
+        let data = serde_json::to_string(&data)?;
+        let response = self
+            .client
+            .post(self.rpc_url())
+            .body(data)
+            .send()
+            .await
+            .with_context(|| {
+                format!("RPC authentication preflight failed for {}", self.base_url)
+            })?;
+        let status = response.status();
+        let text = response.text().await?;
+        if status != 200 {
+            anyhow::bail!(
+                "RPC authentication preflight failed with status:{status}, body is {text}"
+            );
+        }
+
+        let value: serde_json::Value = serde_json::from_str(&text).with_context(|| {
+            format!("RPC authentication preflight returned invalid JSON: {text}")
+        })?;
+        if !value["error"].is_null() {
+            anyhow::bail!("RPC authentication preflight failed: {}", value["error"]);
+        }
+        if value.get("result").is_none() {
+            anyhow::bail!("RPC authentication preflight returned JSON without result");
+        }
+
+        Ok(())
+    }
+
     fn rpc_url(&self) -> String {
         let rpc_auth = self
             .rpc_user_password
@@ -781,6 +824,38 @@ mod test {
         (addr, connections)
     }
 
+    async fn spawn_rpc_preflight_node(
+        status: &str,
+        body: &str,
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let status = status.to_string();
+        let body = body.to_string();
+
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            loop {
+                let n = socket.read(&mut buf).await.unwrap();
+                if n == 0 || buf[..n].windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        (addr, handle)
+    }
+
     fn node_client(addr: std::net::SocketAddr, disable_conn_pool: bool) -> Client {
         let mut args = Arguments::default();
         args.network = Network::Bitcoin;
@@ -792,6 +867,27 @@ mod test {
         args.request_timeout_seconds = 30; // Default::default() leaves this 0, which is_valid() rejects
         args.node_disable_conn_pool = disable_conn_pool;
         Client::new(&args).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_authenticated_rpc_preflight_succeeds() {
+        let (addr, handle) =
+            spawn_rpc_preflight_node("200 OK", r#"{"result":{"version":280000},"error":null}"#)
+                .await;
+        let client = node_client(addr, false);
+
+        client.authenticated_rpc_preflight().await.unwrap();
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_authenticated_rpc_preflight_fails_on_unauthorized() {
+        let (addr, handle) = spawn_rpc_preflight_node("401 Unauthorized", "").await;
+        let client = node_client(addr, false);
+
+        let err = client.authenticated_rpc_preflight().await.unwrap_err();
+        assert!(err.to_string().contains("status:401 Unauthorized"));
+        handle.await.unwrap();
     }
 
     /// Default (pooled) behavior: sequential requests reuse a single keep-alive connection.
