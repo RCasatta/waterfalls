@@ -194,21 +194,29 @@ Opens a Server-Sent Events (SSE) stream that notifies the client when a previous
 
 ```
 
-When activity is detected for a watched script, the server sends:
+When an update is available, the server sends:
 
 ```text
-event: changed
-data: {"reason":"mempool"}
+event: update
+data: {"type":"mempool","tip":{"height":12345,"block_hash":"current_tip_hash"}}
 
 ```
 
-**Event Reasons:**
+**Event Data:**
 
+- `type` (string): Event type
+- `tip` (object, optional): Latest known chain tip when the event is sent
+  - `height` (number): Tip block height
+  - `block_hash` (string): Tip block hash
+
+**Event Types:**
+
+- `tip`: a new block was indexed, but no watched script changed for this subscription
+- `block`: a new block was indexed and a watched script changed for this subscription
 - `mempool`: a watched script appeared in a newly observed mempool transaction
-- `block`: a watched script appeared in a newly indexed block
 - `reorg`: a chain reorganization happened; clients should rescan because affected scripts are not filtered precisely
 
-Mempool removals do not emit `mempool` events. In the common confirmation path, the server emits `mempool` when the transaction first appears and `block` after the confirming block is indexed.
+For each newly indexed block, each subscription receives either `block` or `tip`, not both. Mempool removals do not emit `mempool` events. In the common confirmation path, the server emits `mempool` when the transaction first appears and `block` after the confirming block is indexed.
 
 **Limitations:**
 
@@ -218,7 +226,7 @@ Mempool removals do not emit `mempool` events. In the common confirmation path, 
 **Client Behavior:**
 
 - Treat events as invalidation hints, not as wallet updates
-- On any `changed` event, run the usual Waterfalls scan to obtain authoritative history and tip state
+- On any `update` event, run the usual Waterfalls scan to obtain authoritative history and tip state
 - On reconnect, run a Waterfalls scan before relying on subscription events, because events may have been missed while disconnected
 
 ## Base Endpoints
