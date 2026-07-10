@@ -167,7 +167,7 @@ To get the next unused external address, use index `external + 1` (or index `0` 
 GET /v1/subscribe?descriptor=<descriptor>
 ```
 
-Opens a Server-Sent Events (SSE) stream that notifies the client when a previously scanned descriptor may have new activity. The notification is only a hint; clients should perform the normal Waterfalls scan after receiving an event.
+Opens a Server-Sent Events (SSE) stream that notifies the client when a descriptor may have new activity. The notification is only a hint; clients should perform the normal Waterfalls scan after receiving an event.
 
 **Query Parameters:**
 
@@ -176,12 +176,12 @@ Opens a Server-Sent Events (SSE) stream that notifies the client when a previous
   - Network validation: mainnet descriptors (xpub) cannot be used on testnet/regtest
   - Must have a wildcard
 
-**Precondition:**
+**Subscription Range:**
 
-- The descriptor must have been scanned with `/v1/waterfalls`, `/v2/waterfalls`, or `/v4/waterfalls` before subscribing
-- If the descriptor has never been scanned, the server returns `400 DescriptorNotScanned`
-- The server tracks the highest used derivation index observed during scans
-- Subscriptions watch scripts up to `max_used_index + GAP_LIMIT`; if a descriptor was scanned but has no used index yet, the initial gap window is watched
+- The descriptor does not need to have been scanned before subscribing
+- If the descriptor has never been scanned, the server performs an internal bounded usage scan before opening the stream
+- The server tracks the highest used derivation index observed during scans and first-time subscriptions
+- Subscriptions watch scripts up to `max_used_index + GAP_LIMIT`; if no used index is found, the initial gap window is watched
 
 **Response:**
 
@@ -226,9 +226,10 @@ For each newly indexed block, each subscription receives either `block` or `tip`
 
 **Client Behavior:**
 
+- To avoid missing updates between an initial scan and subscription setup, clients should open the subscription first, then run the usual Waterfalls scan
 - Treat events as invalidation hints, not as wallet updates
 - On any `update` event, run the usual Waterfalls scan to obtain authoritative history and tip state
-- On reconnect, run a Waterfalls scan before relying on subscription events, because events may have been missed while disconnected
+- On reconnect, re-open the subscription, then run a Waterfalls scan, because events may have been missed while disconnected
 
 ## Base Endpoints
 
