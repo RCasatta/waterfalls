@@ -326,23 +326,11 @@ async fn do_test_subscribe_notifies_descriptor_change(test_env: waterfalls::test
     };
     let single_desc = format!("{prefix}wpkh({tpub}/0/*)");
 
-    let err = test_env.client().subscribe(&single_desc).await.unwrap_err();
-    assert_eq!(
-        format!("{err:?}"),
-        "subscribe response is not 200 but: 400 body is: DescriptorNotScanned"
-    );
-
     let addr_0 = subscription_test_address(test_env.family, &single_desc, 0);
     test_env.send_to(&addr_0, 10_000);
+    let addr_20 = subscription_test_address(test_env.family, &single_desc, 20);
+    test_env.send_to(&addr_20, 10_000);
     test_env.node_generate(1).await;
-
-    let result = test_env
-        .client()
-        .waterfalls_v2(&single_desc)
-        .await
-        .unwrap()
-        .0;
-    assert!(!result.is_empty());
 
     let response = test_env.client().subscribe(&single_desc).await.unwrap();
     assert_eq!(
@@ -354,7 +342,7 @@ async fn do_test_subscribe_notifies_descriptor_change(test_env: waterfalls::test
     );
     let mut sse = SseTestReader::new(response);
 
-    let addr = subscription_test_address(test_env.family, &single_desc, 20);
+    let addr = subscription_test_address(test_env.family, &single_desc, 40);
     test_env.send_to(&addr, 10_000);
 
     let event = sse.next_update_event().await;

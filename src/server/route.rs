@@ -979,10 +979,16 @@ async fn subscribe_descriptor(
     let mut scripts = Vec::new();
     for desc in descriptor.into_single_descriptors().unwrap().iter() {
         let single_descriptor_id = string_hash(&desc.normalized_id_string());
-        let max_used_index = state
-            .descriptor_max_used_index(single_descriptor_id)
-            .await
-            .ok_or(Error::DescriptorNotScanned)?;
+        let max_used_index = match state.descriptor_max_used_index(single_descriptor_id).await {
+            Some(max_used_index) => max_used_index,
+            None => {
+                let max_used_index = scan_descriptor_max_used_index(state, desc).await;
+                state
+                    .record_descriptor_scan_max_used_index(single_descriptor_id, max_used_index)
+                    .await;
+                max_used_index
+            }
+        };
         let watch_count = subscription_watch_count(max_used_index)?;
         scripts.extend(
             derive_script_hashes_batch(state, desc, 0, watch_count)
@@ -995,6 +1001,27 @@ async fn subscribe_descriptor(
         .subscribe_scripts(scripts)
         .await
         .map_err(|e| Error::String(format!("{e:?}")))
+}
+
+async fn scan_descriptor_max_used_index(state: &Arc<State>, desc: &be::Descriptor) -> Option<u32> {
+    let mut max_used_index = None;
+
+    for batch in 0..MAX_BATCH {
+        let batch_start = batch * GAP_LIMIT;
+        let (scripts, _) = derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
+
+        let mut result = Vec::with_capacity(GAP_LIMIT as usize);
+        let find_result = find_scripts(state, &state.store, &mut result, scripts, 0, true).await;
+        if let Some(max_used_offset) = find_result.max_used_offset {
+            max_used_index = Some(batch_start + max_used_offset);
+        }
+
+        if find_result.is_last {
+            break;
+        }
+    }
+
+    max_used_index
 }
 
 fn sse_resp(
