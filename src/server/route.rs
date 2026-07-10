@@ -563,8 +563,7 @@ fn error_status(error: &Error) -> StatusCode {
         | Error::TooManyAddresses
         | Error::DescriptorMustHaveWildcard
         | Error::AddressPageRequiresSingleAddress
-        | Error::UtxoOnlyHistoryTooLarge
-        | Error::DescriptorNotScanned => StatusCode::BAD_REQUEST,
+        | Error::UtxoOnlyHistoryTooLarge => StatusCode::BAD_REQUEST,
         Error::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         Error::BodyReadTimeout => StatusCode::REQUEST_TIMEOUT,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
