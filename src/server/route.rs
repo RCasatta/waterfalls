@@ -27,6 +27,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::Mutex;
+use tokio::time::Interval;
 
 use super::{
     encryption,
@@ -54,6 +55,8 @@ const MAX_ADDRESS_LENGTH: usize = 100; // max characters for an address (excessi
 const MAX_TX_BODY_SIZE: usize = 1024 * 1024; // 1MB limit for transaction broadcast body
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30); // timeout for reading request body
 const FEE_ESTIMATES_TTL: u32 = 30; // cache fee estimates for 30 seconds
+const SSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+const SSE_KEEPALIVE: &[u8] = b": keepalive\n\n";
 
 type RespBody = BoxBody<Bytes, Infallible>;
 type Resp = Response<RespBody>;
@@ -1032,26 +1035,27 @@ fn sse_resp(
     let ready = stream::once(async {
         Ok::<Frame<Bytes>, Infallible>(Frame::data(Bytes::from_static(b": ready\n\n")))
     });
-    let events = stream::unfold((receiver, cleanup), |(mut receiver, cleanup)| async move {
-        receiver.recv().await.map(|event| {
-            crate::inc_subscription_notification_counter(event.as_str(), "sent");
-            log::info!(
-                "subscription notification sent: id={}, event={event}",
-                cleanup.id
-            );
-            let state = cleanup.state.clone();
-            (
-                async move {
-                    Ok::<Frame<Bytes>, Infallible>(Frame::data(Bytes::from(sse_event(
-                        event,
-                        state.tip().await,
-                    ))))
-                },
-                (receiver, cleanup),
-            )
-        })
-    });
-    let events = events.then(|frame| frame);
+    let keepalive = keepalive_interval(SSE_KEEPALIVE_INTERVAL);
+    let events = stream::unfold(
+        (receiver, cleanup, keepalive),
+        |(mut receiver, cleanup, mut keepalive)| async move {
+            let bytes = match next_subscription_message(&mut receiver, &mut keepalive).await? {
+                SubscriptionMessage::Event(event) => {
+                    crate::inc_subscription_notification_counter(event.as_str(), "sent");
+                    log::info!(
+                        "subscription notification sent: id={}, event={event}",
+                        cleanup.id
+                    );
+                    Bytes::from(sse_event(event, cleanup.state.tip().await))
+                }
+                SubscriptionMessage::Keepalive => Bytes::from_static(SSE_KEEPALIVE),
+            };
+            Some((
+                Ok::<Frame<Bytes>, Infallible>(Frame::data(bytes)),
+                (receiver, cleanup, keepalive),
+            ))
+        },
+    );
     let body = BodyExt::boxed(StreamBody::new(ready.chain(events)));
 
     Response::builder()
@@ -1061,6 +1065,27 @@ fn sse_resp(
         .header("X-Accel-Buffering", "no")
         .body(body)
         .map_err(|_| Error::Other)
+}
+
+enum SubscriptionMessage {
+    Event(SubscriptionEvent),
+    Keepalive,
+}
+
+async fn next_subscription_message(
+    receiver: &mut SubscriptionReceiver,
+    keepalive: &mut Interval,
+) -> Option<SubscriptionMessage> {
+    tokio::select! {
+        event = receiver.recv() => event.map(SubscriptionMessage::Event),
+        _ = keepalive.tick() => Some(SubscriptionMessage::Keepalive),
+    }
+}
+
+fn keepalive_interval(period: Duration) -> Interval {
+    let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval
 }
 
 struct SubscriptionCleanup {
