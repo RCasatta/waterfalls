@@ -1344,6 +1344,7 @@ fn get_build_info() -> BuildInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::subscription::Subscriptions;
 
     const MAINNET_DESC: &str = "elwpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#20ufqv7z";
     const TESTNET_DESC: &str = "elwpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)#v7pu3vak";
@@ -1575,6 +1576,30 @@ mod tests {
                 test_tip().b
             )
         );
+    }
+
+    #[tokio::test]
+    async fn sse_keepalive_waits_for_interval() {
+        let mut subscriptions = Subscriptions::new(1, 1);
+        let (_id, mut receiver) = subscriptions.subscribe(vec![1]).unwrap();
+        let mut keepalive = keepalive_interval(Duration::from_millis(20));
+
+        assert!(tokio::time::timeout(
+            Duration::from_millis(1),
+            next_subscription_message(&mut receiver, &mut keepalive)
+        )
+        .await
+        .is_err());
+
+        let message = tokio::time::timeout(
+            Duration::from_secs(1),
+            next_subscription_message(&mut receiver, &mut keepalive),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(matches!(message, SubscriptionMessage::Keepalive));
+        assert_eq!(SSE_KEEPALIVE, b": keepalive\n\n");
     }
 
     fn test_tip() -> crate::BlockMeta {
