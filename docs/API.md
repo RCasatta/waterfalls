@@ -194,6 +194,14 @@ Opens a Server-Sent Events (SSE) stream that notifies the client when a descript
 
 ```
 
+While the subscription is idle, the server sends an SSE comment every 30 seconds to keep the
+connection alive:
+
+```text
+: keepalive
+
+```
+
 When an update is available, the server sends:
 
 ```text
