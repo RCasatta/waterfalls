@@ -2,6 +2,12 @@
 
 This document describes all available API endpoints for the Waterfalls server, which provides blockchain data indexing and querying capabilities for Bitcoin and Elements/Liquid networks.
 
+## Response Behavior
+
+### HEAD Requests
+
+All GET endpoints also support HEAD requests. A HEAD response has the same status and headers as the corresponding GET response, including `Content-Length`, but has an empty body.
+
 ## Waterfalls Endpoints
 
 These endpoints provide transaction history and UTXO data for descriptors or addresses. Available in both JSON and CBOR formats.

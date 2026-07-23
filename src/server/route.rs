@@ -12,8 +12,8 @@ use elements::BlockHash;
 use futures_util::{stream, StreamExt};
 use http_body_util::{combinators::BoxBody, BodyExt, Full, Limited, StreamBody};
 use hyper::{
-    body::{Bytes, Frame, Incoming},
-    header::{self, CACHE_CONTROL, CONTENT_TYPE},
+    body::{Body, Bytes, Frame, Incoming},
+    header::{self, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE},
     Method, Request, Response, StatusCode,
 };
 use prometheus::Encoder;
@@ -74,7 +74,12 @@ pub async fn route(
 ) -> Result<Resp, Error> {
     let is_testnet_or_regtest = !matches!(network, Network::Liquid | Network::Bitcoin);
     log::debug!("---> {req:?}");
-    let res = match (req.method(), req.uri().path(), req.uri().query()) {
+    let method = if req.method() == Method::HEAD {
+        Method::GET
+    } else {
+        req.method().clone()
+    };
+    let res = match (&method, req.uri().path(), req.uri().query()) {
         (&Method::GET, "/v1/server_recipient", None) => {
             str_resp(state.key.to_public().to_string(), StatusCode::OK)
         }
@@ -534,6 +539,26 @@ fn any_resp(
     }
 
     builder.body(full_body(bytes)).map_err(|_| Error::Other)
+}
+
+fn strip_head_body(mut response: Resp) -> Resp {
+    if let Some(content_length) = response.body().size_hint().exact() {
+        response.headers_mut().insert(
+            CONTENT_LENGTH,
+            content_length
+                .to_string()
+                .parse()
+                .expect("content length is a valid header value"),
+        );
+    }
+    *response.body_mut() = empty_body();
+    response
+}
+
+fn empty_body() -> RespBody {
+    BodyExt::boxed(StreamBody::new(stream::empty::<
+        Result<Frame<Bytes>, Infallible>,
+    >()))
 }
 
 fn full_body(bytes: Vec<u8>) -> RespBody {
@@ -1300,6 +1325,7 @@ pub async fn infallible_route(
     network: Network,
     add_cors: bool,
 ) -> Result<Resp, hyper::Error> {
+    let is_head = req.method() == Method::HEAD;
     let mut response = match route(state, client, req, network).await {
         Ok(r) => r,
         Err(e) => error_resp(error_status(&e), &e),
@@ -1311,12 +1337,16 @@ pub async fn infallible_route(
         headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
         headers.insert(
             header::ACCESS_CONTROL_ALLOW_METHODS,
-            "GET, POST, OPTIONS".parse().unwrap(),
+            "GET, HEAD, POST, OPTIONS".parse().unwrap(),
         );
         headers.insert(
             header::ACCESS_CONTROL_ALLOW_HEADERS,
             "Content-Type".parse().unwrap(),
         );
+    }
+
+    if is_head {
+        response = strip_head_body(response);
     }
 
     Ok(response)

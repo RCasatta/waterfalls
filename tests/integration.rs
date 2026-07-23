@@ -609,6 +609,34 @@ async fn test_fetch_client_local_regtest(client: FetchClient, network: Network) 
 }
 
 #[cfg(feature = "test_env")]
+async fn head_matches_get(test_env: &waterfalls::test_env::TestEnv) {
+    let http_client = reqwest::Client::new();
+    let build_info_url = format!("{}/v1/build_info", test_env.base_url());
+
+    let get_response = http_client.get(&build_info_url).send().await.unwrap();
+    assert_eq!(get_response.status(), reqwest::StatusCode::OK);
+    let mut get_headers = get_response.headers().clone();
+    let get_body = get_response.bytes().await.unwrap();
+
+    let head_response = http_client.head(&build_info_url).send().await.unwrap();
+    assert_eq!(head_response.status(), reqwest::StatusCode::OK);
+    let mut head_headers = head_response.headers().clone();
+    let head_body = head_response.bytes().await.unwrap();
+    assert!(head_body.is_empty());
+    let content_length = head_headers
+        .get(reqwest::header::CONTENT_LENGTH)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    assert_eq!(content_length, get_body.len());
+    get_headers.remove(reqwest::header::DATE);
+    head_headers.remove(reqwest::header::DATE);
+    assert_eq!(head_headers, get_headers);
+}
+
+#[cfg(feature = "test_env")]
 async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     use bitcoin::sign_message::MessageSignature;
     use elements::{bitcoin::secp256k1, AddressParams};
@@ -627,6 +655,8 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let single_bitcoin_desc = bitcoin_desc.replace("<0;1>", "0");
     let blinding = "slip77(9c8e4f05c7711a98c838be228bcb84924d4570ca53f35fa1c793e58841d47023)";
     let desc_str = format!("ct({blinding},{single_bitcoin_desc})"); // we use a non-multipath to generate addresses
+
+    head_matches_get(&test_env).await;
 
     let result = client.waterfalls_v2(&bitcoin_desc).await.unwrap().0;
     assert_eq!(result.page, 0);
