@@ -681,6 +681,7 @@ async fn handle_waterfalls_req(
 ) -> Result<Resp, Error> {
     let db = &state.store;
     let start = Instant::now();
+    let is_descriptor = inputs.descriptor().is_some();
     let page = inputs.page();
     let mut derivations_duration = Duration::from_secs(0);
 
@@ -862,13 +863,26 @@ async fn handle_waterfalls_req(
     crate::WATERFALLS_COUNTER.inc();
     timer.observe_duration();
 
-    any_resp(
+    let mut response = any_resp(
         result,
         hyper::StatusCode::OK,
         Some(content),
         Some(state.cache_control_seconds),
         Some(m),
-    )
+    )?;
+    if state.server_timing && is_descriptor {
+        add_server_timing_header(&mut response, start.elapsed())?;
+    }
+    Ok(response)
+}
+
+fn add_server_timing_header(response: &mut Resp, duration: Duration) -> Result<(), Error> {
+    let duration_ms = duration.as_secs_f64() * 1_000.0;
+    let value = format!("total;dur={duration_ms:.3}")
+        .parse()
+        .map_err(|_| Error::Other)?;
+    response.headers_mut().insert("server-timing", value);
+    Ok(())
 }
 
 /// Handle the last_used_index endpoint request
@@ -1542,6 +1556,18 @@ mod tests {
     fn test_invalid_descriptor_is_bad_request() {
         let error = Error::InvalidDescriptor("BadDescriptor".to_string());
         assert_eq!(error_status(&error), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn server_timing_header_uses_milliseconds() {
+        let mut response = str_resp(String::new(), StatusCode::OK).unwrap();
+
+        add_server_timing_header(&mut response, Duration::from_micros(1_234)).unwrap();
+
+        assert_eq!(
+            response.headers().get("server-timing").unwrap(),
+            "total;dur=1.234"
+        );
     }
 
     #[test]

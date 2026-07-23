@@ -119,6 +119,10 @@ pub struct Arguments {
     #[arg(env, long)]
     pub add_cors: bool,
 
+    /// Add total server processing time to descriptor endpoint responses using the Server-Timing header
+    #[arg(env, long)]
+    pub server_timing: bool,
+
     /// Maximum capacity for the derivation cache
     #[arg(env, long, default_value = "1000000")]
     pub derivation_cache_capacity: usize,
@@ -202,6 +206,7 @@ impl std::fmt::Debug for Arguments {
             .field("max_addresses", &self.max_addresses)
             .field("max_txs_seen", &self.max_txs_seen)
             .field("add_cors", &self.add_cors)
+            .field("server_timing", &self.server_timing)
             .field("derivation_cache_capacity", &self.derivation_cache_capacity)
             .field("max_active_subscriptions", &self.max_active_subscriptions)
             .field(
@@ -273,6 +278,18 @@ impl Arguments {
 #[cfg(test)]
 mod argument_tests {
     use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn server_timing_is_opt_in() {
+        let args = Arguments::try_parse_from(["waterfalls", "--network", "liquid"]).unwrap();
+        assert!(!args.server_timing);
+
+        let args =
+            Arguments::try_parse_from(["waterfalls", "--network", "liquid", "--server-timing"])
+                .unwrap();
+        assert!(args.server_timing);
+    }
 
     #[test]
     fn deprecated_rpc_user_password_keeps_node_mode_valid() {
@@ -482,6 +499,7 @@ pub async fn inner_main(
             max_addresses: args.max_addresses,
             max_txs_seen: args.max_txs_seen.unwrap_or(DEFAULT_MAX_TXS_SEEN),
             cache_control_seconds: args.cache_control_seconds,
+            server_timing: args.server_timing,
             derivation_cache_capacity: args.derivation_cache_capacity,
             subscription_limits: SubscriptionLimits {
                 max_active_subscriptions: args

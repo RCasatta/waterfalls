@@ -362,6 +362,7 @@ mod tests {
                 max_addresses: 100,
                 max_txs_seen: 100,
                 cache_control_seconds: 5,
+                server_timing: false,
                 derivation_cache_capacity: 1000,
                 subscription_limits: SubscriptionLimits {
                     max_active_subscriptions: 100,
