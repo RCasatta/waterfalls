@@ -58,7 +58,10 @@ tmq = "0.5.0"
 [dev-dependencies]
 criterion = "0.5.1"
 tempfile = "3.10.1"
-lwk_wollet = { version = "0.10.0", features = ["test_wallet"] }
+lwk_wollet = { version = "0.10.0", default-features = false, features = [
+    "esplora",
+    "test_wallet",
+] }
 lwk_common = { version = "0.10.0" }
 
 [features]
