@@ -18,7 +18,7 @@ bitcoin = { version = "0.32.5", features = [
     "rand-std",
 ] }
 env_logger = "0.11.3"
-hyper = { version = "1.2.0", features = ["full"] }
+hyper = { version = "1.2.0", features = ["http1", "server"] }
 log = "0.4.21"
 tokio = { version = "1.43.0", features = [
     "rt-multi-thread",
@@ -26,8 +26,8 @@ tokio = { version = "1.43.0", features = [
     "signal",
 ] }
 http-body-util = "0.1"
-hyper-util = { version = "0.1.5", features = ["full", "server"] }
-reqwest = "0.12.12"
+hyper-util = { version = "0.1.5", features = ["tokio"] }
+reqwest = { version = "0.12.12", default-features = false, features = ["default-tls"] }
 anyhow = "1.0.86"
 futures-util = "0.3.31"
 rocksdb = { version = "0.24.0", features = [
