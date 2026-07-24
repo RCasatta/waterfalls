@@ -242,6 +242,13 @@ impl std::fmt::Debug for Arguments {
 
 impl Arguments {
     pub fn is_valid(&self) -> Result<(), Error> {
+        #[cfg(not(feature = "esplora"))]
+        if self.use_esplora {
+            return Err(Error::String(
+                "Esplora support is not enabled in this build".to_string(),
+            ));
+        }
+
         if !self.use_esplora
             && self.rpc_user_password_file.is_none()
             && self.rpc_user_password.is_none()
@@ -301,6 +308,23 @@ mod argument_tests {
         };
 
         assert!(args.is_valid().is_ok());
+    }
+
+    #[cfg(not(feature = "esplora"))]
+    #[test]
+    fn esplora_requires_feature() {
+        let args = Arguments {
+            use_esplora: true,
+            request_timeout_seconds: 1,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            args.is_valid(),
+            Err(Error::String(
+                "Esplora support is not enabled in this build".to_string()
+            ))
+        );
     }
 
     #[test]

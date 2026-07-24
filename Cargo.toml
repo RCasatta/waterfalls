@@ -27,7 +27,7 @@ tokio = { version = "1.43.0", features = [
 ] }
 http-body-util = "0.1"
 hyper-util = { version = "0.1.5", features = ["tokio"] }
-reqwest = { version = "0.12.12", default-features = false, features = ["default-tls"] }
+reqwest = { version = "0.12.12", default-features = false }
 anyhow = "1.0.86"
 futures-util = "0.3.31"
 rocksdb = { version = "0.24.0", features = [
@@ -67,6 +67,7 @@ lwk_common = { version = "0.10.0" }
 [features]
 default = ["db"]
 db = ["rocksdb"]
+esplora = ["reqwest/default-tls"]
 test_env = ["bitcoind"]
 
 # tests that require a locally running synced node, or taking very long time to run like the one

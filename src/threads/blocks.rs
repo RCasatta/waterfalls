@@ -285,7 +285,7 @@ fn generate_skip_outpoint() -> HashSet<OutPoint> {
     skip_outpoint
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "esplora"))]
 mod tests {
     use std::{collections::BTreeMap, net::SocketAddr, sync::Arc};
 
