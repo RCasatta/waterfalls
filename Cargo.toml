@@ -87,3 +87,7 @@ lwk_common = { git = "https://github.com/blockstream/lwk", rev = "ba7eaf71e7be49
 [[bench]]
 name = "benches"
 harness = false
+
+[[test]]
+name = "integration"
+required-features = ["test_env"]

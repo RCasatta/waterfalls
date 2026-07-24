@@ -95,6 +95,15 @@ Legend:
 | **Liquid** | 38G | 876M | 3510k |
 | **Liquid Testnet** | 4.1G | 258M | 2064k |
 
+## Nix
+
+The default package supports local nodes without Esplora's TLS dependencies. Build the
+explicit Esplora variant when remote Esplora support is needed:
+
+```bash
+nix build
+nix build .#esplora
+```
 
 ## Docker
 
@@ -103,8 +112,11 @@ You can run Waterfalls in a Docker container using the included Nix configuratio
 ### Building the Docker image
 
 ```bash
-# Build the Docker image
+# Build the node-only Docker image
 nix build .#dockerImage
+
+# Build the Docker image with Esplora support
+nix build .#dockerImageEsplora
 
 # Load the image into Docker
 docker load < result

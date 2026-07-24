@@ -60,26 +60,33 @@
             inherit cargoArtifacts;
             cargoTestExtraArgs = "-- --test-threads=1";
           });
+          esploraArgs = commonArgs // {
+            cargoExtraArgs = "--features esplora";
+          };
+          esploraCargoArtifacts = craneLib.buildDepsOnly esploraArgs;
+          esploraBin = craneLib.buildPackage (esploraArgs // {
+            cargoArtifacts = esploraCargoArtifacts;
+            cargoTestExtraArgs = "-- --test-threads=1";
+          });
 
           # Docker image configuration
-          dockerImage = pkgs.dockerTools.buildImage {
+          mkDockerImage = package: includeOpenSSL: pkgs.dockerTools.buildImage {
             name = "waterfalls";
             tag = "latest";
 
             # Copy runtime dependencies
             copyToRoot = pkgs.buildEnv {
               name = "image-root";
-              paths = with pkgs; [
-                bin
-                openssl
-                rocksdb
-                bash # just to inspect the docker
-              ];
+              paths = [
+                package
+                pkgs.rocksdb
+                pkgs.bash # just to inspect the docker
+              ] ++ lib.optionals includeOpenSSL [ pkgs.openssl ];
               pathsToLink = [ "/bin" "/lib" ];
             };
 
             config = {
-              Cmd = [ "${bin}/bin/waterfalls" ];
+              Cmd = [ "${package}/bin/waterfalls" ];
               ExposedPorts = {
                 # Expose all possible ports for different networks
                 "3100/tcp" = {}; # Liquid
@@ -88,12 +95,15 @@
               };
             };
           };
+          dockerImage = mkDockerImage bin false;
+          dockerImageEsplora = mkDockerImage esploraBin true;
         in
         with pkgs;
         {
           packages =
             {
-              inherit bin dockerImage;
+              inherit bin dockerImage dockerImageEsplora;
+              esplora = esploraBin;
               default = bin;
             };
           devShells.default = mkShell {
