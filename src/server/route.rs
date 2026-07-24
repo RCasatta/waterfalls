@@ -55,6 +55,7 @@ const MAX_ADDRESS_LENGTH: usize = 100; // max characters for an address (excessi
 const MAX_TX_BODY_SIZE: usize = 1024 * 1024; // 1MB limit for transaction broadcast body
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30); // timeout for reading request body
 const FEE_ESTIMATES_TTL: u32 = 30; // cache fee estimates for 30 seconds
+const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const SSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 const SSE_KEEPALIVE: &[u8] = b": keepalive\n\n";
 
@@ -281,13 +282,7 @@ pub async fn route(
                         }
                     };
                     let result = tx.serialize();
-                    any_resp(
-                        result,
-                        StatusCode::OK,
-                        Some("application/octet-stream"),
-                        Some(157784630),
-                        None,
-                    )
+                    immutable_resp(result, "application/octet-stream")
                 }
                 (Some(""), Some("block"), Some(v), Some("header"), None) => {
                     let block_hash = BlockHash::from_str(v).map_err(|_| Error::InvalidBlockHash)?;
@@ -511,6 +506,17 @@ fn parse_descriptor_query(
 
 fn str_resp(s: String, status: StatusCode) -> Result<Resp, Error> {
     any_resp(s.into_bytes(), status, Some("text/plain"), None, None)
+}
+
+fn immutable_resp(bytes: Vec<u8>, content: &str) -> Result<Resp, Error> {
+    // Transaction URLs are treated as content-addressed by txid. The txid does not commit to
+    // witness data, but we intentionally disregard that distinction for caching purposes.
+    let mut response = any_resp(bytes, StatusCode::OK, Some(content), None, None)?;
+    response.headers_mut().insert(
+        CACHE_CONTROL,
+        header::HeaderValue::from_static(IMMUTABLE_CACHE_CONTROL),
+    );
+    Ok(response)
 }
 
 fn any_resp(
@@ -1692,6 +1698,16 @@ mod tests {
         let json = serde_json::to_string(&build_info).unwrap();
         assert!(json.contains("version"));
         assert!(json.contains("git_commit"));
+    }
+
+    #[test]
+    fn immutable_response_has_cache_policy() {
+        let response = immutable_resp(Vec::new(), "application/octet-stream").unwrap();
+
+        assert_eq!(
+            response.headers().get(CACHE_CONTROL).unwrap(),
+            IMMUTABLE_CACHE_CONTROL
+        );
     }
 
     #[test]
