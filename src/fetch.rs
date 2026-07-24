@@ -696,14 +696,16 @@ pub struct ChainInfo {
 
 #[cfg(test)]
 mod test {
-    use std::{io::Write, str::FromStr};
+    use std::io::Write;
 
+    #[cfg(any(feature = "esplora", feature = "synced_node"))]
     use elements::BlockHash;
+    #[cfg(any(feature = "esplora", feature = "synced_node"))]
+    use std::str::FromStr;
 
-    use crate::{
-        server::{Arguments, Network},
-        Family,
-    };
+    use crate::server::{Arguments, Network};
+    #[cfg(any(feature = "esplora", feature = "synced_node"))]
+    use crate::Family;
 
     use super::{parse_fee_estimates_rpc_reply, Client};
 
@@ -922,6 +924,7 @@ mod test {
         assert_eq!(connections.load(Ordering::SeqCst), 3);
     }
 
+    #[cfg(feature = "esplora")]
     #[tokio::test]
     #[ignore = "connects to prod server"]
     async fn test_client_esplora() {
@@ -970,6 +973,7 @@ mod test {
         Client::new(&args).unwrap()
     }
 
+    #[cfg(any(feature = "esplora", feature = "synced_node"))]
     async fn test(client: Client, network: Network) {
         let (genesis_hash, genesis_txid, another_txid) = match network {
             Network::Liquid => (

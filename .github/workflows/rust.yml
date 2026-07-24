@@ -23,9 +23,9 @@ jobs:
     - name: Download elementsd 23.2.4
       run: curl -sSL https://github.com/ElementsProject/elements/releases/download/elements-23.2.4/elements-23.2.4-x86_64-linux-gnu.tar.gz | tar -xz
     - name: Run tests
-      run: cargo test
+      run: cargo test --features test_env
     - name: Run ignored tests
-      run: cargo test -- --ignored
+      run: cargo test --features "test_env,esplora" -- --ignored
     - name: Run reorg crash test
       run: cargo test --features "test_env,db,reorg_crash_test" test_bitcoin_reorg_data_not_persisted -- --exact
     env:
@@ -43,7 +43,7 @@ jobs:
     - name: Check benches
       run: cargo check --benches
     - name: Check tests
-      run: cargo check --tests
+      run: cargo check --tests --features test_env
     - name: Check no default features
       run: cargo check --no-default-features
     - name: Check no default features with test_env
