@@ -198,10 +198,6 @@ pub async fn index(
             last_rocksdb_stats_logging = Instant::now();
         }
 
-        let mut history_map = BTreeMap::new();
-        let mut utxo_created = BTreeMap::new();
-        let mut utxo_spent = vec![];
-
         let block = match client.block(block_to_index.hash, family).await {
             Ok(block) => block,
             Err(e) => {
@@ -211,56 +207,15 @@ pub async fn index(
             }
         };
 
-        for tx in block.transactions_iter() {
-            txs_count += 1;
-            let txid = tx.txid();
-            for (j, output) in tx.outputs_iter().enumerate() {
-                if !output.skip_utxo() {
-                    // Use an empty-bytes hash as a placeholder: outputs that are spendable
-                    // but non-standard (e.g. bare OP_TRUE) won't pass skip_indexing() below,
-                    // so their real script hash never overwrites this. When spent, the
-                    // spending tx lands under this dummy hash that no wallet will ever query.
-                    let out_point = OutPoint::new(txid, j as u32);
-                    utxo_created.insert(out_point, db.hash(b""));
-                }
-                if output.skip_indexing() {
-                    continue;
-                }
-                let script_hash = db.hash(output.script_pubkey_bytes());
-                let el = history_map.entry(script_hash).or_insert(vec![]);
-                el.push(TxSeen::new(txid, block_to_index.height, V::Vout(j as u32)));
-
-                let out_point = OutPoint::new(txid, j as u32);
-                log::debug!("inserting {out_point}");
-                utxo_created.insert(out_point, script_hash);
-            }
-
-            if !tx.is_coinbase() {
-                for (vin, input) in tx.inputs_iter().enumerate() {
-                    if input.skip_indexing() {
-                        continue;
-                    }
-                    let previous_output = input.previous_output();
-                    match utxo_created.remove(&previous_output) {
-                        Some(script_hash) => {
-                            // also the spending tx must be indexed
-                            let el = history_map.entry(script_hash).or_insert(vec![]);
-                            el.push(TxSeen::new(txid, block_to_index.height, V::Vin(vin as u32)));
-                        }
-                        None => {
-                            log::debug!("removing {}", &previous_output);
-                            if !skip_outpoint.contains(&previous_output) {
-                                utxo_spent.push((vin as u32, previous_output, txid))
-                            }
-                        }
-                    }
-                }
-            }
-        }
         state.set_hash_ts(&block_to_index).await;
-        let changed_script_hashes = db
-            .update(&block_to_index, utxo_spent, history_map, utxo_created)
-            .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
+        let (changed_script_hashes, indexed_txs) = index_block_transactions(
+            db,
+            &block_to_index,
+            block.transactions_iter(),
+            &skip_outpoint,
+        )
+        .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
+        txs_count += indexed_txs;
         state
             .notify_block_tip_subscriptions(changed_script_hashes)
             .await;
@@ -268,6 +223,72 @@ pub async fn index(
         crate::BLOCKCHAIN_TIP.set(block_to_index.height as i64);
         last_indexed = Some(block_to_index);
     }
+}
+
+fn index_block_transactions<'a>(
+    db: &impl Store,
+    block_meta: &BlockMeta,
+    transactions: impl Iterator<Item = crate::be::TransactionRef<'a>>,
+    skip_outpoint: &HashSet<OutPoint>,
+) -> anyhow::Result<(Vec<crate::ScriptHash>, u64)> {
+    let mut history_map = BTreeMap::new();
+    let mut utxo_created = BTreeMap::new();
+    let mut utxo_spent = vec![];
+    let mut txs_count = 0;
+
+    for tx in transactions {
+        txs_count += 1;
+        let txid = tx.txid();
+        for (vout, output) in tx.outputs_iter().enumerate() {
+            if !output.skip_utxo() {
+                // Use an empty-bytes hash as a placeholder: outputs that are spendable
+                // but non-standard (e.g. bare OP_TRUE) won't pass skip_indexing() below,
+                // so their real script hash never overwrites this. When spent, the
+                // spending tx lands under this dummy hash that no wallet will ever query.
+                let outpoint = OutPoint::new(txid, vout as u32);
+                utxo_created.insert(outpoint, db.hash(b""));
+            }
+            if output.skip_indexing() {
+                continue;
+            }
+            let script_hash = db.hash(output.script_pubkey_bytes());
+            history_map
+                .entry(script_hash)
+                .or_insert(vec![])
+                .push(TxSeen::new(txid, block_meta.height(), V::Vout(vout as u32)));
+
+            let outpoint = OutPoint::new(txid, vout as u32);
+            log::debug!("inserting {outpoint}");
+            utxo_created.insert(outpoint, script_hash);
+        }
+
+        if !tx.is_coinbase() {
+            for (vin, input) in tx.inputs_iter().enumerate() {
+                if input.skip_indexing() {
+                    continue;
+                }
+                let previous_output = input.previous_output();
+                match utxo_created.remove(&previous_output) {
+                    Some(script_hash) => {
+                        // also the spending tx must be indexed
+                        history_map
+                            .entry(script_hash)
+                            .or_insert(vec![])
+                            .push(TxSeen::new(txid, block_meta.height(), V::Vin(vin as u32)));
+                    }
+                    None => {
+                        log::debug!("removing {previous_output}");
+                        if !skip_outpoint.contains(&previous_output) {
+                            utxo_spent.push((vin as u32, previous_output, txid));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let changed_script_hashes = db.update(block_meta, utxo_spent, history_map, utxo_created)?;
+    Ok((changed_script_hashes, txs_count))
 }
 
 fn generate_skip_outpoint() -> HashSet<OutPoint> {
