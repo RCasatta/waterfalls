@@ -5,11 +5,9 @@ use crate::{
     store::{BlockMeta, Store},
     OutPoint, TxSeen, V,
 };
-use elements::Txid;
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::BTreeMap,
     future::Future,
-    str::FromStr,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -145,8 +143,6 @@ pub async fn index(
     log::info!("last indexed block is: {last_indexed:?}");
     let initial_height = last_indexed.as_ref().map(|b| b.height).unwrap_or(0);
 
-    let skip_outpoint = generate_skip_outpoint();
-
     let mut txs_count = 0u64;
     let mut initial_sync_tx = Some(initial_sync_tx);
 
@@ -208,13 +204,9 @@ pub async fn index(
         };
 
         state.set_hash_ts(&block_to_index).await;
-        let (changed_script_hashes, indexed_txs) = index_block_transactions(
-            db,
-            &block_to_index,
-            block.transactions_iter(),
-            &skip_outpoint,
-        )
-        .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
+        let (changed_script_hashes, indexed_txs) =
+            index_block_transactions(db, &block_to_index, block.transactions_iter())
+                .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
         txs_count += indexed_txs;
         state
             .notify_block_tip_subscriptions(changed_script_hashes)
@@ -229,7 +221,6 @@ fn index_block_transactions<'a>(
     db: &impl Store,
     block_meta: &BlockMeta,
     transactions: impl Iterator<Item = crate::be::TransactionRef<'a>>,
-    skip_outpoint: &HashSet<OutPoint>,
 ) -> anyhow::Result<(Vec<crate::ScriptHash>, u64)> {
     let mut history_map = BTreeMap::new();
     let mut utxo_created = BTreeMap::new();
@@ -276,11 +267,16 @@ fn index_block_transactions<'a>(
                             .or_insert(vec![])
                             .push(TxSeen::new(txid, block_meta.height(), V::Vin(vin as u32)));
                     }
+                    None if block_meta.height() == 0 => {
+                        // Elements genesis creates the policy asset with an issuance
+                        // input backed by a synthetic outpoint, not a preceding UTXO.
+                        // Its value depends on the genesis parameters (including the
+                        // fedpeg script), so it cannot be identified by a fixed txid.
+                        log::debug!("ignoring genesis input {previous_output}");
+                    }
                     None => {
                         log::debug!("removing {previous_output}");
-                        if !skip_outpoint.contains(&previous_output) {
-                            utxo_spent.push((vin as u32, previous_output, txid));
-                        }
+                        utxo_spent.push((vin as u32, previous_output, txid));
                     }
                 }
             }
@@ -291,24 +287,123 @@ fn index_block_transactions<'a>(
     Ok((changed_script_hashes, txs_count))
 }
 
-fn generate_skip_outpoint() -> HashSet<OutPoint> {
-    let mut skip_outpoint = HashSet::new();
-    let outpoint = |txid, vout| OutPoint::new(Txid::from_str(txid).expect("static").into(), vout);
+#[cfg(test)]
+mod indexing_tests {
+    use std::str::FromStr;
 
-    // policy asset emission in testnet
-    let s = "0c52d2526a5c9f00e9fb74afd15dd3caaf17c823159a514f929ae25193a43a52";
-    skip_outpoint.insert(outpoint(s, 0));
+    use elements::{encode::deserialize, hashes::Hash, BlockHash, Transaction};
 
-    // policy asset emission in regtest
-    let s = "50cdc410c9d0d61eeacc531f52d2c70af741da33af127c364e52ac1ee7c030a5";
-    skip_outpoint.insert(outpoint(s, 0));
+    use super::*;
+    use crate::{
+        be::TransactionRef,
+        store::{memory::MemoryStore, Store},
+    };
 
-    skip_outpoint
+    const CUSTOM_GENESIS_COINBASE: &str = "0100000000010000000000000000000000000000000000000000000000000000000000000000ffffffff2120bc6224b5d6e9c00462bb241cbc3b630c5be97038ed6a0b32c675496b8fceae74ffffffff0101000000000000000000000000000000000000000000000000000000000000000001000000000000000000016a00000000";
+    const CUSTOM_GENESIS_ISSUANCE: &str = "010000000001bc6224b5d6e9c00462bb241cbc3b630c5be97038ed6a0b32c675496b8fceae740000008000ffffffff000000000000000000000000000000000000000000000000000000000000000006226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f01000000007d2b7500010000000000000000010167d5ceb159844af010727a9aee019922909228a561236ede23faa8a6787fdc8701000000007d2b750000015100000000";
+    const INITIAL_FREE_COINS_SWEEP: &str = "02000000000186832196e41526f82373860b04ffe58c2887315111d7cf7e1dd7bee8c26d5ef30000000000fdffffff020167d5ceb159844af010727a9aee019922909228a561236ede23faa8a6787fdc8701000000007d2b6ea20017a914913aeded70454a1752c64bb1b44577b2c50dbca5870167d5ceb159844af010727a9aee019922909228a561236ede23faa8a6787fdc8701000000000000065e000001000000";
+
+    #[test]
+    fn custom_genesis_issuance_and_sweep_memory() {
+        assert_custom_genesis_issuance_and_sweep(&MemoryStore::new());
+    }
+
+    #[cfg(feature = "db")]
+    #[test]
+    fn custom_genesis_issuance_and_sweep_db() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let store = crate::store::db::DBStore::open(tempdir.path(), 64, true, 6).unwrap();
+        assert_custom_genesis_issuance_and_sweep(&store);
+    }
+
+    fn assert_custom_genesis_issuance_and_sweep(store: &impl Store) {
+        let genesis_txs = [
+            transaction(CUSTOM_GENESIS_COINBASE),
+            transaction(CUSTOM_GENESIS_ISSUANCE),
+        ];
+        let genesis_meta = BlockMeta::new(
+            0,
+            BlockHash::from_str("1ce1ce1f2e97552f43f89dc97427cff12ce533491ddc3e9db2d4dc2dd52aef9e")
+                .unwrap(),
+            1_296_688_602,
+        );
+        let (_, txs_count) = index_block_transactions(
+            store,
+            &genesis_meta,
+            genesis_txs.iter().map(TransactionRef::Elements),
+        )
+        .unwrap();
+        assert_eq!(txs_count, 2);
+
+        let issuance_outpoint = OutPoint::new(genesis_txs[1].txid().into(), 0);
+        let nonstandard_script_hash = store.hash(b"");
+        assert_eq!(
+            store.get_utxos(&[issuance_outpoint]).unwrap(),
+            vec![Some(nonstandard_script_hash)]
+        );
+
+        let empty_meta = BlockMeta::new(1, BlockHash::all_zeros(), 1_296_688_603);
+        index_block_transactions(store, &empty_meta, std::iter::empty()).unwrap();
+
+        store.ibd_finished();
+        let sweep = transaction(INITIAL_FREE_COINS_SWEEP);
+        let sweep_meta = BlockMeta::new(2, BlockHash::all_zeros(), 1_296_688_604);
+        index_block_transactions(
+            store,
+            &sweep_meta,
+            std::iter::once(TransactionRef::Elements(&sweep)),
+        )
+        .unwrap();
+
+        let sweep_outpoint = OutPoint::new(sweep.txid().into(), 0);
+        let sweep_script_hash = store.hash(sweep.output[0].script_pubkey.as_bytes());
+        assert_eq!(
+            store
+                .get_utxos(&[issuance_outpoint, sweep_outpoint])
+                .unwrap(),
+            vec![None, Some(sweep_script_hash)]
+        );
+        assert_eq!(
+            store
+                .get_history(&[nonstandard_script_hash, sweep_script_hash])
+                .unwrap(),
+            vec![
+                vec![TxSeen::new(
+                    sweep.txid().into(),
+                    sweep_meta.height(),
+                    V::Vin(0)
+                )],
+                vec![TxSeen::new(
+                    sweep.txid().into(),
+                    sweep_meta.height(),
+                    V::Vout(0)
+                )],
+            ]
+        );
+
+        store.reorg(sweep_meta.height());
+        assert_eq!(
+            store
+                .get_utxos(&[issuance_outpoint, sweep_outpoint])
+                .unwrap(),
+            vec![Some(nonstandard_script_hash), None]
+        );
+        assert_eq!(
+            store
+                .get_history(&[nonstandard_script_hash, sweep_script_hash])
+                .unwrap(),
+            vec![vec![], vec![]]
+        );
+    }
+
+    fn transaction(hex: &str) -> Transaction {
+        deserialize(&hex_simd::decode_to_vec(hex.as_bytes()).unwrap()).unwrap()
+    }
 }
 
 #[cfg(all(test, feature = "esplora"))]
 mod tests {
-    use std::{collections::BTreeMap, net::SocketAddr, sync::Arc};
+    use std::{collections::BTreeMap, net::SocketAddr, str::FromStr, sync::Arc};
 
     use age::x25519::Identity;
     use bitcoin::{NetworkKind, PrivateKey};
