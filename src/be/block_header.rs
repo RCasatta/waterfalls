@@ -1,4 +1,5 @@
 use crate::be::block::elements_block_hash;
+#[cfg(feature = "test_env")]
 use crate::{be, Family};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +39,7 @@ impl BlockHeader {
         }
     }
 
+    #[cfg(feature = "test_env")]
     pub(crate) fn from_bytes(bytes: &[u8], family: be::Family) -> Result<Self, anyhow::Error> {
         Ok(match family {
             Family::Bitcoin => {
@@ -57,6 +59,7 @@ impl BlockHeader {
         })
     }
 
+    #[cfg(feature = "test_env")]
     pub(crate) fn from_str(header_hex: &str, family: be::Family) -> Result<Self, anyhow::Error> {
         let bytes = hex_simd::decode_to_vec(header_hex.as_bytes())?;
         Self::from_bytes(&bytes, family)

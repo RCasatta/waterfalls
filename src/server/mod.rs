@@ -183,7 +183,7 @@ pub struct Arguments {
 impl std::fmt::Debug for Arguments {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut d = f.debug_struct("Arguments");
-        let mut d = d
+        let d = d
             .field("network", &self.network)
             .field("use_esplora", &self.use_esplora)
             .field("esplora_url", &self.esplora_url)
@@ -230,11 +230,9 @@ impl std::fmt::Debug for Arguments {
             );
 
         #[cfg(feature = "db")]
-        {
-            d = d
-                .field("db_dir", &self.db_dir)
-                .field("reorg_data_keep_heights", &self.reorg_data_keep_heights);
-        }
+        let d = d
+            .field("db_dir", &self.db_dir)
+            .field("reorg_data_keep_heights", &self.reorg_data_keep_heights);
 
         d.finish()
     }

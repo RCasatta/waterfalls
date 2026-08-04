@@ -34,6 +34,8 @@ jobs:
 
   checks:
     runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: "-D warnings"
     steps:
     - uses: actions/checkout@v4
     - name: Cache dependencies
@@ -48,7 +50,6 @@ jobs:
       run: cargo check --no-default-features
     - name: Check no default features with test_env
       run: cargo check --no-default-features --features test_env
-
 
   audit:
     runs-on: ubuntu-latest

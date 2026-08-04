@@ -42,6 +42,7 @@ impl Txid {
         Self(sha256d::Hash::from_byte_array(array))
     }
 
+    #[cfg(feature = "db")]
     pub(crate) fn from_slice(slice: &[u8]) -> Result<Self, anyhow::Error> {
         Ok(Self(sha256d::Hash::from_slice(slice)?))
     }
