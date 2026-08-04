@@ -49,6 +49,17 @@ jobs:
     - name: Check no default features with test_env
       run: cargo check --no-default-features --features test_env
 
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-audit
+    - name: Reject high-severity vulnerabilities
+      run: cargo audit
+
   nix:
     runs-on: ubuntu-latest
     steps:
