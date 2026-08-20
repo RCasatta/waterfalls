@@ -833,6 +833,7 @@ mod test {
             Network::LiquidTestnet,
             Network::Bitcoin,
             Network::BitcoinTestnet,
+            Network::BitcoinTestnet4,
             Network::BitcoinRegtest,
             Network::BitcoinSignet,
         ] {
