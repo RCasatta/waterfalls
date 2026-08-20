@@ -607,7 +607,7 @@ impl Client {
             let response = self.client.get(&url).send().await?;
             let status = response.status();
             let text = response.text().await?;
-            if status != 200 {
+            if !status.is_success() {
                 let msg = format!("fee estimate fetch failed with status:{status}, body is {text}");
                 log::warn!("{msg}");
                 anyhow::bail!("{msg}");
