@@ -1227,6 +1227,13 @@ mod test {
                     Some(BlockHash::from_str(block_1).unwrap())
                 );
             }
+            Network::BitcoinTestnet4 => {
+                let block_1 = "0000000012982b6d5f621229286b880e909984df669c2afabb102ce311b13f28";
+                assert_eq!(
+                    header_json.nextblockhash,
+                    Some(BlockHash::from_str(block_1).unwrap())
+                );
+            }
             Network::Liquid => {
                 let block_1 = "afafbbdfc52a45e51a3b634f391f952f6bdfd14ef74b34925954b4e20d0ad639";
                 assert_eq!(
