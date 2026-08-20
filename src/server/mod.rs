@@ -412,6 +412,18 @@ impl Network {
             Network::BitcoinSignet => 3106,
         }
     }
+
+    pub(crate) fn node_chain_name(&self) -> &'static str {
+        match self {
+            Network::Liquid => "liquidv1",
+            Network::LiquidTestnet => "liquidtestnet",
+            Network::ElementsRegtest => "liquidregtest",
+            Network::Bitcoin => "main",
+            Network::BitcoinTestnet => "test",
+            Network::BitcoinRegtest => "regtest",
+            Network::BitcoinSignet => "signet",
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -492,7 +504,9 @@ pub async fn inner_main(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log::info!("starting waterfalls with args: {:?}", args);
 
-    Client::new(&args)?.authenticated_rpc_preflight().await?;
+    let startup_client = Client::new(&args)?;
+    startup_client.authenticated_rpc_preflight().await?;
+    startup_client.validate_network(args.network).await?;
 
     let store = get_store(&args)?;
 

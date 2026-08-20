@@ -190,6 +190,28 @@ impl Client {
         Ok(())
     }
 
+    pub async fn validate_network(&self, network: Network) -> Result<()> {
+        if self.use_esplora {
+            let Some(expected) = expected_genesis_hash(network) else {
+                log::warn!(
+                    "skipping genesis validation for {network} because its genesis may be customized"
+                );
+                return Ok(());
+            };
+            let actual = self
+                .block_hash(0)
+                .await?
+                .ok_or_else(|| anyhow!("backend did not return a genesis block for {network}"))?;
+            validate_genesis_hash(network, expected, actual)
+        } else {
+            let chain_info = self
+                .chain_info()
+                .await?
+                .ok_or_else(|| anyhow!("node did not return chain information for {network}"))?;
+            validate_node_chain(network, &chain_info.chain)
+        }
+    }
+
     fn rpc_url(&self) -> String {
         let rpc_auth = self
             .rpc_user_password
@@ -694,6 +716,56 @@ pub struct ChainInfo {
     pub bestblockhash: BlockHash,
 }
 
+fn validate_node_chain(network: Network, actual: &str) -> Result<()> {
+    let expected = network.node_chain_name();
+    if actual != expected {
+        anyhow::bail!(
+            "configured network {network} expects node chain {expected}, but backend reports {actual}"
+        );
+    }
+    Ok(())
+}
+
+fn validate_genesis_hash(network: Network, expected: BlockHash, actual: BlockHash) -> Result<()> {
+    if actual != expected {
+        anyhow::bail!(
+            "configured network {network} expects genesis block {expected}, but backend reports {actual}"
+        );
+    }
+    Ok(())
+}
+
+fn expected_genesis_hash(network: Network) -> Option<BlockHash> {
+    let bitcoin_network = match network {
+        Network::Bitcoin => Some(bitcoin::Network::Bitcoin),
+        Network::BitcoinTestnet => Some(bitcoin::Network::Testnet),
+        Network::BitcoinRegtest => Some(bitcoin::Network::Regtest),
+        Network::BitcoinSignet => Some(bitcoin::Network::Signet),
+        _ => None,
+    };
+    if let Some(network) = bitcoin_network {
+        return bitcoin::constants::genesis_block(network)
+            .block_hash()
+            .to_string()
+            .parse()
+            .map(Some)
+            .expect("bitcoin genesis hash must parse as an Elements block hash");
+    }
+
+    let hash = match network {
+        Network::Liquid => "1466275836220db2944ca059a3a10ef6fd2ea684b0688d2c379296888a206003",
+        Network::LiquidTestnet => {
+            "a771da8e52ee6ad581ed1e9a99825e5b3b7992225534eaa2ae23244fe26ab1c1"
+        }
+        Network::ElementsRegtest => return None,
+        Network::Bitcoin
+        | Network::BitcoinTestnet
+        | Network::BitcoinRegtest
+        | Network::BitcoinSignet => unreachable!("handled above"),
+    };
+    Some(hash.parse().expect("hardcoded genesis hash must parse"))
+}
+
 #[cfg(test)]
 mod test {
     use std::io::Write;
@@ -707,7 +779,57 @@ mod test {
     #[cfg(any(feature = "esplora", feature = "synced_node"))]
     use crate::Family;
 
-    use super::{parse_fee_estimates_rpc_reply, Client};
+    use super::{
+        expected_genesis_hash, parse_fee_estimates_rpc_reply, validate_genesis_hash,
+        validate_node_chain, Client,
+    };
+
+    #[test]
+    fn configured_network_accepts_matching_node_chain() {
+        for network in [
+            Network::Liquid,
+            Network::LiquidTestnet,
+            Network::ElementsRegtest,
+            Network::Bitcoin,
+            Network::BitcoinTestnet,
+            Network::BitcoinRegtest,
+            Network::BitcoinSignet,
+        ] {
+            validate_node_chain(network, network.node_chain_name()).unwrap();
+        }
+    }
+
+    #[test]
+    fn configured_network_rejects_wrong_node_chain() {
+        let err = validate_node_chain(Network::BitcoinTestnet, "testnet4").unwrap_err();
+        assert!(err.to_string().contains("expects node chain test"));
+        assert!(err.to_string().contains("backend reports testnet4"));
+    }
+
+    #[test]
+    fn configured_network_accepts_matching_genesis() {
+        for network in [
+            Network::Liquid,
+            Network::LiquidTestnet,
+            Network::Bitcoin,
+            Network::BitcoinTestnet,
+            Network::BitcoinRegtest,
+            Network::BitcoinSignet,
+        ] {
+            let expected = expected_genesis_hash(network).unwrap();
+            validate_genesis_hash(network, expected, expected).unwrap();
+        }
+        assert_eq!(expected_genesis_hash(Network::ElementsRegtest), None);
+    }
+
+    #[test]
+    fn configured_network_rejects_wrong_genesis() {
+        let expected = expected_genesis_hash(Network::BitcoinTestnet).unwrap();
+        let actual = expected_genesis_hash(Network::BitcoinSignet).unwrap();
+        let err = validate_genesis_hash(Network::BitcoinTestnet, expected, actual).unwrap_err();
+        assert!(err.to_string().contains("expects genesis block"));
+        assert!(err.to_string().contains("backend reports"));
+    }
 
     #[test]
     fn test_parse_fee_estimates_rpc_reply() {
