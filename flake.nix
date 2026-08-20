@@ -92,6 +92,11 @@
                 "3100/tcp" = {}; # Liquid
                 "3101/tcp" = {}; # LiquidTestnet
                 "3102/tcp" = {}; # ElementsRegtest
+                "3103/tcp" = {}; # Bitcoin
+                "3104/tcp" = {}; # BitcoinTestnet
+                "3105/tcp" = {}; # BitcoinRegtest
+                "3106/tcp" = {}; # BitcoinSignet
+                "3107/tcp" = {}; # BitcoinTestnet4
               };
             };
           };

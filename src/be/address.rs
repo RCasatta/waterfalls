@@ -18,6 +18,7 @@ impl Address {
             Network::ElementsRegtest => liquid_address(s, &AddressParams::ELEMENTS)?,
             Network::Bitcoin => bitcoin_address(s, bitcoin::Network::Bitcoin)?,
             Network::BitcoinTestnet => bitcoin_address(s, bitcoin::Network::Testnet)?,
+            Network::BitcoinTestnet4 => bitcoin_address(s, bitcoin::Network::Testnet4)?,
             Network::BitcoinRegtest => bitcoin_address(s, bitcoin::Network::Regtest)?,
             Network::BitcoinSignet => bitcoin_address(s, bitcoin::Network::Signet)?,
         })
@@ -44,6 +45,12 @@ impl Address {
             Network::BitcoinTestnet => bitcoin::Address::from_script(
                 &bitcoin::ScriptBuf::from_bytes(script.to_bytes()),
                 bitcoin::Network::Testnet,
+            )
+            .ok()
+            .map(Address::Bitcoin),
+            Network::BitcoinTestnet4 => bitcoin::Address::from_script(
+                &bitcoin::ScriptBuf::from_bytes(script.to_bytes()),
+                bitcoin::Network::Testnet4,
             )
             .ok()
             .map(Address::Bitcoin),
@@ -210,6 +217,16 @@ mod tests {
             addr.to_string(),
             "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"
         );
+    }
+
+    #[test]
+    fn bitcoin_testnet4_address() {
+        let addr = Address::from_str(
+            "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx",
+            Network::BitcoinTestnet4,
+        )
+        .unwrap();
+        assert!(matches!(addr, Address::Bitcoin(_)));
     }
 
     #[test]

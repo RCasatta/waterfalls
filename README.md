@@ -124,7 +124,10 @@ docker load < result
 
 ### Running the Docker container
 
-The Docker image exposes all network ports (3100 for Liquid, 3101 for LiquidTestnet, 3102 for ElementsRegtest). You need to specify the `NETWORK` environment variable when running the container:
+The Docker image exposes ports 3100-3107 for Liquid, Liquid Testnet, Elements
+Regtest, Bitcoin, Bitcoin Testnet, Bitcoin Regtest, Bitcoin Signet, and Bitcoin
+Testnet4 respectively. You need to specify the `NETWORK` environment variable
+when running the container:
 
 ```bash
 # Run with Liquid network
@@ -133,6 +136,15 @@ docker run -p 3100:3100 -e NETWORK=liquid waterfalls:latest
 # Run with LiquidTestnet network
 docker run -p 3101:3101 -e NETWORK=liquid-testnet waterfalls:latest
 
+# Run Bitcoin Testnet4 against a node REST/RPC port 48332 on the Docker host
+docker run -p 3107:3107 \
+  --add-host=host.docker.internal:host-gateway \
+  -e NETWORK=bitcoin-testnet4 \
+  -e NODE_URL=http://host.docker.internal:48332 \
+  -e RPC_USER_PASSWORD_FILE=/run/bitcoin/.cookie \
+  -v /path/to/testnet4/.cookie:/run/bitcoin/.cookie:ro \
+  waterfalls:latest
+
 ```
 
 You can also specify additional parameters via environment variables:
@@ -140,6 +152,9 @@ You can also specify additional parameters via environment variables:
 ```bash
 # Use Esplora API instead of a local node
 docker run -p 3100:3100 -e NETWORK=liquid -e USE_ESPLORA=true waterfalls:latest
+
+# Bitcoin Testnet4 defaults to https://mempool.space/testnet4/api
+docker run -p 3107:3107 -e NETWORK=bitcoin-testnet4 -e USE_ESPLORA=true waterfalls:latest
 ```
 
 ### Publish the Docker

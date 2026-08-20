@@ -28,6 +28,7 @@ impl From<Network> for Family {
             Network::Liquid | Network::LiquidTestnet | Network::ElementsRegtest => Family::Elements,
             Network::Bitcoin
             | Network::BitcoinTestnet
+            | Network::BitcoinTestnet4
             | Network::BitcoinRegtest
             | Network::BitcoinSignet => Family::Bitcoin,
         }

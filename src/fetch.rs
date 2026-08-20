@@ -98,6 +98,10 @@ impl Client {
                 .esplora_url
                 .clone()
                 .unwrap_or(format!("{BS}/testnet/api")),
+            Network::BitcoinTestnet4 => args
+                .esplora_url
+                .clone()
+                .unwrap_or_else(|| "https://mempool.space/testnet4/api".to_string()),
             Network::BitcoinRegtest => args.esplora_url.clone().unwrap_or(format!("{LOCAL}:3000")),
             Network::BitcoinSignet => args
                 .esplora_url
@@ -739,6 +743,7 @@ fn expected_genesis_hash(network: Network) -> Option<BlockHash> {
     let bitcoin_network = match network {
         Network::Bitcoin => Some(bitcoin::Network::Bitcoin),
         Network::BitcoinTestnet => Some(bitcoin::Network::Testnet),
+        Network::BitcoinTestnet4 => Some(bitcoin::Network::Testnet4),
         Network::BitcoinRegtest => Some(bitcoin::Network::Regtest),
         Network::BitcoinSignet => Some(bitcoin::Network::Signet),
         _ => None,
@@ -760,6 +765,7 @@ fn expected_genesis_hash(network: Network) -> Option<BlockHash> {
         Network::ElementsRegtest => return None,
         Network::Bitcoin
         | Network::BitcoinTestnet
+        | Network::BitcoinTestnet4
         | Network::BitcoinRegtest
         | Network::BitcoinSignet => unreachable!("handled above"),
     };
@@ -784,6 +790,19 @@ mod test {
         validate_node_chain, Client,
     };
 
+    #[cfg(feature = "esplora")]
+    #[test]
+    fn bitcoin_testnet4_default_esplora_url() {
+        let args = Arguments {
+            network: Network::BitcoinTestnet4,
+            use_esplora: true,
+            request_timeout_seconds: 1,
+            ..Arguments::default()
+        };
+        let client = Client::new(&args).unwrap();
+        assert_eq!(client.base_url, "https://mempool.space/testnet4/api");
+    }
+
     #[test]
     fn configured_network_accepts_matching_node_chain() {
         for network in [
@@ -792,6 +811,7 @@ mod test {
             Network::ElementsRegtest,
             Network::Bitcoin,
             Network::BitcoinTestnet,
+            Network::BitcoinTestnet4,
             Network::BitcoinRegtest,
             Network::BitcoinSignet,
         ] {
@@ -1056,7 +1076,12 @@ mod test {
             request_timeout_seconds: 30,
             ..Arguments::default()
         };
-        for network in [Network::Bitcoin, Network::Liquid, Network::LiquidTestnet] {
+        for network in [
+            Network::Bitcoin,
+            Network::BitcoinTestnet4,
+            Network::Liquid,
+            Network::LiquidTestnet,
+        ] {
             args.network = network;
             let client = Client::new(&args).unwrap();
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -1119,6 +1144,11 @@ mod test {
                 Some("0e3e2357e806b6cdb1f70b54c3a3a17b6714ee1f0e68bebb44a74b1efd512098"),
             ),
             Network::BitcoinTestnet => todo!(),
+            Network::BitcoinTestnet4 => (
+                "00000000da84f2bafbbc53dee25a72ae507ff4914b867c565be350b0da8bf043",
+                "7aa0a7ae1e223414cb807e40cd57e667b718e42aaf9306db9102fe28912b7b4e",
+                None,
+            ),
             Network::BitcoinRegtest => (
                 "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206",
                 "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",

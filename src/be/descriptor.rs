@@ -18,6 +18,7 @@ impl Descriptor {
             Network::ElementsRegtest => elements_descriptor(s)?,
             Network::Bitcoin => bitcoin_descriptor(s)?,
             Network::BitcoinTestnet => bitcoin_descriptor(s)?,
+            Network::BitcoinTestnet4 => bitcoin_descriptor(s)?,
             Network::BitcoinRegtest => bitcoin_descriptor(s)?,
             Network::BitcoinSignet => bitcoin_descriptor(s)?,
         })
@@ -358,6 +359,13 @@ mod tests {
         assert!(matches!(desc, Descriptor::Bitcoin(_)));
         assert!(desc.to_string().starts_with(desc_str));
         assert!(desc.to_string().contains("#"));
+    }
+
+    #[test]
+    fn bitcoin_testnet4_descriptor() {
+        let desc_str = "wpkh(02e18f242c8b0b589bfffeac30e1baa80a60933a649c7fb0f1103e78fbf58aa0ed)";
+        let desc = Descriptor::from_str(desc_str, Network::BitcoinTestnet4).unwrap();
+        assert!(matches!(desc, Descriptor::Bitcoin(_)));
     }
 
     #[test]

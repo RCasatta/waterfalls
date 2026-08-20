@@ -33,7 +33,7 @@ async fn integration_fetch_client_regtest_elements() {
 
     let elementsd = waterfalls::test_env::launch_elements(std::env::var("ELEMENTSD_EXEC").unwrap());
     let client = fetch_client_for_node(&elementsd, Network::ElementsRegtest);
-    test_fetch_client_local_regtest(client, Network::ElementsRegtest).await;
+    test_fetch_client_local(client, Network::ElementsRegtest).await;
 }
 
 #[cfg(feature = "test_env")]
@@ -52,7 +52,21 @@ async fn integration_fetch_client_regtest_bitcoin() {
 
     let bitcoind = waterfalls::test_env::launch_bitcoin(std::env::var("BITCOIND_EXEC").unwrap());
     let client = fetch_client_for_node(&bitcoind, Network::BitcoinRegtest);
-    test_fetch_client_local_regtest(client, Network::BitcoinRegtest).await;
+    test_fetch_client_local(client, Network::BitcoinRegtest).await;
+}
+
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn integration_fetch_client_bitcoin_testnet4() {
+    let _ = env_logger::try_init();
+
+    let mut conf = bitcoind::Conf::default();
+    conf.args = vec!["-testnet4", "-connect=0", "-rest=1", "-txindex=1"];
+    conf.network = "testnet4";
+    let bitcoind =
+        bitcoind::BitcoinD::with_conf(std::env::var("BITCOIND_EXEC").unwrap(), &conf).unwrap();
+    let client = fetch_client_for_node(&bitcoind, Network::BitcoinTestnet4);
+    test_fetch_client_local(client, Network::BitcoinTestnet4).await;
 }
 
 #[cfg(feature = "test_env")]
@@ -546,7 +560,7 @@ fn fetch_client_for_node(node: &bitcoind::BitcoinD, network: Network) -> FetchCl
 }
 
 #[cfg(feature = "test_env")]
-async fn test_fetch_client_local_regtest(client: FetchClient, network: Network) {
+async fn test_fetch_client_local(client: FetchClient, network: Network) {
     use elements::BlockHash;
     use std::str::FromStr;
 
@@ -559,8 +573,14 @@ async fn test_fetch_client_local_regtest(client: FetchClient, network: Network) 
             "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206",
             "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",
         ),
+        Network::BitcoinTestnet4 => (
+            "00000000da84f2bafbbc53dee25a72ae507ff4914b867c565be350b0da8bf043",
+            "7aa0a7ae1e223414cb807e40cd57e667b718e42aaf9306db9102fe28912b7b4e",
+        ),
         _ => panic!("unexpected network {network:?}"),
     };
+
+    client.validate_network(network).await.unwrap();
 
     let genesis_hash = BlockHash::from_str(genesis_hash).unwrap();
     let genesis_txid = be::Txid::from_str(genesis_txid).unwrap();

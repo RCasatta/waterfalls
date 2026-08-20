@@ -49,6 +49,7 @@ pub enum Network {
     ElementsRegtest,
     Bitcoin,
     BitcoinTestnet,
+    BitcoinTestnet4,
     BitcoinRegtest,
     BitcoinSignet,
 }
@@ -353,6 +354,7 @@ impl std::str::FromStr for Network {
             "elements-regtest" => Ok(Self::ElementsRegtest),
             "bitcoin" => Ok(Self::Bitcoin),
             "bitcoin-testnet" => Ok(Self::BitcoinTestnet),
+            "bitcoin-testnet4" => Ok(Self::BitcoinTestnet4),
             "bitcoin-regtest" => Ok(Self::BitcoinRegtest),
             "bitcoin-signet" => Ok(Self::BitcoinSignet),
             _ => Err(Error::String(format!("Invalid network: {}", s))),
@@ -368,6 +370,7 @@ impl std::fmt::Display for Network {
             Network::ElementsRegtest { .. } => "elements-regtest",
             Network::Bitcoin => "bitcoin",
             Network::BitcoinTestnet => "bitcoin-testnet",
+            Network::BitcoinTestnet4 => "bitcoin-testnet4",
             Network::BitcoinRegtest => "bitcoin-regtest",
             Network::BitcoinSignet => "bitcoin-signet",
         };
@@ -396,6 +399,7 @@ impl Network {
             Network::ElementsRegtest => 7043, // TODO: check this
             Network::Bitcoin => 8332,
             Network::BitcoinTestnet => 18332,
+            Network::BitcoinTestnet4 => 48332,
             Network::BitcoinRegtest => 18443,
             Network::BitcoinSignet => 38332,
         }
@@ -410,6 +414,7 @@ impl Network {
             Network::BitcoinTestnet => 3104,
             Network::BitcoinRegtest => 3105,
             Network::BitcoinSignet => 3106,
+            Network::BitcoinTestnet4 => 3107,
         }
     }
 
@@ -420,6 +425,7 @@ impl Network {
             Network::ElementsRegtest => "liquidregtest",
             Network::Bitcoin => "main",
             Network::BitcoinTestnet => "test",
+            Network::BitcoinTestnet4 => "testnet4",
             Network::BitcoinRegtest => "regtest",
             Network::BitcoinSignet => "signet",
         }
@@ -780,6 +786,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn bitcoin_testnet4_defaults() {
+        let network = Network::BitcoinTestnet4;
+        assert_eq!(network.default_node_listen_port(), 48332);
+        assert_eq!(network.default_listen_port(), 3107);
+        assert_eq!(network.node_chain_name(), "testnet4");
+    }
+
+    #[test]
     fn test_network_from_str_roundtrip() {
         for network in [
             Network::Liquid,
@@ -787,6 +801,7 @@ mod tests {
             Network::ElementsRegtest,
             Network::Bitcoin,
             Network::BitcoinTestnet,
+            Network::BitcoinTestnet4,
             Network::BitcoinRegtest,
             Network::BitcoinSignet,
         ] {
