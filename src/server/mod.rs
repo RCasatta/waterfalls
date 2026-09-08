@@ -4,10 +4,11 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::fetch::Client;
+use crate::fetch::{BackendValidationError, Client};
 use crate::inc_connection_error_counter;
 use crate::server::preload::headers;
 use crate::store::memory::MemoryStore;
@@ -41,6 +42,8 @@ const DEFAULT_MAX_TXS_SEEN: usize = 100;
 const DEFAULT_MAX_ACTIVE_SUBSCRIPTIONS: usize = 5_000;
 const DEFAULT_MAX_SCRIPTS_PER_SUBSCRIPTION: usize = 2_000;
 const PERIODIC_LOGGING_INTERVAL: Duration = Duration::from_secs(300);
+const INITIAL_BACKEND_RETRY_DELAY: Duration = Duration::from_secs(1);
+const MAX_BACKEND_RETRY_DELAY: Duration = Duration::from_secs(30);
 
 #[derive(Clone, clap::ValueEnum, Debug, PartialEq, Eq, Copy)]
 pub enum Network {
@@ -511,8 +514,18 @@ pub async fn inner_main(
     log::info!("starting waterfalls with args: {:?}", args);
 
     let startup_client = Client::new(&args)?;
-    startup_client.authenticated_rpc_preflight().await?;
-    startup_client.validate_network(args.network).await?;
+    let mut signal = std::pin::pin!(shutdown_signal);
+    if !retry_backend_validation(
+        || startup_client.validate_backend(args.network),
+        signal.as_mut(),
+        INITIAL_BACKEND_RETRY_DELAY,
+        MAX_BACKEND_RETRY_DELAY,
+    )
+    .await?
+    {
+        log::info!("shutdown signal received while waiting for blockchain backend");
+        return Ok(());
+    }
 
     let store = get_store(&args)?;
 
@@ -659,8 +672,6 @@ pub async fn inner_main(
         client.chain_info().await
     );
     let client = Arc::new(Mutex::new(client));
-    let mut signal = std::pin::pin!(shutdown_signal);
-
     loop {
         tokio::select! {
             Ok((stream, peer_addr)) = listener.accept() => {
@@ -698,7 +709,7 @@ pub async fn inner_main(
                 });
             },
 
-            _ = &mut signal => {
+            _ = signal.as_mut() => {
                 log::info!("graceful shutdown signal received");
                 // Signal all background tasks to shutdown
                 let _ = shutdown_tx.send(());
@@ -736,6 +747,44 @@ async fn periodic_logging(state: Arc<State>, shutdown_signal: impl Future<Output
             }
         }
     }
+}
+
+async fn retry_backend_validation<Validate, Validation, Shutdown>(
+    mut validate: Validate,
+    mut shutdown_signal: Pin<&mut Shutdown>,
+    initial_delay: Duration,
+    max_delay: Duration,
+) -> Result<bool, BackendValidationError>
+where
+    Validate: FnMut() -> Validation,
+    Validation: Future<Output = Result<(), BackendValidationError>>,
+    Shutdown: Future<Output = ()>,
+{
+    let mut delay = initial_delay.min(max_delay);
+    loop {
+        let result = tokio::select! {
+            result = validate() => result,
+            _ = shutdown_signal.as_mut() => return Ok(false),
+        };
+
+        match result {
+            Ok(()) => return Ok(true),
+            Err(error) if error.is_retryable() => {
+                log::warn!("blockchain backend unavailable: {error:#}; retrying in {delay:?}");
+            }
+            Err(error) => return Err(error),
+        }
+
+        tokio::select! {
+            _ = tokio::time::sleep(delay) => {}
+            _ = shutdown_signal.as_mut() => return Ok(false),
+        }
+        delay = next_backend_retry_delay(delay, max_delay);
+    }
+}
+
+fn next_backend_retry_delay(delay: Duration, max_delay: Duration) -> Duration {
+    delay.saturating_mul(2).min(max_delay)
 }
 
 async fn log_periodic_state(state: &State) {
@@ -784,6 +833,105 @@ struct HeaderTimeoutAggregation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn transient_backend_failure_is_retried() {
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let mut shutdown = std::pin::pin!(std::future::pending());
+
+        let ready = retry_backend_validation(
+            || {
+                let attempt = attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async move {
+                    if attempt < 2 {
+                        Err(BackendValidationError::unavailable(anyhow::anyhow!(
+                            "backend offline"
+                        )))
+                    } else {
+                        Ok(())
+                    }
+                }
+            },
+            shutdown.as_mut(),
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .await
+        .unwrap();
+
+        assert!(ready);
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn permanent_backend_failure_is_returned() {
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let mut shutdown = std::pin::pin!(std::future::pending());
+
+        let err = retry_backend_validation(
+            || {
+                attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async {
+                    Err(BackendValidationError::invalid(anyhow::anyhow!(
+                        "bad credentials"
+                    )))
+                }
+            },
+            shutdown.as_mut(),
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(!err.is_retryable());
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn shutdown_interrupts_backend_retry_delay() {
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let mut shutdown_tx = Some(shutdown_tx);
+        let mut shutdown = std::pin::pin!(async {
+            let _ = shutdown_rx.await;
+        });
+
+        let ready = retry_backend_validation(
+            || {
+                let shutdown_tx = shutdown_tx.take();
+                async move {
+                    if let Some(shutdown_tx) = shutdown_tx {
+                        shutdown_tx.send(()).unwrap();
+                    }
+                    Err(BackendValidationError::unavailable(anyhow::anyhow!(
+                        "backend offline"
+                    )))
+                }
+            },
+            shutdown.as_mut(),
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
+
+        assert!(!ready);
+    }
+
+    #[test]
+    fn backend_retry_delay_uses_capped_exponential_backoff() {
+        let maximum = Duration::from_secs(30);
+
+        assert_eq!(
+            next_backend_retry_delay(Duration::from_secs(1), maximum),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            next_backend_retry_delay(Duration::from_secs(16), maximum),
+            maximum
+        );
+        assert_eq!(next_backend_retry_delay(maximum, maximum), maximum);
+    }
 
     #[test]
     fn bitcoin_testnet4_defaults() {
