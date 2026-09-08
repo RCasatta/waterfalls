@@ -30,6 +30,7 @@ pub enum Error {
     BlockNotFound(String, BlockHash),
     BlockHeaderNotFound(String, BlockHash),
     UnexpectedStatus(String, StatusCode),
+    BackendUnavailable(String),
 }
 
 impl std::error::Error for Error {}
@@ -45,6 +46,7 @@ impl std::fmt::Display for Error {
             Error::UnexpectedStatus(url, status) => {
                 write!(f, "unexpected status: {status} for url {url}")
             }
+            Error::BackendUnavailable(message) => f.write_str(message),
         }
     }
 }
@@ -176,15 +178,25 @@ impl Client {
         let status = response.status();
         let text = response.text().await?;
         if status != 200 {
-            anyhow::bail!(
-                "RPC authentication preflight failed with status:{status}, body is {text}"
-            );
+            let message =
+                format!("RPC authentication preflight failed with status:{status}, body is {text}");
+            if retryable_status(status) {
+                return Err(Error::BackendUnavailable(message).into());
+            }
+            anyhow::bail!(message);
         }
 
         let value: serde_json::Value = serde_json::from_str(&text).with_context(|| {
             format!("RPC authentication preflight returned invalid JSON: {text}")
         })?;
         if !value["error"].is_null() {
+            if value["error"]["code"].as_i64() == Some(-28) {
+                return Err(Error::BackendUnavailable(format!(
+                    "RPC authentication preflight failed: {}",
+                    value["error"]
+                ))
+                .into());
+            }
             anyhow::bail!("RPC authentication preflight failed: {}", value["error"]);
         }
         if value.get("result").is_none() {
@@ -192,6 +204,18 @@ impl Client {
         }
 
         Ok(())
+    }
+
+    pub(crate) async fn validate_backend(
+        &self,
+        network: Network,
+    ) -> std::result::Result<(), BackendValidationError> {
+        self.authenticated_rpc_preflight()
+            .await
+            .map_err(BackendValidationError::classify)?;
+        self.validate_network(network)
+            .await
+            .map_err(BackendValidationError::classify)
     }
 
     pub async fn validate_network(&self, network: Network) -> Result<()> {
@@ -772,6 +796,72 @@ fn expected_genesis_hash(network: Network) -> Option<BlockHash> {
     Some(hash.parse().expect("hardcoded genesis hash must parse"))
 }
 
+#[derive(Debug)]
+pub(crate) struct BackendValidationError {
+    error: anyhow::Error,
+    retryable: bool,
+}
+
+impl BackendValidationError {
+    pub(crate) fn is_retryable(&self) -> bool {
+        self.retryable
+    }
+
+    pub(crate) fn unavailable(error: anyhow::Error) -> Self {
+        Self {
+            error,
+            retryable: true,
+        }
+    }
+
+    pub(crate) fn invalid(error: anyhow::Error) -> Self {
+        Self {
+            error,
+            retryable: false,
+        }
+    }
+
+    fn classify(error: anyhow::Error) -> Self {
+        let retryable_request = error
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(|error| !error.is_builder() && !error.is_redirect());
+        let retryable_fetch = error
+            .downcast_ref::<Error>()
+            .is_some_and(|error| match error {
+                Error::UnexpectedStatus(_, status) => retryable_status(*status),
+                Error::BackendUnavailable(_) => true,
+                _ => false,
+            });
+        if retryable_request || retryable_fetch {
+            Self::unavailable(error)
+        } else {
+            Self::invalid(error)
+        }
+    }
+}
+
+impl std::fmt::Display for BackendValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if f.alternate() {
+            write!(f, "{:#}", self.error)
+        } else {
+            self.error.fmt(f)
+        }
+    }
+}
+
+impl std::error::Error for BackendValidationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.error.as_ref())
+    }
+}
+
+fn retryable_status(status: StatusCode) -> bool {
+    status.is_server_error()
+        || status == StatusCode::REQUEST_TIMEOUT
+        || status == StatusCode::TOO_MANY_REQUESTS
+}
+
 #[cfg(test)]
 mod test {
     use std::io::Write;
@@ -787,7 +877,7 @@ mod test {
 
     use super::{
         expected_genesis_hash, parse_fee_estimates_rpc_reply, validate_genesis_hash,
-        validate_node_chain, Client,
+        validate_node_chain, BackendValidationError, Client,
     };
 
     #[cfg(feature = "esplora")]
@@ -824,6 +914,7 @@ mod test {
         let err = validate_node_chain(Network::BitcoinTestnet, "testnet4").unwrap_err();
         assert!(err.to_string().contains("expects node chain test"));
         assert!(err.to_string().contains("backend reports testnet4"));
+        assert!(!BackendValidationError::classify(err).is_retryable());
     }
 
     #[test]
@@ -973,39 +1064,53 @@ mod test {
         status: &str,
         body: &str,
     ) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+        spawn_node_responses(&[(status, body)]).await
+    }
+
+    async fn spawn_node_responses(
+        responses: &[(&str, &str)],
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::TcpListener;
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let status = status.to_string();
-        let body = body.to_string();
+        let responses: Vec<_> = responses
+            .iter()
+            .map(|(status, body)| (status.to_string(), body.to_string()))
+            .collect();
 
         let handle = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut buf = [0u8; 1024];
-            loop {
-                let n = socket.read(&mut buf).await.unwrap();
-                if n == 0 || buf[..n].windows(4).any(|w| w == b"\r\n\r\n") {
-                    break;
+            for (status, body) in responses {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 1024];
+                loop {
+                    let n = socket.read(&mut buf).await.unwrap();
+                    if n == 0 || buf[..n].windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
                 }
-            }
 
-            let response = format!(
-                "HTTP/1.1 {status}\r\nContent-Length: {}\r\n\r\n{body}",
-                body.len()
-            );
-            socket.write_all(response.as_bytes()).await.unwrap();
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
         });
 
         (addr, handle)
     }
 
     fn node_client(addr: std::net::SocketAddr, disable_conn_pool: bool) -> Client {
+        node_client_url(format!("http://{addr}"), disable_conn_pool)
+    }
+
+    fn node_client_url(node_url: String, disable_conn_pool: bool) -> Client {
         let mut args = Arguments::default();
         args.network = Network::Bitcoin;
         args.use_esplora = false;
-        args.node_url = Some(format!("http://{addr}"));
+        args.node_url = Some(node_url);
         let mut rpc_user_password_file = tempfile::NamedTempFile::new().unwrap();
         write!(rpc_user_password_file, "user:pass").unwrap();
         args.rpc_user_password_file = Some(rpc_user_password_file.path().to_path_buf());
@@ -1032,6 +1137,112 @@ mod test {
 
         let err = client.authenticated_rpc_preflight().await.unwrap_err();
         assert!(err.to_string().contains("status:401 Unauthorized"));
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn backend_validation_retries_connection_failures() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let client = node_client(addr, false);
+
+        let err = client.validate_backend(Network::Bitcoin).await.unwrap_err();
+
+        assert!(err.is_retryable());
+        assert!(err
+            .to_string()
+            .contains("RPC authentication preflight failed"));
+    }
+
+    #[tokio::test]
+    async fn backend_validation_rejects_invalid_node_url() {
+        let client = node_client_url("not a url".to_string(), false);
+
+        let err = client.validate_backend(Network::Bitcoin).await.unwrap_err();
+
+        assert!(!err.is_retryable());
+        assert!(err
+            .to_string()
+            .contains("RPC authentication preflight failed"));
+    }
+
+    #[tokio::test]
+    async fn backend_validation_rejects_bad_credentials() {
+        let (addr, handle) = spawn_rpc_preflight_node("401 Unauthorized", "").await;
+        let client = node_client(addr, false);
+
+        let err = client.validate_backend(Network::Bitcoin).await.unwrap_err();
+
+        assert!(!err.is_retryable());
+        assert!(err.to_string().contains("status:401 Unauthorized"));
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn backend_validation_retries_service_unavailable() {
+        let (addr, handle) = spawn_rpc_preflight_node("503 Service Unavailable", "").await;
+        let client = node_client(addr, false);
+
+        let err = client.validate_backend(Network::Bitcoin).await.unwrap_err();
+
+        assert!(err.is_retryable());
+        assert!(err.to_string().contains("status:503 Service Unavailable"));
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn backend_validation_retries_node_warmup() {
+        let (addr, handle) = spawn_rpc_preflight_node(
+            "200 OK",
+            r#"{"result":null,"error":{"code":-28,"message":"Loading block index"}}"#,
+        )
+        .await;
+        let client = node_client(addr, false);
+
+        let err = client.validate_backend(Network::Bitcoin).await.unwrap_err();
+
+        assert!(err.is_retryable());
+        assert!(err.to_string().contains("Loading block index"));
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn backend_validation_retries_chain_info_unavailable() {
+        let (addr, handle) = spawn_node_responses(&[
+            ("200 OK", r#"{"result":{"version":280000},"error":null}"#),
+            ("503 Service Unavailable", ""),
+        ])
+        .await;
+        let client = node_client(addr, false);
+
+        let err = client.validate_backend(Network::Bitcoin).await.unwrap_err();
+
+        assert!(err.is_retryable());
+        assert!(err.to_string().contains("503 Service Unavailable"));
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn backend_validation_rejects_wrong_node_network() {
+        let (addr, handle) = spawn_node_responses(&[
+            (
+                "200 OK",
+                r#"{"result":{"version":280000},"error":null}"#,
+            ),
+            (
+                "200 OK",
+                r#"{"chain":"signet","blocks":1,"headers":1,"bestblockhash":"00000008819873e925422c1ff0f99f7c85b01e6bffe137e43aeb8f5358f2a4db"}"#,
+            ),
+        ])
+        .await;
+        let client = node_client(addr, false);
+
+        let err = client.validate_backend(Network::Bitcoin).await.unwrap_err();
+
+        assert!(!err.is_retryable());
+        assert!(err.to_string().contains("expects node chain main"));
+        assert!(err.to_string().contains("backend reports signet"));
         handle.await.unwrap();
     }
 
