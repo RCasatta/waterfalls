@@ -269,8 +269,17 @@ fn within_reorg_window(node_tip: u32, height: u32, reorg_data_keep_heights: u32)
     node_tip.saturating_sub(height) < reorg_data_keep_heights
 }
 
-/// Best-effort read of the node tip height. `None` when it cannot be determined, for
-/// example in esplora mode or on a transient node error.
+/// Best-effort read of the node tip height, `None` when it cannot be determined.
+///
+/// In esplora mode (`--use-esplora`) `chain_info` is not implemented and always returns
+/// `None`, so the early exit from IBD in `index` never triggers and reorg data is only
+/// written from the first time the tip is reached, exactly as before this change.
+/// Blocks indexed while catching up after a restart therefore still cannot be rolled
+/// back with the esplora backend. That backend is rarely used and may be removed, so
+/// this is accepted for now; fixing it would need a tip-height lookup for esplora
+/// (`GET /blocks/tip/height`).
+///
+/// A transient node error also yields `None`; it is retried on the next block.
 async fn node_tip_height(client: &Client) -> Option<u32> {
     match client.chain_info().await {
         Ok(Some(info)) => Some(info.blocks),

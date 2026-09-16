@@ -180,6 +180,7 @@ pub struct Arguments {
 
     /// Number of recent block heights to keep reorg data for. Older reorg data is automatically deleted. Default is 6.
     /// Reorg data is not written during initial block download, except for blocks within this many heights of the node tip.
+    /// With `--use-esplora` the node tip is unknown, so reorg data starts only when the tip is reached.
     #[cfg(feature = "db")]
     #[arg(env, long)]
     pub reorg_data_keep_heights: Option<u32>,
