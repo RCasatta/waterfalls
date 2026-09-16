@@ -13,6 +13,10 @@ use std::{
 };
 use tokio::time::sleep;
 
+/// How often the node tip is re-read while catching up, to decide when reorg data writes
+/// must be enabled. A stale (lower) tip only enables them earlier, never later.
+const NODE_TIP_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+
 pub(crate) async fn blocks_infallible(
     shared_state: Arc<State>,
     client: Client,
@@ -20,6 +24,7 @@ pub(crate) async fn blocks_infallible(
     initial_sync_tx: tokio::sync::oneshot::Sender<()>,
     shutdown_signal: impl Future<Output = ()>,
     logs_rocksdb_stat_every_minutes: u64,
+    reorg_data_keep_heights: u32,
 ) {
     if let Err(e) = index(
         shared_state,
@@ -28,6 +33,7 @@ pub(crate) async fn blocks_infallible(
         initial_sync_tx,
         shutdown_signal,
         logs_rocksdb_stat_every_minutes,
+        reorg_data_keep_heights,
     )
     .await
     {
@@ -88,6 +94,9 @@ async fn get_next_block_to_index(
                 Ok(ChainStatus::Tip) => {
                     // Signal initial sync completion the first time we hit the tip
                     if let Some(tx) = initial_sync_tx.take() {
+                        // Enable reorg data writes here, before the next block is indexed,
+                        // rather than in the mempool task that receives the signal.
+                        state.store.ibd_finished();
                         let _ = tx.send(());
                         log::info!("Initial block download completed, signaling mempool thread");
                     }
@@ -128,6 +137,7 @@ pub async fn index(
     initial_sync_tx: tokio::sync::oneshot::Sender<()>,
     shutdown_signal: impl Future<Output = ()>,
     logs_rocksdb_stat_every_minutes: u64,
+    reorg_data_keep_heights: u32,
 ) -> Result<(), Error> {
     let db = &state.store;
 
@@ -145,6 +155,15 @@ pub async fn index(
 
     let mut txs_count = 0u64;
     let mut initial_sync_tx = Some(initial_sync_tx);
+
+    // The store starts in IBD mode on every process start and skips reorg data while in it,
+    // but a block indexed without reorg data can never be rolled back. Blocks indexed while
+    // catching up after a restart are the ones a reorg is most likely to remove, so leave
+    // IBD mode as soon as the block being indexed is within the reorg retention window of
+    // the node tip, instead of waiting for the tip itself.
+    let mut reorg_data_enabled = false;
+    let mut node_tip = node_tip_height(&client).await;
+    let mut last_node_tip_refresh = Instant::now();
 
     let start = Instant::now();
     let mut last_logging = Instant::now();
@@ -186,6 +205,32 @@ pub async fn index(
             last_logging = Instant::now();
         }
 
+        if !reorg_data_enabled {
+            if initial_sync_tx.is_none() {
+                // The tip was reached, `ibd_finished` has already been called.
+                reorg_data_enabled = true;
+            } else {
+                if node_tip.is_none()
+                    || last_node_tip_refresh.elapsed() >= NODE_TIP_REFRESH_INTERVAL
+                {
+                    node_tip = node_tip_height(&client).await;
+                    last_node_tip_refresh = Instant::now();
+                }
+                if let Some(tip) = node_tip {
+                    if within_reorg_window(tip, block_to_index.height, reorg_data_keep_heights) {
+                        log::info!(
+                            "block {} is within {} blocks of node tip {}, enabling reorg data writes",
+                            block_to_index.height,
+                            reorg_data_keep_heights,
+                            tip
+                        );
+                        db.ibd_finished();
+                        reorg_data_enabled = true;
+                    }
+                }
+            }
+        }
+
         // Log RocksDB stats at the specified interval (independent of initial sync)
         if last_rocksdb_stats_logging.elapsed() >= rocksdb_stats_interval {
             if let Some(stats) = db.stats() {
@@ -214,6 +259,26 @@ pub async fn index(
 
         crate::BLOCKCHAIN_TIP.set(block_to_index.height as i64);
         last_indexed = Some(block_to_index);
+    }
+}
+
+/// Whether a block at `height` is close enough to `node_tip` that reorg data must be kept
+/// for it, i.e. it would still be within the retention window of `reorg_data_keep_heights`
+/// recent heights once the tip is reached.
+fn within_reorg_window(node_tip: u32, height: u32, reorg_data_keep_heights: u32) -> bool {
+    node_tip.saturating_sub(height) < reorg_data_keep_heights
+}
+
+/// Best-effort read of the node tip height. `None` when it cannot be determined, for
+/// example in esplora mode or on a transient node error.
+async fn node_tip_height(client: &Client) -> Option<u32> {
+    match client.chain_info().await {
+        Ok(Some(info)) => Some(info.blocks),
+        Ok(None) => None,
+        Err(e) => {
+            log::warn!("error getting chain info to determine node tip: {e}");
+            None
+        }
     }
 }
 
@@ -302,6 +367,21 @@ mod indexing_tests {
     const CUSTOM_GENESIS_COINBASE: &str = "0100000000010000000000000000000000000000000000000000000000000000000000000000ffffffff2120bc6224b5d6e9c00462bb241cbc3b630c5be97038ed6a0b32c675496b8fceae74ffffffff0101000000000000000000000000000000000000000000000000000000000000000001000000000000000000016a00000000";
     const CUSTOM_GENESIS_ISSUANCE: &str = "010000000001bc6224b5d6e9c00462bb241cbc3b630c5be97038ed6a0b32c675496b8fceae740000008000ffffffff000000000000000000000000000000000000000000000000000000000000000006226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f01000000007d2b7500010000000000000000010167d5ceb159844af010727a9aee019922909228a561236ede23faa8a6787fdc8701000000007d2b750000015100000000";
     const INITIAL_FREE_COINS_SWEEP: &str = "02000000000186832196e41526f82373860b04ffe58c2887315111d7cf7e1dd7bee8c26d5ef30000000000fdffffff020167d5ceb159844af010727a9aee019922909228a561236ede23faa8a6787fdc8701000000007d2b6ea20017a914913aeded70454a1752c64bb1b44577b2c50dbca5870167d5ceb159844af010727a9aee019922909228a561236ede23faa8a6787fdc8701000000000000065e000001000000";
+
+    #[test]
+    fn reorg_window() {
+        // With a retention of 6 heights, the 6 blocks up to and including the tip are kept.
+        assert!(within_reorg_window(100, 100, 6));
+        assert!(within_reorg_window(100, 95, 6));
+        assert!(!within_reorg_window(100, 94, 6));
+        assert!(!within_reorg_window(100, 0, 6));
+        // A block past a stale tip is still within the window.
+        assert!(within_reorg_window(100, 101, 6));
+        // No retention means no reorg data before the tip is reached.
+        assert!(!within_reorg_window(100, 100, 0));
+        // A short chain gets reorg data from genesis.
+        assert!(within_reorg_window(3, 0, 6));
+    }
 
     #[test]
     fn custom_genesis_issuance_and_sweep_memory() {

@@ -58,7 +58,10 @@ pub trait Store {
     /// height: the height of the block that was reorged (needs to be rolled back)
     fn reorg(&self, height: Height);
 
-    /// Called when the initial block download is finished
+    /// Enable reorg data writes for every block indexed from now on.
+    ///
+    /// Called by the blocks task as soon as the block being indexed is within the reorg
+    /// retention window of the node tip, and again when the tip is reached. Idempotent.
     fn ibd_finished(&self);
 }
 

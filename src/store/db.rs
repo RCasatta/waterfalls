@@ -41,6 +41,12 @@ pub struct DBStore {
     /// Whether we are in Initial Block Download mode.
     /// During initial block download we skip reorg data writes, since reorgs are
     /// extremely unlikely for old blocks and the data is only needed near tip.
+    ///
+    /// Every process start begins in IBD mode, so the blocks task turns it off as soon as
+    /// the block being indexed is within `reorg_data_keep_heights` of the node tip, not
+    /// only when the tip is reached: a block indexed without reorg data can never be
+    /// rolled back, and the blocks indexed while catching up after a restart are exactly
+    /// the ones a reorg is most likely to hit.
     ibd: AtomicBool,
 
     /// Number of recent block heights to keep reorg data for. Older reorg data is automatically deleted.
@@ -687,7 +693,10 @@ impl Store for DBStore {
 
         // Store reorg data for potential blockchain reorganization correction
         // Skip during IBD (Initial Block Download) as reorgs are extremely unlikely for old blocks
-        // and this saves significant write overhead during initial sync
+        // and this saves significant write overhead during initial sync.
+        // A block written here without reorg data cannot be rolled back later, so the
+        // caller must call `ibd_finished` before indexing any block that is within
+        // `reorg_data_keep_heights` of the node tip (see `threads::blocks`).
         if !self.ibd.load(Ordering::Relaxed) {
             // Create ReorgData and persist it to the database
             let reorg_data = ReorgData {
@@ -724,8 +733,9 @@ impl Store for DBStore {
     }
 
     fn ibd_finished(&self) {
-        log::info!("Initial block download finished, enabling reorg data writes");
-        self.ibd.store(false, Ordering::Relaxed);
+        if self.ibd.swap(false, Ordering::Relaxed) {
+            log::info!("Initial block download finished, enabling reorg data writes");
+        }
     }
 }
 
@@ -814,19 +824,22 @@ fn concat_merge(
 mod test {
     use elements::{hashes::Hash, BlockHash, Txid};
     use rocksdb::DB;
-    use std::{collections::BTreeMap, sync::atomic::AtomicBool};
+    use std::{
+        collections::BTreeMap,
+        sync::atomic::{AtomicBool, Ordering},
+    };
 
     use crate::store::{
         db::{
             estimate_history_size, get_or_init_salt, serialize_outpoint, vec_tx_seen_from_be_bytes,
             vec_tx_seen_to_be_bytes, TxSeen,
         },
-        Store,
+        BlockMeta, Store,
     };
     use crate::OutPoint;
     use crate::V;
 
-    use super::DBStore;
+    use super::{DBStore, REORG_CF};
 
     #[test]
     fn test_db_hash_compatibility() {
@@ -909,6 +922,58 @@ mod test {
 
         // let r = db._get_multi_block_hash(&[0, 1, 2]).unwrap();
         // assert_eq!(r, vec![BlockHash::all_zeros(); 3]);
+    }
+
+    #[test]
+    fn test_reorg_data_written_only_after_ibd_finished() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let db = DBStore::open(tempdir.path(), 64, false, 6).unwrap();
+        let reorg_cf = db.db.cf_handle(REORG_CF).unwrap();
+        let txid = crate::be::Txid::all_zeros();
+
+        let block = |height: u32| BlockMeta::new(height, BlockHash::all_zeros(), height);
+        let created = |vout: u32| {
+            let mut m = BTreeMap::new();
+            m.insert(OutPoint::new(txid, vout), 1u64);
+            m
+        };
+
+        // While in IBD the block is indexed but no reorg data is persisted...
+        db.update(&block(1), vec![], BTreeMap::new(), created(1))
+            .unwrap();
+        assert!(db
+            .db
+            .get_cf(&reorg_cf, 1u32.to_be_bytes())
+            .unwrap()
+            .is_none());
+        // ...so that block can never be rolled back.
+        let err = db._reorg(1).unwrap_err().to_string();
+        assert!(err.contains("No reorg data found for height 1"), "{err}");
+
+        // Once IBD is finished every indexed block gets reorg data.
+        db.ibd_finished();
+        db.update(&block(2), vec![], BTreeMap::new(), created(2))
+            .unwrap();
+        assert!(db
+            .db
+            .get_cf(&reorg_cf, 2u32.to_be_bytes())
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            db.get_utxos(&[OutPoint::new(txid, 2)]).unwrap(),
+            vec![Some(1)]
+        );
+
+        // Calling it again is a no-op, and the block can be rolled back.
+        db.ibd_finished();
+        assert!(!db.ibd.load(Ordering::Relaxed));
+        db.reorg(2);
+        assert!(db
+            .db
+            .get_cf(&reorg_cf, 2u32.to_be_bytes())
+            .unwrap()
+            .is_none());
+        assert_eq!(db.get_utxos(&[OutPoint::new(txid, 2)]).unwrap(), vec![None]);
     }
 
     #[test]

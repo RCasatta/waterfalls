@@ -171,6 +171,26 @@ async fn inner_launch_with_node_no_generate(
     }
 }
 
+/// Generate `block_num` blocks on `node` to a new wallet address, without any server involved.
+/// Useful for tests that need to mine blocks while no server is running.
+pub fn generate_blocks(node: &BitcoinD, block_num: u32) -> Vec<BlockHash> {
+    let address: Value = node
+        .client
+        .call("getnewaddress", &["label".into(), "p2sh-segwit".into()])
+        .unwrap();
+    let result = node
+        .client
+        .call::<Value>("generatetoaddress", &[block_num.into(), address])
+        .unwrap();
+
+    result
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| BlockHash::from_str(v.as_str().unwrap()).unwrap())
+        .collect()
+}
+
 pub fn launch_bitcoin<S: AsRef<OsStr>>(exe: S) -> BitcoinD {
     let mut conf = Conf::default();
     conf.args = vec!["-regtest", "-fallbackfee=0.0001", "-rest=1", "-txindex=1"];
@@ -245,6 +265,25 @@ impl TestEnv {
         // BitcoinD will be automatically dropped here, calling its Drop implementation
     }
 
+    /// Shut down the server and wait for it to exit, keeping the node alive so that a new
+    /// server can be started against it, for example on the same database.
+    pub async fn shutdown_server(self) -> BitcoinD {
+        let TestEnv {
+            node,
+            handle,
+            tx,
+            client,
+            ..
+        } = self;
+        // Close idle keep-alive connections first: every connection task holds the shared
+        // state, and with it the database, until the connection is closed.
+        drop(client);
+        tx.send(()).unwrap();
+        let _ = handle.await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        node
+    }
+
     /// Extract the BitcoinD node from this TestEnv, signaling the server to shutdown.
     /// Used in tests that need to restart the server with the same node.
     pub fn into_node(self) -> BitcoinD {
@@ -300,22 +339,7 @@ impl TestEnv {
     /// Generate blocks on the node without waiting for waterfalls to index them.
     /// Useful for tests that expect the server to crash or be unavailable.
     pub fn node_generate_no_wait(&self, block_num: u32) -> Vec<BlockHash> {
-        let address = self.get_new_address(None);
-        let result = self
-            .node
-            .client
-            .call::<Value>(
-                "generatetoaddress",
-                &[block_num.into(), address.to_string().into()],
-            )
-            .unwrap();
-
-        result
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| BlockHash::from_str(v.as_str().unwrap()).unwrap())
-            .collect()
+        generate_blocks(&self.node, block_num)
     }
 
     /// generate `block_num` blocks and wait the waterfalls server had indexed them

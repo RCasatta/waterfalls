@@ -41,6 +41,7 @@ pub(crate) use subscription::SubscriptionEvent;
 const DEFAULT_MAX_TXS_SEEN: usize = 100;
 const DEFAULT_MAX_ACTIVE_SUBSCRIPTIONS: usize = 5_000;
 const DEFAULT_MAX_SCRIPTS_PER_SUBSCRIPTION: usize = 2_000;
+const DEFAULT_REORG_DATA_KEEP_HEIGHTS: u32 = 6;
 const PERIODIC_LOGGING_INTERVAL: Duration = Duration::from_secs(300);
 const INITIAL_BACKEND_RETRY_DELAY: Duration = Duration::from_secs(1);
 const MAX_BACKEND_RETRY_DELAY: Duration = Duration::from_secs(30);
@@ -178,6 +179,7 @@ pub struct Arguments {
     pub mempool_sleep_between_cycles_ms: Option<u64>,
 
     /// Number of recent block heights to keep reorg data for. Older reorg data is automatically deleted. Default is 6.
+    /// Reorg data is not written during initial block download, except for blocks within this many heights of the node tip.
     #[cfg(feature = "db")]
     #[arg(env, long)]
     pub reorg_data_keep_heights: Option<u32>,
@@ -490,7 +492,8 @@ fn get_store(args: &Arguments) -> Result<AnyStore, Error> {
                 &path,
                 args.shared_db_cache_mb,
                 args.enable_db_statistics,
-                args.reorg_data_keep_heights.unwrap_or(6),
+                args.reorg_data_keep_heights
+                    .unwrap_or(DEFAULT_REORG_DATA_KEEP_HEIGHTS),
             )
             .map_err(|e| Error::DBOpen(format!("{e:?}")))?;
 
@@ -582,6 +585,13 @@ pub async fn inner_main(
         last_report: Instant::now(),
     }));
 
+    #[cfg(feature = "db")]
+    let reorg_data_keep_heights = args
+        .reorg_data_keep_heights
+        .unwrap_or(DEFAULT_REORG_DATA_KEEP_HEIGHTS);
+    #[cfg(not(feature = "db"))]
+    let reorg_data_keep_heights = DEFAULT_REORG_DATA_KEEP_HEIGHTS;
+
     let h1 = {
         let state = state.clone();
         let client: Client =
@@ -603,6 +613,7 @@ pub async fn inner_main(
                 initial_sync_tx,
                 shutdown_future,
                 args.logs_rocksdb_stat_every,
+                reorg_data_keep_heights,
             )
             .await
         })

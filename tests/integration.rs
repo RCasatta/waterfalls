@@ -1385,6 +1385,85 @@ async fn test_bitcoin_reorg() {
     test_env.shutdown().await;
 }
 
+/// Blocks indexed while catching up after a restart must get reorg data like any other
+/// block near the tip: without it a reorg across them can never be rolled back, and
+/// restarting does not help because the same reorg is detected again on every start.
+#[cfg(all(feature = "test_env", feature = "db"))]
+#[tokio::test]
+async fn test_bitcoin_reorg_after_restart() {
+    let _ = env_logger::try_init();
+
+    let tempdir = tempfile::TempDir::new().unwrap();
+    let db_path = tempdir.path().to_path_buf();
+    let exe = std::env::var("BITCOIND_EXEC").unwrap();
+    let node = waterfalls::test_env::launch_bitcoin(&exe);
+    let test_env =
+        waterfalls::test_env::launch_with_node(node, Some(db_path.clone()), Family::Bitcoin).await;
+
+    // Create a UTXO that both competing chains will spend
+    let address_to_spend = test_env.get_new_address(None);
+    test_env.send_to(&address_to_spend, 10_000);
+    test_env.node_generate(1).await;
+    let utxo = test_env.list_unspent()[0].clone();
+
+    // Transaction A spends it to recipient A, it is broadcast but not yet mined
+    let recipient_a = test_env.get_new_address(None);
+    let tx_a =
+        test_env.create_transaction_spending(&[utxo.clone()], &recipient_a, utxo.amount - 0.00001);
+    let signed_tx_a = test_env.sign_raw_transanction_with_wallet(&tx_a);
+    let txid_a = test_env.client().broadcast(&signed_tx_a).await.unwrap();
+
+    // Stop the server, then mine block A (containing transaction A) and one more block
+    // while it is down, so that both are indexed while catching up after the restart
+    let node = test_env.shutdown_server().await;
+    let hashes = waterfalls::test_env::generate_blocks(&node, 2);
+    let block_a_hash = hashes[0];
+    let tip_before_reorg = hashes[1];
+    println!("Block A: {block_a_hash} with transaction A: {txid_a}, tip: {tip_before_reorg}");
+
+    // Restart the server on the same database and let it catch up
+    let test_env =
+        waterfalls::test_env::launch_with_node_no_generate(node, Some(db_path), Family::Bitcoin)
+            .await;
+    test_env
+        .client()
+        .wait_tip_hash(tip_before_reorg)
+        .await
+        .unwrap();
+    let recipient_a_history = test_env.client().address_txs(&recipient_a).await.unwrap();
+    assert!(
+        recipient_a_history.contains(&txid_a.to_string()),
+        "Transaction A should be in recipient A's history after catching up"
+    );
+
+    // Reorg both catch-up blocks away with a longer chain double-spending the UTXO
+    test_env.invalidate_block(block_a_hash);
+    let recipient_b = test_env.get_new_address(None);
+    let tx_b =
+        test_env.create_transaction_spending(&[utxo.clone()], &recipient_b, utxo.amount - 0.00002);
+    let signed_tx_b = test_env.sign_raw_transanction_with_wallet(&tx_b);
+    let txid_b = test_env.client().broadcast(&signed_tx_b).await.unwrap();
+    let hashes = test_env.node_generate(3).await;
+    let final_tip_hash = hashes[2];
+    println!("New tip after reorg: {final_tip_hash} with transaction B: {txid_b}");
+
+    // The server rolled back the catch-up blocks and followed the new chain
+    assert_eq!(test_env.client().tip_hash().await.unwrap(), final_tip_hash);
+    let _ = test_env.client().header(block_a_hash).await.unwrap_err();
+    let recipient_a_history = test_env.client().address_txs(&recipient_a).await.unwrap();
+    assert!(
+        !recipient_a_history.contains(&txid_a.to_string()),
+        "Transaction A should NOT be in recipient A's history after the reorg"
+    );
+    let recipient_b_history = test_env.client().address_txs(&recipient_b).await.unwrap();
+    assert!(
+        recipient_b_history.contains(&txid_b.to_string()),
+        "Transaction B should be in recipient B's history after the reorg"
+    );
+
+    test_env.shutdown().await;
+}
+
 #[cfg(all(feature = "test_env", feature = "db"))]
 #[tokio::test]
 async fn test_bitcoin_two_block_reorg_memory() {

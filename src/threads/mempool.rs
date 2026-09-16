@@ -179,7 +179,6 @@ async fn mempool_sync(
             match result {
                 Ok(_) => {
                     log::info!("Initial block download completed, starting mempool sync");
-                    state.store.ibd_finished();
                 }
                 Err(e) => {
                     // RecvError indicates the sender was dropped. Check if this is due to expected shutdown
