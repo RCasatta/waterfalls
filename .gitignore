@@ -5,3 +5,4 @@ db/
 result
 .cursor
 .codex
+.env
