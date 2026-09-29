@@ -99,10 +99,13 @@ pub(crate) struct Subscriptions {
     max_scripts_per_subscription: usize,
     by_id: HashMap<SubscriptionId, Subscription>,
     by_script: HashMap<ScriptHash, HashSet<SubscriptionId>>,
+    by_descriptor: HashMap<u64, HashSet<SubscriptionId>>,
 }
 
 struct Subscription {
     scripts: Vec<ScriptHash>,
+    /// Number of derivation indexes watched, starting from 0, for each wildcard single descriptor id.
+    descriptors: HashMap<u64, u32>,
     queue: Arc<SubscriptionQueue>,
 }
 
@@ -160,12 +163,16 @@ impl Subscriptions {
             max_scripts_per_subscription,
             by_id: HashMap::new(),
             by_script: HashMap::new(),
+            by_descriptor: HashMap::new(),
         }
     }
 
+    /// `descriptors` maps each wildcard single descriptor id to the number of derivation indexes
+    /// watched starting from 0.
     pub(crate) fn subscribe(
         &mut self,
         scripts: Vec<ScriptHash>,
+        descriptors: HashMap<u64, u32>,
     ) -> Result<(SubscriptionId, SubscriptionReceiver), SubscriptionError> {
         if self.by_id.len() >= self.max_active {
             return Err(SubscriptionError::TooManySubscriptions);
@@ -189,8 +196,21 @@ impl Subscriptions {
         for script in scripts.iter().copied() {
             self.by_script.entry(script).or_default().insert(id);
         }
+        for descriptor_id in descriptors.keys().copied() {
+            self.by_descriptor
+                .entry(descriptor_id)
+                .or_default()
+                .insert(id);
+        }
         let scripts_len = scripts.len();
-        self.by_id.insert(id, Subscription { scripts, queue });
+        self.by_id.insert(
+            id,
+            Subscription {
+                scripts,
+                descriptors,
+                queue,
+            },
+        );
         log::info!(
             "subscription registered: id={id}, scripts={scripts_len}, active={}",
             self.by_id.len()
@@ -204,6 +224,14 @@ impl Subscriptions {
             return false;
         };
 
+        for descriptor_id in subscription.descriptors.keys() {
+            if let Some(ids) = self.by_descriptor.get_mut(descriptor_id) {
+                ids.remove(&id);
+                if ids.is_empty() {
+                    self.by_descriptor.remove(descriptor_id);
+                }
+            }
+        }
         let scripts_len = subscription.scripts.len();
         for script in subscription.scripts {
             if let Some(ids) = self.by_script.get_mut(&script) {
@@ -333,11 +361,15 @@ mod tests {
         let mut subscriptions = Subscriptions::new(10, 2);
 
         assert_eq!(
-            subscriptions.subscribe(Vec::new()).unwrap_err(),
+            subscriptions
+                .subscribe(Vec::new(), HashMap::new())
+                .unwrap_err(),
             SubscriptionError::Empty
         );
         assert_eq!(
-            subscriptions.subscribe(vec![1, 2, 3]).unwrap_err(),
+            subscriptions
+                .subscribe(vec![1, 2, 3], HashMap::new())
+                .unwrap_err(),
             SubscriptionError::TooManyScripts
         );
     }
@@ -346,10 +378,12 @@ mod tests {
     fn subscribe_rejects_too_many_subscriptions() {
         let mut subscriptions = Subscriptions::new(1, 10);
 
-        subscriptions.subscribe(vec![1]).unwrap();
+        subscriptions.subscribe(vec![1], HashMap::new()).unwrap();
 
         assert_eq!(
-            subscriptions.subscribe(vec![2]).unwrap_err(),
+            subscriptions
+                .subscribe(vec![2], HashMap::new())
+                .unwrap_err(),
             SubscriptionError::TooManySubscriptions
         );
     }
@@ -357,8 +391,10 @@ mod tests {
     #[test]
     fn notify_scripts_fans_out_once_per_subscription() {
         let mut subscriptions = Subscriptions::new(10, 10);
-        let (_first_id, mut first_rx) = subscriptions.subscribe(vec![1, 2]).unwrap();
-        let (_second_id, mut second_rx) = subscriptions.subscribe(vec![2, 3]).unwrap();
+        let (_first_id, mut first_rx) =
+            subscriptions.subscribe(vec![1, 2], HashMap::new()).unwrap();
+        let (_second_id, mut second_rx) =
+            subscriptions.subscribe(vec![2, 3], HashMap::new()).unwrap();
 
         assert_eq!(
             subscriptions.notify_scripts(SubscriptionEvent::Block, vec![1, 2]),
@@ -374,7 +410,7 @@ mod tests {
     #[test]
     fn notify_scripts_coalesces_when_receiver_is_full() {
         let mut subscriptions = Subscriptions::new(10, 10);
-        let (_id, mut rx) = subscriptions.subscribe(vec![1]).unwrap();
+        let (_id, mut rx) = subscriptions.subscribe(vec![1], HashMap::new()).unwrap();
 
         assert_eq!(
             subscriptions.notify_scripts(SubscriptionEvent::Block, vec![1]),
@@ -392,7 +428,7 @@ mod tests {
     #[test]
     fn notify_scripts_coalesces_to_highest_priority_event() {
         let mut subscriptions = Subscriptions::new(10, 10);
-        let (_id, mut rx) = subscriptions.subscribe(vec![1]).unwrap();
+        let (_id, mut rx) = subscriptions.subscribe(vec![1], HashMap::new()).unwrap();
 
         assert_eq!(
             subscriptions.notify_scripts(SubscriptionEvent::Tip, vec![1]),
@@ -414,8 +450,9 @@ mod tests {
     #[test]
     fn notify_block_tip_sends_block_or_tip_once_per_subscription() {
         let mut subscriptions = Subscriptions::new(10, 10);
-        let (_first_id, mut first_rx) = subscriptions.subscribe(vec![1, 2]).unwrap();
-        let (_second_id, mut second_rx) = subscriptions.subscribe(vec![3]).unwrap();
+        let (_first_id, mut first_rx) =
+            subscriptions.subscribe(vec![1, 2], HashMap::new()).unwrap();
+        let (_second_id, mut second_rx) = subscriptions.subscribe(vec![3], HashMap::new()).unwrap();
 
         assert_eq!(subscriptions.notify_block_tip(vec![2]), 2);
 
@@ -428,7 +465,7 @@ mod tests {
     #[test]
     fn unsubscribe_removes_script_index_entries() {
         let mut subscriptions = Subscriptions::new(10, 10);
-        let (id, mut rx) = subscriptions.subscribe(vec![1, 2]).unwrap();
+        let (id, mut rx) = subscriptions.subscribe(vec![1, 2], HashMap::new()).unwrap();
 
         assert!(subscriptions.unsubscribe(id));
         assert_eq!(
@@ -442,7 +479,7 @@ mod tests {
     #[test]
     fn closed_receivers_are_pruned_on_notify() {
         let mut subscriptions = Subscriptions::new(10, 10);
-        let (_id, rx) = subscriptions.subscribe(vec![1]).unwrap();
+        let (_id, rx) = subscriptions.subscribe(vec![1], HashMap::new()).unwrap();
         drop(rx);
 
         assert_eq!(
@@ -456,12 +493,23 @@ mod tests {
     #[test]
     fn notify_all_sends_reorg_to_every_subscription() {
         let mut subscriptions = Subscriptions::new(10, 10);
-        let (_first_id, mut first_rx) = subscriptions.subscribe(vec![1]).unwrap();
-        let (_second_id, mut second_rx) = subscriptions.subscribe(vec![2]).unwrap();
+        let (_first_id, mut first_rx) = subscriptions.subscribe(vec![1], HashMap::new()).unwrap();
+        let (_second_id, mut second_rx) = subscriptions.subscribe(vec![2], HashMap::new()).unwrap();
 
         assert_eq!(subscriptions.notify_all(SubscriptionEvent::Reorg), 2);
 
         assert_eq!(first_rx.try_recv().unwrap(), SubscriptionEvent::Reorg);
         assert_eq!(second_rx.try_recv().unwrap(), SubscriptionEvent::Reorg);
+    }
+
+    #[test]
+    fn unsubscribe_removes_descriptor_index_entries() {
+        let mut subscriptions = Subscriptions::new(10, 10);
+        let (id, _rx) = subscriptions
+            .subscribe(vec![10], HashMap::from([(7, 1)]))
+            .unwrap();
+
+        assert!(subscriptions.unsubscribe(id));
+        assert!(subscriptions.by_descriptor.is_empty());
     }
 }

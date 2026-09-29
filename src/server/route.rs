@@ -19,7 +19,7 @@ use hyper::{
 use prometheus::Encoder;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     convert::Infallible,
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
@@ -1024,6 +1024,7 @@ async fn subscribe_descriptor(
     descriptor: be::Descriptor,
 ) -> Result<(SubscriptionId, SubscriptionReceiver), Error> {
     let mut scripts = Vec::new();
+    let mut descriptors = HashMap::new();
     for desc in descriptor.into_single_descriptors().unwrap().iter() {
         let single_descriptor_id = string_hash(&desc.normalized_id_string());
         let max_used_index = match state.descriptor_max_used_index(single_descriptor_id).await {
@@ -1042,10 +1043,13 @@ async fn subscribe_descriptor(
                 .await
                 .0,
         );
+        if desc.has_wildcard() {
+            descriptors.insert(single_descriptor_id, watch_count);
+        }
     }
 
     state
-        .subscribe_scripts(scripts)
+        .subscribe_scripts(scripts, descriptors)
         .await
         .map_err(|e| Error::String(format!("{e:?}")))
 }
@@ -1643,7 +1647,7 @@ mod tests {
     #[tokio::test]
     async fn sse_keepalive_waits_for_interval() {
         let mut subscriptions = Subscriptions::new(1, 1);
-        let (_id, mut receiver) = subscriptions.subscribe(vec![1]).unwrap();
+        let (_id, mut receiver) = subscriptions.subscribe(vec![1], HashMap::new()).unwrap();
         let mut keepalive = keepalive_interval(Duration::from_millis(20));
 
         assert!(tokio::time::timeout(

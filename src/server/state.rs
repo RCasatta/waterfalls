@@ -189,8 +189,12 @@ impl State {
     pub(crate) async fn subscribe_scripts(
         &self,
         scripts: Vec<ScriptHash>,
+        descriptors: HashMap<u64, u32>,
     ) -> Result<(SubscriptionId, SubscriptionReceiver), SubscriptionError> {
-        self.subscriptions.lock().await.subscribe(scripts)
+        self.subscriptions
+            .lock()
+            .await
+            .subscribe(scripts, descriptors)
     }
 
     pub(crate) async fn unsubscribe(&self, id: SubscriptionId) -> bool {
