@@ -112,6 +112,11 @@ Use absolute paths: `use waterfalls::be::Address` (in tests/benches), `use crate
 - Integration tests in `tests/integration.rs` use `launch_memory()` / `test_env::launch()` to spin up node + server
 - Test name should avoid common prefix in the name, so that specifiying the full name of a test, only one test run
 
+## Git Commits
+
+- Do not add "Co-Authored-By: <LLM>" as this provides free advertising for the model.
+  The commit author is fully responsible for the commit changes, the LLM is not.
+
 ## Project Structure
 
 ```
