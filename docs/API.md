@@ -233,10 +233,12 @@ data: {"type":"mempool","tip":{"height":12345,"block_hash":"current_tip_hash","t
 
 For each newly indexed block, each subscription receives either `block` or `tip`, not both. Mempool removals do not emit `mempool` events. In the common confirmation path, the server emits `mempool` when the transaction first appears and `block` after the confirming block is indexed.
 
-**Limitations:**
+**Watched Range:**
 
-- At the moment active subscriptions do not expand when later scans increase the descriptor's highest used index
-- To watch the expanded range, clients should close the current SSE stream and re-open a new subscription
+- A subscription watches, for each wildcard descriptor, derivation indexes from 0 up to the highest used index known by the server plus the gap limit (20)
+- Active subscriptions expand automatically when a later Waterfalls scan of the same descriptor finds a higher used index, so clients following the scan-on-update behavior below keep watching the next gap window without re-subscribing
+- A transaction to a newly covered index that arrives between the scan and the expansion may not emit an event
+- The watched range is capped by the server's maximum scripts per subscription
 
 **Client Behavior:**
 

@@ -168,7 +168,7 @@ impl Subscriptions {
     }
 
     /// `descriptors` maps each wildcard single descriptor id to the number of derivation indexes
-    /// watched starting from 0.
+    /// watched starting from 0; they are used to later expand the subscription with [`Self::expand`].
     pub(crate) fn subscribe(
         &mut self,
         scripts: Vec<ScriptHash>,
@@ -247,6 +247,94 @@ impl Subscriptions {
         );
 
         true
+    }
+
+    /// Returns the derivation range `[start, end)` that must be derived to let every subscription
+    /// watching `descriptor_id` cover `watch_count` indexes, or `None` if they already do.
+    /// Subscriptions at the per-subscription script limit are ignored, and `end` does not exceed
+    /// what the subscriptions still have room for, so no derivation work is wasted.
+    pub(crate) fn expansion_range(
+        &self,
+        descriptor_id: u64,
+        watch_count: u32,
+    ) -> Option<(u32, u32)> {
+        let mut range: Option<(u32, u32)> = None;
+        for id in self.by_descriptor.get(&descriptor_id)? {
+            let Some(subscription) = self.by_id.get(id) else {
+                continue;
+            };
+            let Some(watched) = subscription.descriptors.get(&descriptor_id).copied() else {
+                continue;
+            };
+            let available = self
+                .max_scripts_per_subscription
+                .saturating_sub(subscription.scripts.len());
+            let end = watched
+                .saturating_add(u32::try_from(available).unwrap_or(u32::MAX))
+                .min(watch_count);
+            if watched >= end {
+                continue;
+            }
+            range = Some(match range {
+                Some((start, max_end)) => (start.min(watched), max_end.max(end)),
+                None => (watched, end),
+            });
+        }
+        range
+    }
+
+    /// Extends the subscriptions watching `descriptor_id` with `scripts`, which are the script
+    /// hashes for derivation indexes starting at `start`. Returns the number of expanded subscriptions.
+    pub(crate) fn expand(
+        &mut self,
+        descriptor_id: u64,
+        start: u32,
+        scripts: &[ScriptHash],
+    ) -> usize {
+        let Some(ids) = self.by_descriptor.get(&descriptor_id) else {
+            return 0;
+        };
+        let end = start + scripts.len() as u32;
+        let mut expanded = 0;
+        for id in ids.iter().copied() {
+            let Some(subscription) = self.by_id.get_mut(&id) else {
+                continue;
+            };
+            let Some(watched) = subscription.descriptors.get_mut(&descriptor_id) else {
+                continue;
+            };
+            // A subscription watching less than `start` would leave a hole, it's expanded
+            // on a later call when `start` is computed including it.
+            if *watched < start || *watched >= end {
+                continue;
+            }
+            let available = self
+                .max_scripts_per_subscription
+                .saturating_sub(subscription.scripts.len());
+            if available == 0 {
+                continue;
+            }
+            let missing = &scripts[(*watched - start) as usize..];
+            if missing.len() > available {
+                log::warn!(
+                    "subscription expansion truncated, script limit reached: id={id}, limit={}",
+                    self.max_scripts_per_subscription
+                );
+            }
+            let new_scripts: Vec<_> = missing.iter().copied().take(available).collect();
+            *watched += new_scripts.len() as u32;
+            for script in new_scripts.iter().copied() {
+                self.by_script.entry(script).or_default().insert(id);
+            }
+            subscription.scripts.extend(new_scripts);
+            expanded += 1;
+            log::info!(
+                "subscription expanded: id={id}, watched_indexes={}, scripts={}",
+                *watched,
+                subscription.scripts.len()
+            );
+        }
+        expanded
     }
 
     pub(crate) fn notify_scripts<I>(&mut self, event: SubscriptionEvent, scripts: I) -> usize
@@ -503,6 +591,85 @@ mod tests {
     }
 
     #[test]
+    fn expand_extends_descriptor_subscriptions() {
+        let mut subscriptions = Subscriptions::new(10, 10);
+        let (_first_id, mut first_rx) = subscriptions
+            .subscribe(vec![10, 11], HashMap::from([(7, 2)]))
+            .unwrap();
+        let (_second_id, mut second_rx) = subscriptions
+            .subscribe(vec![10, 11, 12], HashMap::from([(7, 3)]))
+            .unwrap();
+        let (_third_id, mut third_rx) = subscriptions.subscribe(vec![10], HashMap::new()).unwrap();
+
+        assert_eq!(subscriptions.expansion_range(7, 2), None);
+        assert_eq!(subscriptions.expansion_range(8, 5), None);
+        assert_eq!(subscriptions.expansion_range(7, 5), Some((2, 5)));
+        assert_eq!(subscriptions.expand(7, 2, &[12, 13, 14]), 2);
+        assert_eq!(subscriptions.expansion_range(7, 5), None);
+
+        assert_eq!(
+            subscriptions.notify_scripts(SubscriptionEvent::Mempool, vec![14]),
+            2
+        );
+        assert_eq!(first_rx.try_recv().unwrap(), SubscriptionEvent::Mempool);
+        assert_eq!(second_rx.try_recv().unwrap(), SubscriptionEvent::Mempool);
+        assert!(third_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn expand_skips_subscriptions_that_would_leave_a_hole() {
+        let mut subscriptions = Subscriptions::new(10, 10);
+        let (_id, mut rx) = subscriptions
+            .subscribe(vec![10], HashMap::from([(7, 1)]))
+            .unwrap();
+
+        assert_eq!(subscriptions.expand(7, 2, &[12, 13]), 0);
+        assert_eq!(
+            subscriptions.notify_scripts(SubscriptionEvent::Mempool, vec![12]),
+            0
+        );
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn expand_respects_script_limit() {
+        let mut subscriptions = Subscriptions::new(10, 3);
+        let (_id, mut rx) = subscriptions
+            .subscribe(vec![10, 11], HashMap::from([(7, 2)]))
+            .unwrap();
+
+        assert_eq!(subscriptions.expansion_range(7, 10), Some((2, 3)));
+        assert_eq!(subscriptions.expand(7, 2, &[12, 13]), 1);
+        assert_eq!(subscriptions.expansion_range(7, 10), None);
+        assert_eq!(
+            subscriptions.notify_scripts(SubscriptionEvent::Mempool, vec![13]),
+            0
+        );
+        assert_eq!(
+            subscriptions.notify_scripts(SubscriptionEvent::Mempool, vec![12]),
+            1
+        );
+        assert_eq!(rx.try_recv().unwrap(), SubscriptionEvent::Mempool);
+    }
+
+    #[test]
+    fn expansion_range_ignores_full_subscriptions() {
+        let mut subscriptions = Subscriptions::new(10, 4);
+        // Full because of scripts of another descriptor
+        let (_full_id, _full_rx) = subscriptions
+            .subscribe(vec![10, 20, 21, 22], HashMap::from([(7, 1), (8, 3)]))
+            .unwrap();
+
+        assert_eq!(subscriptions.expansion_range(7, 10), None);
+
+        let (_id, _rx) = subscriptions
+            .subscribe(vec![10, 11], HashMap::from([(7, 2)]))
+            .unwrap();
+
+        assert_eq!(subscriptions.expansion_range(7, 10), Some((2, 4)));
+    }
+
+    #[test]
     fn unsubscribe_removes_descriptor_index_entries() {
         let mut subscriptions = Subscriptions::new(10, 10);
         let (id, _rx) = subscriptions
@@ -510,6 +677,7 @@ mod tests {
             .unwrap();
 
         assert!(subscriptions.unsubscribe(id));
+        assert_eq!(subscriptions.expansion_range(7, 5), None);
         assert!(subscriptions.by_descriptor.is_empty());
     }
 }

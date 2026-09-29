@@ -197,6 +197,29 @@ impl State {
             .subscribe(scripts, descriptors)
     }
 
+    pub(crate) async fn subscription_expansion_range(
+        &self,
+        descriptor_id: u64,
+        watch_count: u32,
+    ) -> Option<(u32, u32)> {
+        self.subscriptions
+            .lock()
+            .await
+            .expansion_range(descriptor_id, watch_count)
+    }
+
+    pub(crate) async fn expand_subscriptions(
+        &self,
+        descriptor_id: u64,
+        start: u32,
+        scripts: &[ScriptHash],
+    ) -> usize {
+        self.subscriptions
+            .lock()
+            .await
+            .expand(descriptor_id, start, scripts)
+    }
+
     pub(crate) async fn unsubscribe(&self, id: SubscriptionId) -> bool {
         self.subscriptions.lock().await.unsubscribe(id)
     }

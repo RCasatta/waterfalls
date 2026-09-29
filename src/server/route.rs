@@ -754,6 +754,9 @@ async fn handle_waterfalls_req(
                         break;
                     }
                 }
+                if !is_single_address {
+                    expand_subscriptions(state, desc, single_descriptor_id).await;
+                }
                 if utxo_only {
                     filter_utxo_only(&mut result, db)?;
                 }
@@ -1025,7 +1028,8 @@ async fn subscribe_descriptor(
 ) -> Result<(SubscriptionId, SubscriptionReceiver), Error> {
     let mut scripts = Vec::new();
     let mut descriptors = HashMap::new();
-    for desc in descriptor.into_single_descriptors().unwrap().iter() {
+    let single_descriptors = descriptor.into_single_descriptors().unwrap();
+    for desc in single_descriptors.iter() {
         let single_descriptor_id = string_hash(&desc.normalized_id_string());
         let max_used_index = match state.descriptor_max_used_index(single_descriptor_id).await {
             Some(max_used_index) => max_used_index,
@@ -1048,10 +1052,44 @@ async fn subscribe_descriptor(
         }
     }
 
-    state
+    let subscription = state
         .subscribe_scripts(scripts, descriptors)
         .await
-        .map_err(|e| Error::String(format!("{e:?}")))
+        .map_err(|e| Error::String(format!("{e:?}")))?;
+
+    // A concurrent scan may have raised the highest used index after it was read above but before
+    // the subscription was registered, in which case the scan's expansion missed this subscription.
+    // Scans record the index before expanding, so re-checking after registering closes the gap.
+    for desc in single_descriptors.iter().filter(|desc| desc.has_wildcard()) {
+        expand_subscriptions(state, desc, string_hash(&desc.normalized_id_string())).await;
+    }
+
+    Ok(subscription)
+}
+
+/// Expands active subscriptions on `desc` so that they keep watching `GAP_LIMIT` indexes past the
+/// highest used index known for the descriptor, which scans may have increased since subscribing.
+async fn expand_subscriptions(
+    state: &Arc<State>,
+    desc: &be::Descriptor,
+    single_descriptor_id: u64,
+) {
+    let Some(max_used_index) = state.descriptor_max_used_index(single_descriptor_id).await else {
+        return;
+    };
+    let Ok(watch_count) = subscription_watch_count(max_used_index) else {
+        return;
+    };
+    let Some((start, end)) = state
+        .subscription_expansion_range(single_descriptor_id, watch_count)
+        .await
+    else {
+        return;
+    };
+    let (scripts, _) = derive_script_hashes_batch(state, desc, start, end - start).await;
+    state
+        .expand_subscriptions(single_descriptor_id, start, &scripts)
+        .await;
 }
 
 async fn scan_descriptor_max_used_index(state: &Arc<State>, desc: &be::Descriptor) -> Option<u32> {
