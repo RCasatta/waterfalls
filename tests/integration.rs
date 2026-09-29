@@ -377,6 +377,52 @@ async fn do_test_subscribe_notifies_descriptor_change(test_env: waterfalls::test
 }
 
 #[cfg(feature = "test_env")]
+#[tokio::test]
+async fn integration_subscribe_expands_after_scan_bitcoin() {
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory(Family::Bitcoin).await;
+    do_test_subscribe_expands_after_scan(test_env).await;
+}
+
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn integration_subscribe_expands_after_scan_liquid() {
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory(Family::Elements).await;
+    do_test_subscribe_expands_after_scan(test_env).await;
+}
+
+/// A subscription opened on an unused descriptor watches indexes 0..20, every scan finding a
+/// higher used index must expand it so that the next gap window is watched too.
+#[cfg(feature = "test_env")]
+async fn do_test_subscribe_expands_after_scan(test_env: waterfalls::test_env::TestEnv) {
+    let tpub = "tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M";
+    let prefix = match test_env.family {
+        Family::Bitcoin => "",
+        Family::Elements => "el",
+    };
+    let single_desc = format!("{prefix}wpkh({tpub}/1/*)");
+
+    let response = test_env.client().subscribe(&single_desc).await.unwrap();
+    let mut sse = SseTestReader::new(response);
+
+    for index in [10, 30, 50] {
+        let addr = subscription_test_address(test_env.family, &single_desc, index);
+        test_env.send_to(&addr, 10_000);
+
+        let event = sse.next_update_event().await;
+        assert_eq!(event.event_type, SseEventType::Mempool, "index {index}");
+
+        // The scan following the event raises the highest used index and expands the subscription
+        test_env.client().waterfalls(&single_desc).await.unwrap();
+    }
+
+    test_env.shutdown().await;
+}
+
+#[cfg(feature = "test_env")]
 fn subscription_test_address(family: Family, descriptor: &str, index: u32) -> be::Address {
     match family {
         Family::Bitcoin => {
