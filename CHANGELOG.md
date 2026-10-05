@@ -14,5 +14,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fetches data from a bitcoind/elementsd node through its REST and RPC interfaces, so
   `--rpc-user-password-file` is always required. Configurations still passing the removed
   options fail to start.
+- The `esplora` Cargo feature and the `esplora` and `dockerImageEsplora` Nix outputs.
 
 [Unreleased]: https://github.com/Blockstream/waterfalls/compare/0.10.0...HEAD

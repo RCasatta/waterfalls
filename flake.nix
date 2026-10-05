@@ -60,17 +60,9 @@
             inherit cargoArtifacts;
             cargoTestExtraArgs = "-- --test-threads=1";
           });
-          esploraArgs = commonArgs // {
-            cargoExtraArgs = "--features esplora";
-          };
-          esploraCargoArtifacts = craneLib.buildDepsOnly esploraArgs;
-          esploraBin = craneLib.buildPackage (esploraArgs // {
-            cargoArtifacts = esploraCargoArtifacts;
-            cargoTestExtraArgs = "-- --test-threads=1";
-          });
 
           # Docker image configuration
-          mkDockerImage = package: includeOpenSSL: pkgs.dockerTools.buildImage {
+          mkDockerImage = package: pkgs.dockerTools.buildImage {
             name = "waterfalls";
             tag = "latest";
 
@@ -81,7 +73,7 @@
                 package
                 pkgs.rocksdb
                 pkgs.bash # just to inspect the docker
-              ] ++ lib.optionals includeOpenSSL [ pkgs.openssl ];
+              ];
               pathsToLink = [ "/bin" "/lib" ];
             };
 
@@ -100,15 +92,13 @@
               };
             };
           };
-          dockerImage = mkDockerImage bin false;
-          dockerImageEsplora = mkDockerImage esploraBin true;
+          dockerImage = mkDockerImage bin;
         in
         with pkgs;
         {
           packages =
             {
-              inherit bin dockerImage dockerImageEsplora;
-              esplora = esploraBin;
+              inherit bin dockerImage;
               default = bin;
             };
           devShells.default = mkShell {

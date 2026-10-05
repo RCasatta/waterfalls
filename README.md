@@ -97,12 +97,8 @@ Legend:
 
 ## Nix
 
-The default package supports local nodes without Esplora's TLS dependencies. Build the
-explicit Esplora variant when remote Esplora support is needed:
-
 ```bash
 nix build
-nix build .#esplora
 ```
 
 ## Docker
@@ -112,11 +108,8 @@ You can run Waterfalls in a Docker container using the included Nix configuratio
 ### Building the Docker image
 
 ```bash
-# Build the node-only Docker image
+# Build the Docker image
 nix build .#dockerImage
-
-# Build the Docker image with Esplora support
-nix build .#dockerImageEsplora
 
 # Load the image into Docker
 docker load < result

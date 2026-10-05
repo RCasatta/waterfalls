@@ -25,7 +25,7 @@ jobs:
     - name: Run tests
       run: cargo test --features test_env
     - name: Run ignored tests
-      run: cargo test --features "test_env,esplora" -- --ignored
+      run: cargo test --features test_env -- --ignored
     - name: Run reorg crash test
       run: cargo test --features "test_env,db,reorg_crash_test" test_bitcoin_reorg_data_not_persisted -- --exact
     env:
