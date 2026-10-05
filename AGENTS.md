@@ -117,6 +117,12 @@ Use absolute paths: `use waterfalls::be::Address` (in tests/benches), `use crate
 - Do not add "Co-Authored-By: <LLM>" as this provides free advertising for the model.
   The commit author is fully responsible for the commit changes, the LLM is not.
 
+## Changelog
+
+User-visible changes (CLI flags, API, behavior, build outputs) must be recorded in
+`CHANGELOG.md` under `[Unreleased]`, following [Keep a Changelog](https://keepachangelog.com/en/2.0.0/).
+Mark breaking changes with **Breaking:**.
+
 ## Project Structure
 
 ```
