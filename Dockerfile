@@ -9,6 +9,5 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release
 
 FROM debian:stable-slim
-RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /waterfalls/target/release/waterfalls /usr/local/bin/waterfalls
 ENTRYPOINT [ "waterfalls" ]
