@@ -11,9 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking:** the Esplora backend. The `--use-esplora` and `--esplora-url` options
   (`USE_ESPLORA` and `ESPLORA_URL` environment variables) are gone: waterfalls now always
-  fetches data from a bitcoind/elementsd node through its REST and RPC interfaces, so
-  `--rpc-user-password-file` is always required. Configurations still passing the removed
-  options fail to start.
+  fetches data from a bitcoind/elementsd node through its REST and RPC interfaces, so node
+  RPC credentials are always required. Configurations still passing the removed options,
+  as flags or environment variables, fail to start.
 - The `esplora` Cargo feature and the `esplora` and `dockerImageEsplora` Nix outputs.
 
 [Unreleased]: https://github.com/Blockstream/waterfalls/compare/0.10.0...HEAD
