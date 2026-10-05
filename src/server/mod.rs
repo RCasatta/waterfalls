@@ -334,17 +334,22 @@ mod argument_tests {
 
     #[test]
     fn subscription_limits_must_be_non_zero() {
-        let args = Arguments {
-            use_esplora: true,
-            max_active_subscriptions: Some(0),
+        let valid = Arguments {
+            rpc_user_password: Some("user:pass".to_string()),
+            request_timeout_seconds: 1,
             ..Default::default()
+        };
+        assert!(valid.is_valid().is_ok());
+
+        let args = Arguments {
+            max_active_subscriptions: Some(0),
+            ..valid.clone()
         };
         assert!(args.is_valid().is_err());
 
         let args = Arguments {
-            use_esplora: true,
             max_scripts_per_subscription: Some(0),
-            ..Default::default()
+            ..valid
         };
         assert!(args.is_valid().is_err());
     }

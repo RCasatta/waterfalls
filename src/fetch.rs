@@ -1107,15 +1107,16 @@ mod test {
     }
 
     fn node_client_url(node_url: String, disable_conn_pool: bool) -> Client {
-        let mut args = Arguments::default();
-        args.network = Network::Bitcoin;
-        args.use_esplora = false;
-        args.node_url = Some(node_url);
         let mut rpc_user_password_file = tempfile::NamedTempFile::new().unwrap();
         write!(rpc_user_password_file, "user:pass").unwrap();
-        args.rpc_user_password_file = Some(rpc_user_password_file.path().to_path_buf());
-        args.request_timeout_seconds = 30; // Default::default() leaves this 0, which is_valid() rejects
-        args.node_disable_conn_pool = disable_conn_pool;
+        let args = Arguments {
+            network: Network::Bitcoin,
+            node_url: Some(node_url),
+            rpc_user_password_file: Some(rpc_user_password_file.path().to_path_buf()),
+            request_timeout_seconds: 30, // Default::default() leaves this 0, which is_valid() rejects
+            node_disable_conn_pool: disable_conn_pool,
+            ..Arguments::default()
+        };
         Client::new(&args).unwrap()
     }
 

@@ -490,8 +490,8 @@ mod indexing_tests {
     }
 }
 
-#[cfg(all(test, feature = "esplora"))]
-mod tests {
+#[cfg(test)]
+mod reorg_tests {
     use std::{collections::BTreeMap, net::SocketAddr, str::FromStr, sync::Arc};
 
     use age::x25519::Identity;
@@ -582,8 +582,8 @@ mod tests {
         let address = spawn_reorg_server().await;
         Client::new(&Arguments {
             network: Network::BitcoinRegtest,
-            use_esplora: true,
-            esplora_url: Some(format!("http://{address}")),
+            node_url: Some(format!("http://{address}")),
+            rpc_user_password: Some("user:pass".to_string()),
             request_timeout_seconds: 30,
             ..Default::default()
         })
