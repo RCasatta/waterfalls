@@ -150,11 +150,8 @@ docker run -p 3107:3107 \
 You can also specify additional parameters via environment variables:
 
 ```bash
-# Use Esplora API instead of a local node
-docker run -p 3100:3100 -e NETWORK=liquid -e USE_ESPLORA=true waterfalls:latest
-
-# Bitcoin Testnet4 defaults to https://mempool.space/testnet4/api
-docker run -p 3107:3107 -e NETWORK=bitcoin-testnet4 -e USE_ESPLORA=true waterfalls:latest
+# Add CORS headers and allow up to 200 addresses per request
+docker run -p 3100:3100 -e NETWORK=liquid -e ADD_CORS=true -e MAX_ADDRESSES=200 waterfalls:latest
 ```
 
 ### Publish the Docker

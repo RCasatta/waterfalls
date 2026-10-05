@@ -367,7 +367,7 @@ Returns transaction history for a specific address in Esplora-compatible format.
 ```
 GET /fee-estimates
 ```
-Returns fee estimates for various confirmation targets in sat/vB (satoshis per virtual byte). The endpoint queries either the connected node's RPC or proxies to Esplora depending on server configuration.
+Returns fee estimates for various confirmation targets in sat/vB (satoshis per virtual byte). The endpoint queries the connected node's RPC (`estimatesmartfee`).
 
 **Response Format (JSON):**
  
@@ -396,7 +396,7 @@ The endpoint provides estimates for the following confirmation targets (in block
 
 **Caching:**
 
-Fee estimates are cached server-side for 30 seconds to reduce load on the underlying node or Esplora API.
+Fee estimates are cached server-side for 30 seconds to reduce load on the underlying node.
 
 ## Transaction Operations
 

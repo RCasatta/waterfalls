@@ -129,7 +129,7 @@ Mark breaking changes with **Breaking:**.
 src/
 ├── lib.rs              # Library root: types, error_panic! macro, prometheus metrics
 ├── main.rs             # Binary entry: clap parsing, logging, signal handling
-├── fetch.rs            # Blockchain data fetching (esplora / local node REST)
+├── fetch.rs            # Blockchain data fetching (local node REST + RPC)
 ├── cbor.rs             # CBOR encoding helpers for block hashes
 ├── test_env.rs         # Test utilities (TestEnv, WaterfallClient)
 ├── be/                 # Backend types (Address, Block, BlockHeader, Descriptor, Tx, Txid)
@@ -185,7 +185,7 @@ From `.cursor/rules/my-custom-rule.mdc` (always applied):
 ## Common Tasks
 
 ```bash
-cargo run -- --network liquid --use-esplora   # Run server against esplora
+cargo run -- --network liquid --rpc-user-password-file ~/.elements/liquidv1/.cookie  # Run server against a local node
 cargo test --features "test_env db"           # Run tests with DB backend
 nix build .#dockerImage && docker load < result  # Build Docker image
 cargo bench --features bench_test             # Run benchmarks

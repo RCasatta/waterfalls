@@ -595,7 +595,6 @@ fn send_to_address(
 #[cfg(feature = "test_env")]
 fn fetch_client_for_node(node: &bitcoind::BitcoinD, network: Network) -> FetchClient {
     let args = Arguments {
-        use_esplora: false,
         network,
         node_url: Some(node.rpc_url()),
         request_timeout_seconds: 10,

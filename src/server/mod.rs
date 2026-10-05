@@ -65,15 +65,7 @@ pub struct Arguments {
     #[arg(env, long)]
     pub network: Network,
 
-    /// if specified, it uses esplora instead of local node to get data
-    #[arg(env, long)]
-    pub use_esplora: bool,
-
-    /// If `use_esplora` is true will use this address to fetch data from esplora or a default url according to the used network if not provided.
-    #[arg(env, long)]
-    pub esplora_url: Option<String>,
-
-    /// If `use_esplora` is false will use this address to fetch data from the local rest-enabled elements node or a default url according to the used network if not provided.
+    /// Address of the rest-enabled node used to fetch data, a default url according to the used network is used if not provided.
     #[arg(env, long)]
     pub node_url: Option<String>,
 
@@ -99,7 +91,7 @@ pub struct Arguments {
     /// File containing the Elements node rpc user and password, separated by ':' (same as the content of the cookie file)
     ///
     /// RPC connection is needed for broadcasting transaction via the `sendrawtransaction` call which is not present in the REST interface.
-    /// It's an error if `use_esplora` is false and this is missing.
+    /// It's an error if this and `rpc_user_password` are both missing.
     #[arg(long, env)]
     pub rpc_user_password_file: Option<PathBuf>,
 
@@ -161,12 +153,11 @@ pub struct Arguments {
     #[arg(env, long, default_value = "5")]
     pub cache_control_seconds: u32,
 
-    /// Timeout in seconds for connect and for reques HTTP requests and  to the node or esplora
+    /// Timeout in seconds for connect and for HTTP requests to the node
     #[arg(env, long, default_value = "30")]
     pub request_timeout_seconds: u64,
 
     /// Disable HTTP keep-alive connection pooling to the node, forcing a fresh connection per request.
-    /// Node-only: ignored (with a warning) when --use-esplora is set.
     #[arg(env, long)]
     pub node_disable_conn_pool: bool,
 
@@ -180,7 +171,6 @@ pub struct Arguments {
 
     /// Number of recent block heights to keep reorg data for. Older reorg data is automatically deleted. Default is 6.
     /// Reorg data is not written during initial block download, except for blocks within this many heights of the node tip.
-    /// With `--use-esplora` the node tip is unknown, so reorg data starts only when the tip is reached.
     #[cfg(feature = "db")]
     #[arg(env, long)]
     pub reorg_data_keep_heights: Option<u32>,
@@ -192,8 +182,6 @@ impl std::fmt::Debug for Arguments {
         let mut d = f.debug_struct("Arguments");
         let d = d
             .field("network", &self.network)
-            .field("use_esplora", &self.use_esplora)
-            .field("esplora_url", &self.esplora_url)
             .field("node_url", &self.node_url)
             .field("listen", &self.listen)
             .field(
@@ -247,19 +235,9 @@ impl std::fmt::Debug for Arguments {
 
 impl Arguments {
     pub fn is_valid(&self) -> Result<(), Error> {
-        #[cfg(not(feature = "esplora"))]
-        if self.use_esplora {
-            return Err(Error::String(
-                "Esplora support is not enabled in this build".to_string(),
-            ));
-        }
-
-        if !self.use_esplora
-            && self.rpc_user_password_file.is_none()
-            && self.rpc_user_password.is_none()
-        {
+        if self.rpc_user_password_file.is_none() && self.rpc_user_password.is_none() {
             Err(Error::String(
-                "When using the node you must specify --rpc-user-password-file".to_string(),
+                "You must specify --rpc-user-password-file".to_string(),
             ))
         } else if self.max_txs_seen == Some(0) {
             Err(Error::String(
@@ -306,30 +284,12 @@ mod argument_tests {
     #[test]
     fn deprecated_rpc_user_password_keeps_node_mode_valid() {
         let args = Arguments {
-            use_esplora: false,
             rpc_user_password: Some("user:pass".to_string()),
             request_timeout_seconds: 1,
             ..Default::default()
         };
 
         assert!(args.is_valid().is_ok());
-    }
-
-    #[cfg(not(feature = "esplora"))]
-    #[test]
-    fn esplora_requires_feature() {
-        let args = Arguments {
-            use_esplora: true,
-            request_timeout_seconds: 1,
-            ..Default::default()
-        };
-
-        assert_eq!(
-            args.is_valid(),
-            Err(Error::String(
-                "Esplora support is not enabled in this build".to_string()
-            ))
-        );
     }
 
     #[test]

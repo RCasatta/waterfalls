@@ -53,16 +53,10 @@ impl std::fmt::Display for Error {
 
 pub struct Client {
     client: reqwest::Client,
-    use_esplora: bool,
     base_url: String,
-
-    /// even when `use_esplora` is false we use this for broadcasting because local node doesn't expose broadcasting via REST interface
-    esplora_url: String,
-
     rpc_user_password: Option<String>,
 }
 
-const BS: &str = "https://blockstream.info";
 const LOCAL: &str = "http://127.0.0.1";
 
 impl Client {
@@ -84,61 +78,15 @@ impl Client {
         } else {
             None
         };
-        let esplora_url = match args.network {
-            Network::Liquid => args
-                .esplora_url
-                .clone()
-                .unwrap_or(format!("{BS}/liquid/api")),
-            Network::LiquidTestnet => args
-                .esplora_url
-                .clone()
-                .unwrap_or(format!("{BS}/liquidtestnet/api")),
-            Network::ElementsRegtest => args.esplora_url.clone().unwrap_or(format!("{LOCAL}:3000")),
-
-            Network::Bitcoin => args.esplora_url.clone().unwrap_or(format!("{BS}/api")),
-            Network::BitcoinTestnet => args
-                .esplora_url
-                .clone()
-                .unwrap_or(format!("{BS}/testnet/api")),
-            Network::BitcoinTestnet4 => args
-                .esplora_url
-                .clone()
-                .unwrap_or_else(|| "https://mempool.space/testnet4/api".to_string()),
-            Network::BitcoinRegtest => args.esplora_url.clone().unwrap_or(format!("{LOCAL}:3000")),
-            Network::BitcoinSignet => args
-                .esplora_url
-                .clone()
-                .unwrap_or(format!("{BS}/signet/api")),
-        };
-        let use_esplora = args.use_esplora;
-        let base_url = if use_esplora {
-            esplora_url.clone()
-        } else {
-            let node_url = args.node_url.clone();
-            let port = args.network.default_node_listen_port();
-            node_url.unwrap_or(format!("{LOCAL}:{port}"))
-        };
+        let port = args.network.default_node_listen_port();
+        let base_url = args.node_url.clone().unwrap_or(format!("{LOCAL}:{port}"));
         log::info!("connecting to {base_url}");
         let mut builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(args.request_timeout_seconds))
             .connect_timeout(Duration::from_secs(args.request_timeout_seconds)); // Connection establishment timeout
         if args.node_disable_conn_pool {
-            if use_esplora {
-                // The flag is node-only; applying it to Esplora would force a fresh
-                // TCP + TLS handshake per request — a real regression — so ignore it
-                // here, but make the ignored setting loud rather than silent.
-                log::warn!(
-                    "**********************************************************************\n\
-                     * --node-disable-conn-pool (NODE_DISABLE_CONN_POOL) is set together   \n\
-                     * with --use-esplora. This flag only affects the local node           \n\
-                     * connection and is being IGNORED for the Esplora backend; keep-alive \n\
-                     * pooling stays ENABLED.                                              \n\
-                     **********************************************************************"
-                );
-            } else {
-                // No keep-alive reuse: each request opens a fresh connection.
-                builder = builder.pool_max_idle_per_host(0);
-            }
+            // No keep-alive reuse: each request opens a fresh connection.
+            builder = builder.pool_max_idle_per_host(0);
         }
         let client = builder
             .build()
@@ -146,18 +94,12 @@ impl Client {
 
         Ok(Client {
             client,
-            use_esplora,
             base_url,
-            esplora_url,
             rpc_user_password,
         })
     }
 
     pub async fn authenticated_rpc_preflight(&self) -> Result<()> {
-        if self.use_esplora {
-            return Ok(());
-        }
-
         log::info!("checking rpc authentication against {}", self.base_url);
         let data = json!({
             "jsonrpc": "1.0",
@@ -219,25 +161,8 @@ impl Client {
     }
 
     pub async fn validate_network(&self, network: Network) -> Result<()> {
-        if self.use_esplora {
-            let Some(expected) = expected_genesis_hash(network) else {
-                log::warn!(
-                    "skipping genesis validation for {network} because its genesis may be customized"
-                );
-                return Ok(());
-            };
-            let actual = self
-                .block_hash(0)
-                .await?
-                .ok_or_else(|| anyhow!("backend did not return a genesis block for {network}"))?;
-            validate_genesis_hash(network, expected, actual)
-        } else {
-            let chain_info = self
-                .chain_info()
-                .await?
-                .ok_or_else(|| anyhow!("node did not return chain information for {network}"))?;
-            validate_node_chain(network, &chain_info.chain)
-        }
+        let chain_info = self.chain_info().await?;
+        validate_node_chain(network, &chain_info.chain)
     }
 
     fn rpc_url(&self) -> String {
@@ -250,14 +175,9 @@ impl Client {
     }
 
     // `curl http://127.0.0.1:7041/rest/blockhashbyheight/0.hex`
-    // GET /block-height/:height
     pub async fn block_hash(&self, height: u32) -> Result<Option<BlockHash>> {
         let base = &self.base_url;
-        let url = if self.use_esplora {
-            format!("{base}/block-height/{height}")
-        } else {
-            format!("{base}/rest/blockhashbyheight/{height}.hex",)
-        };
+        let url = format!("{base}/rest/blockhashbyheight/{height}.hex",);
         let response = self
             .client
             .get(&url)
@@ -282,12 +202,7 @@ impl Client {
     }
 
     /// GET /rest/chaininfo.json
-    /// Returns chain information when connecting to a bitcoin node, None for esplora
-    pub async fn chain_info(&self) -> Result<Option<ChainInfo>> {
-        if self.use_esplora {
-            return Ok(None);
-        }
-
+    pub async fn chain_info(&self) -> Result<ChainInfo> {
         let base = &self.base_url;
         let url = format!("{base}/rest/chaininfo.json");
 
@@ -306,21 +221,16 @@ impl Client {
                 .with_context(|| format!("failing converting body to text for {url}"))?;
             let chain_info: ChainInfo = serde_json::from_str(&text)
                 .with_context(|| format!("failing converting {text} to ChainInfo"))?;
-            Ok(Some(chain_info))
+            Ok(chain_info)
         } else {
             Err(Error::UnexpectedStatus(url, status).into())
         }
     }
 
     /// GET /rest/block/<BLOCK-HASH>.<bin|hex|json>
-    /// GET /block/:hash/raw
     pub async fn block(&self, hash: BlockHash, family: Family) -> Result<be::Block> {
         let base = &self.base_url;
-        let url = if self.use_esplora {
-            format!("{base}/block/{hash}/raw")
-        } else {
-            format!("{base}/rest/block/{hash}.bin",)
-        };
+        let url = format!("{base}/rest/block/{hash}.bin",);
         let resp = self
             .client
             .get(&url)
@@ -356,19 +266,15 @@ impl Client {
         family: Family,
     ) -> Result<Option<HeaderJson>> {
         let base = &self.base_url;
-        let url = if self.use_esplora {
-            format!("{base}/block/{hash}/status")
-        } else {
-            match family {
-                // see https://github.com/bitcoin/bitcoin/blob/master/doc/REST-interface.md#blockheaders
-                Family::Bitcoin => format!("{base}/rest/headers/{hash}.json",),
-                Family::Elements => format!("{base}/rest/headers/1/{hash}.json",), // pre bitcoin 24.0
-            }
+        let url = match family {
+            // see https://github.com/bitcoin/bitcoin/blob/master/doc/REST-interface.md#blockheaders
+            Family::Bitcoin => format!("{base}/rest/headers/{hash}.json",),
+            Family::Elements => format!("{base}/rest/headers/1/{hash}.json",), // pre bitcoin 24.0
         };
 
         loop {
             let mut builder = self.client.get(&url);
-            if family == Family::Bitcoin && !self.use_esplora {
+            if family == Family::Bitcoin {
                 builder = builder.query(&[("count", "1")]);
             }
             let resp = builder
@@ -390,21 +296,8 @@ impl Client {
             }
 
             let text = resp.text().await?;
-            let mut header: Vec<HeaderJson> = if self.use_esplora {
-                let value: serde_json::Value = serde_json::from_str(&text)
-                    .with_context(|| format!("failing converting {text} to Value"))?;
-                let nextblockhash = value
-                    .get("next_best")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| BlockHash::from_str(s).ok());
-                vec![HeaderJson {
-                    hash,
-                    nextblockhash,
-                }]
-            } else {
-                serde_json::from_str(&text)
-                    .with_context(|| format!("failing converting {text} to Vec<HeaderJson>"))?
-            };
+            let mut header: Vec<HeaderJson> = serde_json::from_str(&text)
+                .with_context(|| format!("failing converting {text} to Vec<HeaderJson>"))?;
             let header = match header.pop() {
                 Some(header) => header,
                 None => {
@@ -417,22 +310,17 @@ impl Client {
     }
 
     /// GET /rest/headers/<BLOCK-HASH>.<bin|hex|json>
-    /// GET /block/:hash/header
     pub async fn block_header(&self, hash: BlockHash, family: Family) -> Result<be::BlockHeader> {
         let base = &self.base_url;
-        let url = if self.use_esplora {
-            format!("{base}/block/{hash}/header")
-        } else {
-            match family {
-                // see https://github.com/bitcoin/bitcoin/blob/master/doc/REST-interface.md#blockheaders
-                Family::Bitcoin => format!("{base}/rest/headers/{hash}.bin",),
-                Family::Elements => format!("{base}/rest/headers/1/{hash}.bin",), // pre bitcoin 24.0
-            }
+        let url = match family {
+            // see https://github.com/bitcoin/bitcoin/blob/master/doc/REST-interface.md#blockheaders
+            Family::Bitcoin => format!("{base}/rest/headers/{hash}.bin",),
+            Family::Elements => format!("{base}/rest/headers/1/{hash}.bin",), // pre bitcoin 24.0
         };
 
         loop {
             let mut builder = self.client.get(&url);
-            if family == Family::Bitcoin && !self.use_esplora {
+            if family == Family::Bitcoin {
                 builder = builder.query(&[("count", "1")]);
             }
             let resp = builder
@@ -453,15 +341,9 @@ impl Client {
                 return Err(Error::UnexpectedStatus(url, status).into());
             }
 
+            let bytes = resp.bytes().await?;
             return match family {
                 Family::Bitcoin => {
-                    let bytes = if self.use_esplora {
-                        let text = resp.text().await?;
-                        hex_simd::decode_to_vec(text.as_bytes())
-                            .map_err(|_| anyhow!("failing converting {text} to bytes"))?
-                    } else {
-                        resp.bytes().await?.to_vec()
-                    };
                     let header =
                         <bitcoin::block::Header as bitcoin::consensus::Decodable>::consensus_decode(
                             &mut &bytes[..],
@@ -469,13 +351,6 @@ impl Client {
                     Ok(be::BlockHeader::Bitcoin(Box::new(header)))
                 }
                 Family::Elements => {
-                    let bytes = if self.use_esplora {
-                        let text = resp.text().await?;
-                        hex_simd::decode_to_vec(text.as_bytes())
-                            .map_err(|_| anyhow!("failing converting {text} to bytes"))?
-                    } else {
-                        resp.bytes().await?.to_vec()
-                    };
                     let header = elements::BlockHeader::consensus_decode(&bytes[..])?;
                     Ok(be::BlockHeader::Elements(Box::new(header)))
                 }
@@ -488,13 +363,9 @@ impl Client {
     // verbose false is not supported on liquid
     pub async fn mempool(&self, support_verbose: bool) -> Result<HashSet<crate::be::Txid>> {
         let base = &self.base_url;
-        let url = if self.use_esplora {
-            format!("{base}/mempool/txids")
-        } else {
-            format!("{base}/rest/mempool/contents.json")
-        };
+        let url = format!("{base}/rest/mempool/contents.json");
 
-        let query = if support_verbose && !self.use_esplora {
+        let query = if support_verbose {
             HashMap::from([("verbose".to_string(), "false".to_string())])
         } else {
             HashMap::new()
@@ -514,11 +385,7 @@ impl Client {
             .await
             .with_context(|| format!("failure reading {url} body in bytes"))?;
 
-        Ok(if self.use_esplora {
-            let content: HashSet<crate::be::Txid> = serde_json::from_slice(&body_bytes)
-                .with_context(|| format!("failure converting {url} body in HashSet<Txid>"))?;
-            content
-        } else if support_verbose {
+        Ok(if support_verbose {
             serde_json::from_slice(&body_bytes)
                 .with_context(|| format!("failure converting {url} body in HashSet<Txid> "))?
         } else {
@@ -534,11 +401,7 @@ impl Client {
     /// GET /rest/tx/<TX-HASH>.<bin|hex|json>
     pub async fn tx(&self, txid: crate::be::Txid, family: Family) -> Result<be::Transaction> {
         let base = &self.base_url;
-        let url = if self.use_esplora {
-            format!("{base}/tx/{txid}/raw")
-        } else {
-            format!("{base}/rest/tx/{txid}.bin")
-        };
+        let url = format!("{base}/rest/tx/{txid}.bin");
 
         loop {
             let resp = self.client.get(&url).send().await?;
@@ -562,38 +425,31 @@ impl Client {
 
     /// POST /tx
     ///
-    /// When using the node it must go through RPC interface because the node doesn't support broadcasting via REST
+    /// It must go through RPC interface because the node doesn't support broadcasting via REST
     /// We can't go full RPC for other methods because RPC doesn't return binary data
     ///
     pub async fn broadcast(&self, tx: &be::Transaction) -> Result<crate::be::Txid> {
         let tx_hex = tx.serialize_hex();
 
-        let response = if self.use_esplora {
-            let url = format!("{}/tx", &self.esplora_url);
-            log::info!("broadcasting to {}", url);
+        let url = self.rpc_url();
+        log::info!("broadcasting to url {}", self.base_url);
 
-            self.client.post(&url).body(tx_hex).send().await?
-        } else {
-            let url = self.rpc_url();
-            log::info!("broadcasting to url {}", self.base_url);
+        let data = json!({
+            "jsonrpc":"1.0",
+            "id": tx.txid(),
+            "method": "sendrawtransaction",
+            "params": [tx_hex],
+        });
+        log::trace!("data {data:?}");
+        let data = serde_json::to_string(&data)?;
 
-            let data = json!({
-                "jsonrpc":"1.0",
-                "id": tx.txid(),
-                "method": "sendrawtransaction",
-                "params": [tx_hex],
-            });
-            log::trace!("data {data:?}");
-            let data = serde_json::to_string(&data)?;
-
-            self.client.post(&url).body(data).send().await?
-        };
+        let response = self.client.post(&url).body(data).send().await?;
         let status = response.status();
         let text = response.text().await?;
         if status != 200 {
             anyhow::bail!("broadcast failed with status:{status}, body is {text}");
         }
-        let txid = parse_broadcast_response(&text, self.use_esplora)?;
+        let txid = parse_broadcast_response(&text)?;
         assert_eq!(txid, tx.txid());
         Ok(txid)
     }
@@ -619,55 +475,35 @@ impl Client {
         }
     }
 
-    /// GET /fee-estimates
-    ///
-    /// Estimating using node requires RPC (estimatesmartfee) to avoid multiple requests for
+    /// Estimating requires RPC (estimatesmartfee) to avoid multiple requests for
     /// different targets with a single batch RPC request.
     pub async fn fee_estimates(&self) -> Result<HashMap<u16, f64>> {
-        let result = if self.use_esplora {
-            let url = format!("{}/fee-estimates", &self.esplora_url);
-            log::info!("fetching fee estimates from {}", url);
+        let url = self.rpc_url();
+        log::info!("fetching fee estimates from {}", self.base_url);
 
-            let response = self.client.get(&url).send().await?;
-            let status = response.status();
-            let text = response.text().await?;
-            if !status.is_success() {
-                let msg = format!("fee estimate fetch failed with status:{status}, body is {text}");
-                log::warn!("{msg}");
-                anyhow::bail!("{msg}");
-            }
-
-            serde_json::from_str::<HashMap<u16, f64>>(&text)?
-        } else {
-            let url = self.rpc_url();
-            log::info!("fetching fee estimates from {}", self.base_url);
-
-            let batch: Vec<serde_json::Value> = CONF_TARGETS
-                .iter()
-                .map(|t| {
-                    json!({
-                        "jsonrpc": "1.0",
-                        "id": t,
-                        "method": "estimatesmartfee",
-                        "params": [t, "ECONOMICAL"],
-                    })
+        let batch: Vec<serde_json::Value> = CONF_TARGETS
+            .iter()
+            .map(|t| {
+                json!({
+                    "jsonrpc": "1.0",
+                    "id": t,
+                    "method": "estimatesmartfee",
+                    "params": [t, "ECONOMICAL"],
                 })
-                .collect();
-            let data = serde_json::to_string(&batch)?;
+            })
+            .collect();
+        let data = serde_json::to_string(&batch)?;
 
-            let response = self.client.post(&url).body(data).send().await?;
-            let status = response.status();
-            let text = response.text().await?;
-            if status != 200 {
-                let msg = format!("fee estimate fetch failed with status:{status}, body is {text}");
-                log::warn!("{msg}");
-                anyhow::bail!("{msg}");
-            }
+        let response = self.client.post(&url).body(data).send().await?;
+        let status = response.status();
+        let text = response.text().await?;
+        if status != 200 {
+            let msg = format!("fee estimate fetch failed with status:{status}, body is {text}");
+            log::warn!("{msg}");
+            anyhow::bail!("{msg}");
+        }
 
-            parse_fee_estimates_rpc_reply(&text)?
-        };
-
-        Ok(result)
+        parse_fee_estimates_rpc_reply(&text)
     }
 }
 
@@ -706,11 +542,7 @@ fn parse_fee_estimates_rpc_reply(text: &str) -> anyhow::Result<HashMap<u16, f64>
         .collect())
 }
 
-fn parse_broadcast_response(text: &str, use_esplora: bool) -> anyhow::Result<crate::be::Txid> {
-    if use_esplora {
-        return crate::be::Txid::from_str(text.trim());
-    }
-
+fn parse_broadcast_response(text: &str) -> anyhow::Result<crate::be::Txid> {
     let value: serde_json::Value = serde_json::from_str(text)?;
     let txid_text = value
         .get("result")
@@ -752,48 +584,6 @@ fn validate_node_chain(network: Network, actual: &str) -> Result<()> {
         );
     }
     Ok(())
-}
-
-fn validate_genesis_hash(network: Network, expected: BlockHash, actual: BlockHash) -> Result<()> {
-    if actual != expected {
-        anyhow::bail!(
-            "configured network {network} expects genesis block {expected}, but backend reports {actual}"
-        );
-    }
-    Ok(())
-}
-
-fn expected_genesis_hash(network: Network) -> Option<BlockHash> {
-    let bitcoin_network = match network {
-        Network::Bitcoin => Some(bitcoin::Network::Bitcoin),
-        Network::BitcoinTestnet => Some(bitcoin::Network::Testnet),
-        Network::BitcoinTestnet4 => Some(bitcoin::Network::Testnet4),
-        Network::BitcoinRegtest => Some(bitcoin::Network::Regtest),
-        Network::BitcoinSignet => Some(bitcoin::Network::Signet),
-        _ => None,
-    };
-    if let Some(network) = bitcoin_network {
-        return bitcoin::constants::genesis_block(network)
-            .block_hash()
-            .to_string()
-            .parse()
-            .map(Some)
-            .expect("bitcoin genesis hash must parse as an Elements block hash");
-    }
-
-    let hash = match network {
-        Network::Liquid => "1466275836220db2944ca059a3a10ef6fd2ea684b0688d2c379296888a206003",
-        Network::LiquidTestnet => {
-            "a771da8e52ee6ad581ed1e9a99825e5b3b7992225534eaa2ae23244fe26ab1c1"
-        }
-        Network::ElementsRegtest => return None,
-        Network::Bitcoin
-        | Network::BitcoinTestnet
-        | Network::BitcoinTestnet4
-        | Network::BitcoinRegtest
-        | Network::BitcoinSignet => unreachable!("handled above"),
-    };
-    Some(hash.parse().expect("hardcoded genesis hash must parse"))
 }
 
 #[derive(Debug)]
@@ -866,32 +656,18 @@ fn retryable_status(status: StatusCode) -> bool {
 mod test {
     use std::io::Write;
 
-    #[cfg(any(feature = "esplora", feature = "synced_node"))]
+    #[cfg(feature = "synced_node")]
     use elements::BlockHash;
-    #[cfg(any(feature = "esplora", feature = "synced_node"))]
+    #[cfg(feature = "synced_node")]
     use std::str::FromStr;
 
     use crate::server::{Arguments, Network};
-    #[cfg(any(feature = "esplora", feature = "synced_node"))]
+    #[cfg(feature = "synced_node")]
     use crate::Family;
 
     use super::{
-        expected_genesis_hash, parse_fee_estimates_rpc_reply, validate_genesis_hash,
-        validate_node_chain, BackendValidationError, Client,
+        parse_fee_estimates_rpc_reply, validate_node_chain, BackendValidationError, Client,
     };
-
-    #[cfg(feature = "esplora")]
-    #[test]
-    fn bitcoin_testnet4_default_esplora_url() {
-        let args = Arguments {
-            network: Network::BitcoinTestnet4,
-            use_esplora: true,
-            request_timeout_seconds: 1,
-            ..Arguments::default()
-        };
-        let client = Client::new(&args).unwrap();
-        assert_eq!(client.base_url, "https://mempool.space/testnet4/api");
-    }
 
     #[test]
     fn configured_network_accepts_matching_node_chain() {
@@ -915,32 +691,6 @@ mod test {
         assert!(err.to_string().contains("expects node chain test"));
         assert!(err.to_string().contains("backend reports testnet4"));
         assert!(!BackendValidationError::classify(err).is_retryable());
-    }
-
-    #[test]
-    fn configured_network_accepts_matching_genesis() {
-        for network in [
-            Network::Liquid,
-            Network::LiquidTestnet,
-            Network::Bitcoin,
-            Network::BitcoinTestnet,
-            Network::BitcoinTestnet4,
-            Network::BitcoinRegtest,
-            Network::BitcoinSignet,
-        ] {
-            let expected = expected_genesis_hash(network).unwrap();
-            validate_genesis_hash(network, expected, expected).unwrap();
-        }
-        assert_eq!(expected_genesis_hash(Network::ElementsRegtest), None);
-    }
-
-    #[test]
-    fn configured_network_rejects_wrong_genesis() {
-        let expected = expected_genesis_hash(Network::BitcoinTestnet).unwrap();
-        let actual = expected_genesis_hash(Network::BitcoinSignet).unwrap();
-        let err = validate_genesis_hash(Network::BitcoinTestnet, expected, actual).unwrap_err();
-        assert!(err.to_string().contains("expects genesis block"));
-        assert!(err.to_string().contains("backend reports"));
     }
 
     #[test]
@@ -1279,29 +1029,6 @@ mod test {
         assert_eq!(connections.load(Ordering::SeqCst), 3);
     }
 
-    #[cfg(feature = "esplora")]
-    #[tokio::test]
-    #[ignore = "connects to prod server"]
-    async fn test_client_esplora() {
-        let _ = env_logger::try_init();
-        let mut args = Arguments {
-            use_esplora: true,
-            request_timeout_seconds: 30,
-            ..Arguments::default()
-        };
-        for network in [
-            Network::Bitcoin,
-            Network::BitcoinTestnet4,
-            Network::Liquid,
-            Network::LiquidTestnet,
-        ] {
-            args.network = network;
-            let client = Client::new(&args).unwrap();
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            test(client, network).await;
-        }
-    }
-
     #[tokio::test]
     #[cfg(feature = "synced_node")]
     async fn test_client_local_liquid() {
@@ -1326,14 +1053,13 @@ mod test {
     #[cfg(feature = "synced_node")]
     fn init_client(network: Network) -> Client {
         let args = Arguments {
-            use_esplora: false,
             network,
             ..Arguments::default()
         };
         Client::new(&args).unwrap()
     }
 
-    #[cfg(any(feature = "esplora", feature = "synced_node"))]
+    #[cfg(feature = "synced_node")]
     async fn test(client: Client, network: Network) {
         let (genesis_hash, genesis_txid, another_txid) = match network {
             Network::Liquid => (
@@ -1400,16 +1126,14 @@ mod test {
         }
         client.mempool(false).await.unwrap();
 
-        if !client.use_esplora {
-            match network.into() {
-                Family::Bitcoin => {
-                    let support_verbose = client.mempool(true).await.is_ok();
-                    assert!(support_verbose);
-                }
-                Family::Elements => {
-                    let support_verbose = client.mempool(true).await.is_ok();
-                    assert!(!support_verbose);
-                }
+        match network.into() {
+            Family::Bitcoin => {
+                let support_verbose = client.mempool(true).await.is_ok();
+                assert!(support_verbose);
+            }
+            Family::Elements => {
+                let support_verbose = client.mempool(true).await.is_ok();
+                assert!(!support_verbose);
             }
         }
 
