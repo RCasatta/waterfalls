@@ -119,33 +119,54 @@ docker load < result
 
 The Docker image exposes ports 3100-3107 for Liquid, Liquid Testnet, Elements
 Regtest, Bitcoin, Bitcoin Testnet, Bitcoin Regtest, Bitcoin Signet, and Bitcoin
-Testnet4 respectively. You need to specify the `NETWORK` environment variable
-when running the container:
+Testnet4 respectively. Waterfalls needs a node with the REST interface enabled
+(`rest=1`) and its RPC credentials, so a container must specify:
+
+* `NETWORK`: the network to serve
+* `NODE_URL`: the node REST/RPC address, reachable from inside the container
+  (`127.0.0.1` is the container itself)
+* `RPC_USER_PASSWORD_FILE`: the node cookie file, mounted into the container
+* `LISTEN`: `0.0.0.0:<port>`, because the default `127.0.0.1` is not reachable
+  through the published port
+
+The examples below reach a node running on the Docker host through
+`host.docker.internal`; the node must accept RPC connections from the Docker
+network (`rpcbind`/`rpcallowip`).
 
 ```bash
-# Run with Liquid network
-docker run -p 3100:3100 -e NETWORK=liquid waterfalls:latest
+# Run with Liquid network against elementsd on the Docker host (port 7041)
+docker run -p 3100:3100 \
+  --add-host=host.docker.internal:host-gateway \
+  -e NETWORK=liquid \
+  -e LISTEN=0.0.0.0:3100 \
+  -e NODE_URL=http://host.docker.internal:7041 \
+  -e RPC_USER_PASSWORD_FILE=/run/elements/.cookie \
+  -v /path/to/liquidv1/.cookie:/run/elements/.cookie:ro \
+  waterfalls:latest
 
-# Run with LiquidTestnet network
-docker run -p 3101:3101 -e NETWORK=liquid-testnet waterfalls:latest
+# Run with Liquid Testnet network against elementsd on the Docker host (port 7039)
+docker run -p 3101:3101 \
+  --add-host=host.docker.internal:host-gateway \
+  -e NETWORK=liquid-testnet \
+  -e LISTEN=0.0.0.0:3101 \
+  -e NODE_URL=http://host.docker.internal:7039 \
+  -e RPC_USER_PASSWORD_FILE=/run/elements/.cookie \
+  -v /path/to/liquidtestnet/.cookie:/run/elements/.cookie:ro \
+  waterfalls:latest
 
-# Run Bitcoin Testnet4 against a node REST/RPC port 48332 on the Docker host
+# Run with Bitcoin Testnet4 network against bitcoind on the Docker host (port 48332)
 docker run -p 3107:3107 \
   --add-host=host.docker.internal:host-gateway \
   -e NETWORK=bitcoin-testnet4 \
+  -e LISTEN=0.0.0.0:3107 \
   -e NODE_URL=http://host.docker.internal:48332 \
   -e RPC_USER_PASSWORD_FILE=/run/bitcoin/.cookie \
   -v /path/to/testnet4/.cookie:/run/bitcoin/.cookie:ro \
   waterfalls:latest
-
 ```
 
-You can also specify additional parameters via environment variables:
-
-```bash
-# Add CORS headers and allow up to 200 addresses per request
-docker run -p 3100:3100 -e NETWORK=liquid -e ADD_CORS=true -e MAX_ADDRESSES=200 waterfalls:latest
-```
+Any other option can be passed the same way as an environment variable, for
+example `-e ADD_CORS=true -e MAX_ADDRESSES=200`.
 
 ### Publish the Docker
 
