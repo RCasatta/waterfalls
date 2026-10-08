@@ -257,6 +257,10 @@ pub async fn index(
         // readers looking at the mempool before the db always find them in one of the two.
         // The mempool thread doesn't remove txs missing from the node mempool while the node tip
         // is ahead of the indexed one, so without this they would linger until its next cycle.
+        // The mempool thread keeps its own set of tracked txids, not updated here: if this block
+        // is reorged out before its next cycle, a tx returning to the node mempool isn't seen as
+        // new and is added back one cycle later. Reorgs already leave such txs missing until the
+        // mempool thread adds them back, this only extends that rare gap by a cycle.
         let confirmed_txids: Vec<_> = block.transactions_iter().map(|tx| tx.txid()).collect();
         state.mempool.lock().await.remove(&confirmed_txids);
         state
