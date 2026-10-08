@@ -1314,6 +1314,11 @@ async fn find_scripts(
 /// Removes from `seen_mempool` the txs also in `seen_blockchain` for the same script.
 ///
 /// Since the mempool is read before the db, a tx confirmed in between is in both.
+///
+/// Callers pass the history already truncated to the requested page, so a tx confirmed in
+/// between whose entry falls past the page is still reported unconfirmed, in that one response.
+/// This needs a script with more than a page of history and a block indexed between the two
+/// reads, while filtering against the full history would hash it on every such request.
 fn remove_confirmed_from_mempool(
     seen_blockchain: &[Vec<TxSeen>],
     seen_mempool: &mut [Vec<TxSeen>],
