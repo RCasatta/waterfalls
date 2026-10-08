@@ -1036,6 +1036,92 @@ async fn test_fee_estimates_bitcoin() {
     test_env.shutdown().await;
 }
 
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn confirmation_without_gap_elements() {
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory(Family::Elements).await;
+    do_test_confirmation_without_gap(test_env).await;
+}
+
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn confirmation_without_gap_bitcoin() {
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory(Family::Bitcoin).await;
+    do_test_confirmation_without_gap(test_env).await;
+}
+
+/// A tx moving from the mempool to a block must never disappear from the response, nor be
+/// reported both as unconfirmed and confirmed, while the server catches up with the new block.
+#[cfg(feature = "test_env")]
+async fn do_test_confirmation_without_gap(test_env: waterfalls::test_env::TestEnv) {
+    for round in 0..3 {
+        let addr = test_env.get_new_address(None);
+        let txid = test_env.send_to(&addr, 10_000);
+        let addr = addr.to_unconfidential().unwrap_or(addr);
+
+        let tx_seens = |response: &waterfalls::WaterfallResponse| {
+            response.txs_seen.get("addresses").unwrap()[0]
+                .iter()
+                .filter(|tx_seen| tx_seen.txid == txid)
+                .map(|tx_seen| tx_seen.height)
+                .collect::<Vec<_>>()
+        };
+
+        let start = Instant::now();
+        loop {
+            let (response, _) = test_env
+                .client()
+                .waterfalls_addresses(&[addr.clone()])
+                .await
+                .unwrap();
+            if tx_seens(&response) == [0] {
+                break;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "tx not in mempool"
+            );
+            sleep(Duration::from_millis(50)).await;
+        }
+
+        test_env.node_generate_no_wait(1);
+
+        let start = Instant::now();
+        let mut polls = 0;
+        loop {
+            let (response, _) = test_env
+                .client()
+                .waterfalls_addresses(&[addr.clone()])
+                .await
+                .unwrap();
+            polls += 1;
+            match tx_seens(&response).as_slice() {
+                [0] => {}
+                [height] if *height > 0 => break,
+                other => panic!(
+                    "round {round}, poll {polls}, {:?} after mining: tx {txid} seen at heights {other:?}",
+                    start.elapsed()
+                ),
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "tx not confirmed"
+            );
+            sleep(Duration::from_millis(10)).await;
+        }
+        log::info!(
+            "round {round}: confirmed after {polls} polls, {:?}",
+            start.elapsed()
+        );
+    }
+
+    test_env.shutdown().await;
+}
+
 /// A tx replaced with RBF leaves the mempool view without any block being mined.
 #[cfg(feature = "test_env")]
 #[tokio::test]

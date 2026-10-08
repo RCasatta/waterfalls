@@ -5,6 +5,7 @@ use crate::{
     server::{Error, State, SubscriptionEvent},
     store::Store,
 };
+use elements::BlockHash;
 use std::{
     collections::HashSet,
     future::Future,
@@ -45,6 +46,9 @@ async fn sync_mempool_once(
     family: Family,
 ) -> Result<MempoolSyncStats, Error> {
     let start = Instant::now();
+    // Read before the node mempool, so that a block indexed after the node dropped its txs from
+    // the mempool is detected below.
+    let indexed_tip = state.tip_hash().await;
     match client.mempool(support_verbose).await {
         Ok(current) => {
             let client_mempool_elapsed = start.elapsed();
@@ -54,7 +58,18 @@ async fn sync_mempool_once(
             let db = &state.store;
             let tip = state.tip_height().await;
             let new: Vec<_> = current.difference(mempool_txids).cloned().collect();
-            let removed: Vec<_> = mempool_txids.difference(&current).cloned().collect();
+            let mut removed: Vec<_> = mempool_txids.difference(&current).cloned().collect();
+            if !removed.is_empty() && !node_tip_is_indexed(client, indexed_tip).await {
+                // Some of the removed txs may be confirmed in a block not indexed yet: removing
+                // them now would make them disappear from responses until it is. The block thread
+                // removes them once the block is indexed, evicted or replaced txs are removed in
+                // a following cycle, when the indexed tip caught up with the node one.
+                log::debug!(
+                    "node tip not indexed yet, deferring removal of {} mempool txs",
+                    removed.len()
+                );
+                removed.clear();
+            }
             crate::MEMPOOL_NEW_TXS_COUNTER.inc_by(new.len() as u64);
             let is_big_delta = new.len() >= BIG_MEMPOOL_DELTA_THRESHOLD
                 || removed.len() >= BIG_MEMPOOL_DELTA_THRESHOLD;
@@ -109,6 +124,18 @@ async fn sync_mempool_once(
                 .collect();
             let changed_script_hashes = {
                 let mut m = state.mempool.lock().await;
+                if state.tip_hash().await != indexed_tip {
+                    // A block was indexed since the node mempool was read, and its txs were
+                    // removed from the mempool view: applying this snapshot could add them back.
+                    // Holding the mempool lock, a block indexed from now on removes its txs
+                    // after this update, so checking here is enough.
+                    log::debug!("block indexed during mempool sync, discarding the snapshot");
+                    return Ok(MempoolSyncStats {
+                        tip,
+                        mempool_txs: current.len(),
+                        processing_time: start.elapsed(),
+                    });
+                }
                 let changed_script_hashes = m.update(db, &removed, &txs);
                 mempool_txids.clear();
                 mempool_txids.extend(m.txids_iter());
@@ -149,6 +176,18 @@ async fn sync_mempool_once(
                 format!("mempool sync error, is the node running and has rest=1 ? error: {e:?}");
             log::warn!("{err_msg}");
             Err(Error::String(err_msg))
+        }
+    }
+}
+
+/// Whether the node best block is the indexed tip, meaning every block the node had when its
+/// mempool was read before this call is indexed. Errors are reported as `false`.
+async fn node_tip_is_indexed(client: &Client, indexed_tip: Option<BlockHash>) -> bool {
+    match client.chain_info().await {
+        Ok(info) => Some(info.bestblockhash) == indexed_tip,
+        Err(e) => {
+            log::warn!("error getting chain info to compare node and indexed tips: {e}");
+            false
         }
     }
 }

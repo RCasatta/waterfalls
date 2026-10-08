@@ -44,7 +44,8 @@ impl Mempool {
         self.add(db, txs)
     }
 
-    fn remove(&mut self, txids: &[crate::be::Txid]) {
+    /// Removes `txids` from the mempool view, the ones not present are ignored.
+    pub(crate) fn remove(&mut self, txids: &[crate::be::Txid]) {
         for txid in txids {
             if let Some(hashes) = self.txid_hashes.remove(txid) {
                 for hash in hashes {

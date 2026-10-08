@@ -253,6 +253,12 @@ pub async fn index(
                 .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
         txs_count += indexed_txs;
         state.set_hash_ts(&block_to_index).await;
+        // Drop the confirmed txs from the mempool view only now that they are in the db, so that
+        // readers looking at the mempool before the db always find them in one of the two.
+        // The mempool thread doesn't remove txs missing from the node mempool while the node tip
+        // is ahead of the indexed one, so without this they would linger until its next cycle.
+        let confirmed_txids: Vec<_> = block.transactions_iter().map(|tx| tx.txid()).collect();
+        state.mempool.lock().await.remove(&confirmed_txids);
         state
             .notify_block_tip_subscriptions(changed_script_hashes)
             .await;
