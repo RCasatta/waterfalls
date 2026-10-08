@@ -621,9 +621,17 @@ async fn handle_single_address(state: &Arc<State>, address: &be::Address) -> Res
     let script_pubkey = address.script_pubkey();
 
     let script_hash = [db.hash(script_pubkey.as_bytes())];
+    // The mempool is read before the db, see `find_scripts`.
+    let mut seen_mempool = vec![Vec::new()];
+    state
+        .mempool
+        .lock()
+        .await
+        .append_seen(&script_hash, &mut seen_mempool);
     let mut seen_blockchain = db.get_history(&script_hash).unwrap();
     // TODO add pagination for `/address/:address/txs`; for now we only return the first capped page.
     truncate_history_page(&mut seen_blockchain, 0, state.max_txs_seen);
+    remove_confirmed_from_mempool(&seen_blockchain, &mut seen_mempool);
     let mut result: Vec<_> = seen_blockchain
         .remove(0)
         .iter()
@@ -636,12 +644,6 @@ async fn handle_single_address(state: &Arc<State>, address: &be::Address) -> Res
         })
         .collect();
 
-    let mut seen_mempool = vec![Vec::new()];
-    state
-        .mempool
-        .lock()
-        .await
-        .append_seen(&script_hash, &mut seen_mempool);
     result.extend(seen_mempool[0].iter().map(|tx_seen| EsploraTx {
         txid: tx_seen.txid,
         status: Status {
@@ -927,9 +929,10 @@ async fn handle_last_used_index(
             let (scripts, _) =
                 derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
 
-            // Check which scripts have history (either confirmed or mempool)
-            let seen_blockchain = db.has_history(&scripts).unwrap();
+            // Check which scripts have history (either confirmed or mempool), the mempool is
+            // read before the db, see `find_scripts`.
             let seen_mempool = state.mempool.lock().await.has_seen(&scripts);
+            let seen_blockchain = db.has_history(&scripts).unwrap();
 
             // Find the max index with activity in this batch
             let mut batch_has_activity = false;
@@ -1267,18 +1270,26 @@ async fn find_scripts(
     address_history_page: usize,
     append_mempool: bool,
 ) -> FindScriptsResult {
+    // The mempool is read before the db: the blocks thread removes txs from the mempool after
+    // indexing the block confirming them, so a tx missing from this mempool read because it was
+    // just confirmed is found in the db read that follows.
+    let mut seen_mempool = vec![Vec::new(); scripts.len()];
+    if append_mempool {
+        state
+            .mempool
+            .lock()
+            .await
+            .append_seen(&scripts, &mut seen_mempool);
+    }
     let mut seen_blockchain = db.get_history(&scripts).unwrap();
     let has_more = truncate_history_page(
         &mut seen_blockchain,
         address_history_page,
         state.max_txs_seen,
     );
-    if append_mempool {
-        state
-            .mempool
-            .lock()
-            .await
-            .append_seen(&scripts, &mut seen_blockchain);
+    remove_confirmed_from_mempool(&seen_blockchain, &mut seen_mempool);
+    for (txs_seen, mempool_txs_seen) in seen_blockchain.iter_mut().zip(seen_mempool) {
+        txs_seen.extend(mempool_txs_seen);
     }
     let max_used_offset = seen_blockchain
         .iter()
@@ -1297,6 +1308,21 @@ async fn find_scripts(
         is_last,
         has_more,
         max_used_offset,
+    }
+}
+
+/// Removes from `seen_mempool` the txs also in `seen_blockchain` for the same script.
+///
+/// Since the mempool is read before the db, a tx confirmed in between is in both.
+fn remove_confirmed_from_mempool(
+    seen_blockchain: &[Vec<TxSeen>],
+    seen_mempool: &mut [Vec<TxSeen>],
+) {
+    for (confirmed, mempool) in seen_blockchain.iter().zip(seen_mempool.iter_mut()) {
+        if !mempool.is_empty() && !confirmed.is_empty() {
+            let confirmed: HashSet<_> = confirmed.iter().map(|tx_seen| tx_seen.txid).collect();
+            mempool.retain(|tx_seen| !confirmed.contains(&tx_seen.txid));
+        }
     }
 }
 
