@@ -1036,6 +1036,57 @@ async fn test_fee_estimates_bitcoin() {
     test_env.shutdown().await;
 }
 
+/// A tx replaced with RBF leaves the mempool view without any block being mined.
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn replaced_mempool_tx_removed() {
+    use bitcoind::bitcoincore_rpc::RpcApi;
+
+    let _ = env_logger::try_init();
+
+    let test_env = launch_memory(Family::Bitcoin).await;
+    let addr = test_env.get_new_address(None);
+    let txid = test_env.send_to(&addr, 10_000);
+    let mempool_txids = || async {
+        let (response, _) = test_env
+            .client()
+            .waterfalls_addresses(&[addr.clone()])
+            .await
+            .unwrap();
+        response.txs_seen.get("addresses").unwrap()[0]
+            .iter()
+            .map(|tx_seen| {
+                assert_eq!(tx_seen.height, 0);
+                tx_seen.txid
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let start = Instant::now();
+    while mempool_txids().await != [txid] {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "tx not in mempool"
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    let bumped: serde_json::Value = test_env
+        .node()
+        .client
+        .call("bumpfee", &[txid.to_string().into()])
+        .unwrap();
+    let replacement: be::Txid = bumped["txid"].as_str().unwrap().parse().unwrap();
+
+    let start = Instant::now();
+    while mempool_txids().await != [replacement] {
+        assert!(start.elapsed() < Duration::from_secs(10), "tx not replaced");
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    test_env.shutdown().await;
+}
+
 #[cfg(feature = "test_env")]
 #[tokio::test]
 async fn test_last_used_index_elements() {
