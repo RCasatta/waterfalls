@@ -691,10 +691,12 @@ pub async fn inner_main(
                     let state = &state;
                     let network = args.network;
                     let add_cors = args.add_cors;
+                    // when a dedicated metrics listener is configured, keep metrics off the public one
+                    let expose_metrics = args.metrics_listen.is_none();
                     let header_read_timeout = args.header_read_timeout_seconds;
                     let client = &client;
 
-                    let service = service_fn(move |req| infallible_route(state, client, req, network, add_cors));
+                    let service = service_fn(move |req| infallible_route(state, client, req, network, add_cors, expose_metrics));
 
                     let result = http1::Builder::new()
                         .timer(TokioTimer::new())

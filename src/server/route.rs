@@ -72,6 +72,7 @@ pub async fn route(
     client: &Arc<Mutex<Client>>,
     req: Request<Incoming>,
     network: Network,
+    expose_metrics: bool,
 ) -> Result<Resp, Error> {
     let is_testnet_or_regtest = !matches!(network, Network::Liquid | Network::Bitcoin);
     log::debug!("---> {req:?}");
@@ -238,7 +239,7 @@ pub async fn route(
                 }
             }
         }
-        (&Method::GET, "/metrics", None) => metrics_resp(state).await,
+        (&Method::GET, "/metrics", None) if expose_metrics => metrics_resp(state).await,
         (&Method::GET, path, None) => {
             let mut s = path.split('/');
             match (s.next(), s.next(), s.next(), s.next(), s.next()) {
@@ -1401,9 +1402,10 @@ pub async fn infallible_route(
     req: Request<Incoming>,
     network: Network,
     add_cors: bool,
+    expose_metrics: bool,
 ) -> Result<Resp, hyper::Error> {
     let is_head = req.method() == Method::HEAD;
-    let mut response = match route(state, client, req, network).await {
+    let mut response = match route(state, client, req, network, expose_metrics).await {
         Ok(r) => r,
         Err(e) => error_resp(error_status(&e), &e),
     };

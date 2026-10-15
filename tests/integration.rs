@@ -498,6 +498,9 @@ async fn metrics_on_dedicated_listener() {
         .unwrap();
     assert_eq!(status, 404);
 
+    let (status, _) = test_env.client().get_path("/metrics").await.unwrap();
+    assert_eq!(status, 404, "public listener must not serve metrics");
+
     test_env.shutdown().await;
 }
 
@@ -732,6 +735,10 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     use waterfalls::{be, server::encryption::encrypt, WaterfallResponse, V};
     let secp = secp256k1::Secp256k1::new();
     let client = test_env.client();
+
+    // without --metrics-listen, metrics are still served on the public listener
+    let (status, _) = client.get_path("/metrics").await.unwrap();
+    assert_eq!(status, 200);
 
     let prefix = match test_env.family {
         Family::Bitcoin => "",
