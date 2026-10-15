@@ -75,6 +75,8 @@ pub struct Arguments {
 
     /// Socket address of a dedicated listener serving only the prometheus `/metrics` endpoint.
     /// Bind it to a loopback or private interface so metrics stay off the public port.
+    /// When unset, `/metrics` is served on the public listener: this is deprecated and a future
+    /// release will stop doing it by default.
     #[arg(env, long)]
     pub metrics_listen: Option<SocketAddr>,
 
@@ -667,7 +669,13 @@ pub async fn inner_main(
                 .await
             }))
         }
-        None => None,
+        None => {
+            log::warn!(
+                "serving /metrics on the public listener is deprecated and will be turned off \
+                 by default in a future release, use --metrics-listen"
+            );
+            None
+        }
     };
 
     log::info!("Starting on http://{addr}");

@@ -422,6 +422,21 @@ Returns Prometheus-formatted metrics for monitoring.
 
 **Response:** Text format metrics (text/plain)
 
+Metrics expose operational details that wallet users don't need, so serve them on a
+dedicated listener with `--metrics-listen <ip:port>` (`METRICS_LISTEN`), bound to a loopback
+or private interface:
+
+```
+waterfalls --listen 0.0.0.0:3100 --metrics-listen 127.0.0.1:9100 ...
+```
+
+When `--metrics-listen` is set, `/metrics` is served only there and the public listener
+returns 404 for it.
+
+**Deprecated:** without `--metrics-listen`, `/metrics` is still served on the public
+listener. A future release will stop doing so by default; set `--metrics-listen` to keep
+scraping metrics.
+
 ## Error Responses
 
 The API returns appropriate HTTP status codes:

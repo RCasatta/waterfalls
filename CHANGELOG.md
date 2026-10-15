@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--cache-control-seconds` value meant for blockchain data, which could let a caching proxy
   serve stale metrics to scrapers.
 
+### Deprecated
+
+- Serving `/metrics` on the public listener. It still happens when `--metrics-listen` is
+  not set, with a warning at startup, but a future release will stop doing it by default.
+  Set `--metrics-listen` to keep scraping metrics.
+
 ### Fixed
 
 - A transaction confirmed by a new block no longer disappears from responses for up to
