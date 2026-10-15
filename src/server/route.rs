@@ -1444,6 +1444,23 @@ pub(crate) async fn metrics_resp(state: &State) -> Result<Resp, Error> {
     any_resp(buffer, StatusCode::OK, Some("text/plain"), None, None)
 }
 
+/// Route of the dedicated metrics listener: it serves only `/metrics`
+pub async fn infallible_metrics_route(
+    state: &State,
+    req: Request<Incoming>,
+) -> Result<Resp, hyper::Error> {
+    let is_head = req.method() == Method::HEAD;
+    let result = match (req.method(), req.uri().path()) {
+        (&Method::GET | &Method::HEAD, "/metrics") => metrics_resp(state).await,
+        _ => str_resp("endpoint not found".to_string(), StatusCode::NOT_FOUND),
+    };
+    let mut response = result.unwrap_or_else(|e| error_resp(error_status(&e), &e));
+    if is_head {
+        response = strip_head_body(response);
+    }
+    Ok(response)
+}
+
 fn string_hash(s: &str) -> u64 {
     let mut hasher = DefaultHasher::default();
     s.hash(&mut hasher);

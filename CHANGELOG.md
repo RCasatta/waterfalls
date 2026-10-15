@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--metrics-listen <ip:port>` (`METRICS_LISTEN` environment variable) starts a dedicated
+  listener serving only the prometheus `/metrics` endpoint, so it can be bound to a loopback
+  or private interface separate from the public one.
+
 ### Changed
 
 - `/metrics` responses no longer carry a `Cache-Control` header: it reused the

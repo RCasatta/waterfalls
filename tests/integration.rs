@@ -479,6 +479,28 @@ async fn integration_db_bitcoin() {
     do_test(test_env).await;
 }
 
+#[cfg(feature = "test_env")]
+#[tokio::test]
+async fn metrics_on_dedicated_listener() {
+    let _ = env_logger::try_init();
+
+    let exe = std::env::var("BITCOIND_EXEC").unwrap();
+    let test_env = waterfalls::test_env::launch_with_metrics_listen(exe, Family::Bitcoin).await;
+    let metrics_client = test_env.metrics_client().unwrap();
+
+    let (status, body) = metrics_client.get_path("/metrics").await.unwrap();
+    assert_eq!(status, 200);
+    assert!(body.contains("waterfalls_descriptor_max_used_index_descriptors"));
+
+    let (status, _) = metrics_client
+        .get_path("/v1/server_recipient")
+        .await
+        .unwrap();
+    assert_eq!(status, 404);
+
+    test_env.shutdown().await;
+}
+
 #[cfg(all(feature = "test_env", feature = "db"))]
 async fn launch_memory(family: Family) -> waterfalls::test_env::TestEnv {
     let exe = match family {

@@ -35,6 +35,7 @@ pub struct TestEnv {
     handle: tokio::task::JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>,
     tx: Sender<()>,
     client: WaterfallClient,
+    metrics_client: Option<WaterfallClient>,
     base_url: String,
     server_key: Identity,
     wif_key: PrivateKey,
@@ -44,7 +45,7 @@ pub struct TestEnv {
 
 #[cfg(feature = "db")]
 pub async fn launch<S: AsRef<OsStr>>(exe: S, path: Option<PathBuf>, family: Family) -> TestEnv {
-    inner_launch(exe, path, family, None, true).await
+    inner_launch(exe, path, family, None, true, false).await
 }
 
 #[cfg(feature = "db")]
@@ -54,12 +55,12 @@ pub async fn launch_with_max_txs_seen<S: AsRef<OsStr>>(
     family: Family,
     max_txs_seen: usize,
 ) -> TestEnv {
-    inner_launch(exe, path, family, Some(max_txs_seen), true).await
+    inner_launch(exe, path, family, Some(max_txs_seen), true, false).await
 }
 
 #[cfg(not(feature = "db"))]
 pub async fn launch<S: AsRef<OsStr>>(exe: S, family: Family) -> TestEnv {
-    inner_launch(exe, None, family, None, true).await
+    inner_launch(exe, None, family, None, true, false).await
 }
 
 #[cfg(not(feature = "db"))]
@@ -68,7 +69,13 @@ pub async fn launch_with_max_txs_seen<S: AsRef<OsStr>>(
     family: Family,
     max_txs_seen: usize,
 ) -> TestEnv {
-    inner_launch(exe, None, family, Some(max_txs_seen), true).await
+    inner_launch(exe, None, family, Some(max_txs_seen), true, false).await
+}
+
+/// Launch a memory-backed server whose `/metrics` is served on a dedicated listener,
+/// reachable through [`TestEnv::metrics_client`]
+pub async fn launch_with_metrics_listen<S: AsRef<OsStr>>(exe: S, family: Family) -> TestEnv {
+    inner_launch(exe, None, family, None, true, true).await
 }
 
 #[cfg(feature = "db")]
@@ -91,11 +98,11 @@ pub async fn launch_with_node_no_generate(
     path: Option<PathBuf>,
     family: Family,
 ) -> TestEnv {
-    inner_launch_with_node_no_generate(node, path, family, None).await
+    inner_launch_with_node_no_generate(node, path, family, None, false).await
 }
 
 async fn inner_launch_with_node(node: BitcoinD, path: Option<PathBuf>, family: Family) -> TestEnv {
-    let test_env = inner_launch_with_node_no_generate(node, path, family, None).await;
+    let test_env = inner_launch_with_node_no_generate(node, path, family, None, false).await;
 
     test_env.node_generate(1).await;
 
@@ -115,6 +122,7 @@ async fn inner_launch_with_node_no_generate(
     path: Option<PathBuf>,
     family: Family,
     max_txs_seen: Option<usize>,
+    metrics_listen: bool,
 ) -> TestEnv {
     let mut args = Arguments {
         node_url: Some(node.rpc_url()),
@@ -128,6 +136,14 @@ async fn inner_launch_with_node_no_generate(
     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), available_port);
     let base_url = format!("http://{socket_addr}");
     args.listen = Some(socket_addr);
+    let metrics_base_url = if metrics_listen {
+        let metrics_port = get_available_port().unwrap();
+        let metrics_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), metrics_port);
+        args.metrics_listen = Some(metrics_addr);
+        Some(format!("http://{metrics_addr}"))
+    } else {
+        None
+    };
     args.network = match family {
         Family::Bitcoin => Network::BitcoinRegtest,
         Family::Elements => Network::ElementsRegtest,
@@ -156,6 +172,7 @@ async fn inner_launch_with_node_no_generate(
     let handle = tokio::spawn(inner_main(args, shutdown_signal(rx)));
 
     let client = WaterfallClient::new(base_url.to_string(), family);
+    let metrics_client = metrics_base_url.map(|url| WaterfallClient::new(url, family));
     let secp = Secp256k1::new();
 
     TestEnv {
@@ -163,6 +180,7 @@ async fn inner_launch_with_node_no_generate(
         handle,
         tx,
         client,
+        metrics_client,
         base_url,
         server_key,
         wif_key,
@@ -221,15 +239,24 @@ async fn inner_launch<S: AsRef<OsStr>>(
     family: Family,
     max_txs_seen: Option<usize>,
     generate_blocks: bool,
+    metrics_listen: bool,
 ) -> TestEnv {
     let elementsd = match family {
         Family::Bitcoin => launch_bitcoin(exe),
         Family::Elements => launch_elements(exe),
     };
     if generate_blocks {
-        inner_launch_with_node_with_max_txs_seen(elementsd, path, family, max_txs_seen).await
+        inner_launch_with_node_with_max_txs_seen(
+            elementsd,
+            path,
+            family,
+            max_txs_seen,
+            metrics_listen,
+        )
+        .await
     } else {
-        inner_launch_with_node_no_generate(elementsd, path, family, max_txs_seen).await
+        inner_launch_with_node_no_generate(elementsd, path, family, max_txs_seen, metrics_listen)
+            .await
     }
 }
 
@@ -238,8 +265,10 @@ async fn inner_launch_with_node_with_max_txs_seen(
     path: Option<PathBuf>,
     family: Family,
     max_txs_seen: Option<usize>,
+    metrics_listen: bool,
 ) -> TestEnv {
-    let test_env = inner_launch_with_node_no_generate(node, path, family, max_txs_seen).await;
+    let test_env =
+        inner_launch_with_node_no_generate(node, path, family, max_txs_seen, metrics_listen).await;
 
     test_env.node_generate(1).await;
 
@@ -273,11 +302,13 @@ impl TestEnv {
             handle,
             tx,
             client,
+            metrics_client,
             ..
         } = self;
         // Close idle keep-alive connections first: every connection task holds the shared
         // state, and with it the database, until the connection is closed.
         drop(client);
+        drop(metrics_client);
         tx.send(()).unwrap();
         let _ = handle.await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -301,6 +332,11 @@ impl TestEnv {
 
     pub fn client(&self) -> &WaterfallClient {
         &self.client
+    }
+
+    /// Client of the dedicated metrics listener, if the server was launched with one
+    pub fn metrics_client(&self) -> Option<&WaterfallClient> {
+        self.metrics_client.as_ref()
     }
 
     pub fn server_recipient(&self) -> Recipient {
@@ -716,6 +752,14 @@ impl WaterfallClient {
         }
         let text = response.text().await?;
         be::BlockHeader::from_str(&text, self.family)
+    }
+
+    /// GET `path` returning the status code and the body, without checking the status
+    pub async fn get_path(&self, path: &str) -> anyhow::Result<(u16, String)> {
+        let url = format!("{}{}", self.base_url, path);
+        let response = self.client.get(&url).send().await?;
+        let status_code = response.status().as_u16();
+        Ok((status_code, response.text().await?))
     }
 
     pub async fn server_recipient(&self) -> anyhow::Result<Recipient> {

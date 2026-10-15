@@ -21,7 +21,7 @@ use bitcoin::{NetworkKind, PrivateKey};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioIo, TokioTimer};
-use route::infallible_route;
+use route::{infallible_metrics_route, infallible_route};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
@@ -72,6 +72,11 @@ pub struct Arguments {
     /// Socket address where to listen to serve requests
     #[arg(env, long)]
     pub listen: Option<SocketAddr>,
+
+    /// Socket address of a dedicated listener serving only the prometheus `/metrics` endpoint.
+    /// Bind it to a loopback or private interface so metrics stay off the public port.
+    #[arg(env, long)]
+    pub metrics_listen: Option<SocketAddr>,
 
     /// Directory where to save the database
     #[cfg(feature = "db")]
@@ -184,6 +189,7 @@ impl std::fmt::Debug for Arguments {
             .field("network", &self.network)
             .field("node_url", &self.node_url)
             .field("listen", &self.listen)
+            .field("metrics_listen", &self.metrics_listen)
             .field(
                 "server_key",
                 &self.server_key.as_ref().map(|_| "Some(<redacted>)"),
@@ -640,6 +646,30 @@ pub async fn inner_main(
         [127, 0, 0, 1],
         args.network.default_listen_port(),
     )));
+    let h5 = match args.metrics_listen {
+        Some(metrics_addr) => {
+            log::info!("Serving metrics on http://{metrics_addr}/metrics");
+            let metrics_listener = TcpListener::bind(metrics_addr).await?;
+            let state = state.clone();
+            let header_read_timeout = Duration::from_secs(args.header_read_timeout_seconds);
+            let shutdown_rx = shutdown_tx.subscribe();
+            Some(tokio::spawn(async move {
+                let shutdown_future = async {
+                    let mut rx = shutdown_rx;
+                    let _ = rx.recv().await;
+                };
+                serve_metrics(
+                    metrics_listener,
+                    state,
+                    header_read_timeout,
+                    shutdown_future,
+                )
+                .await
+            }))
+        }
+        None => None,
+    };
+
     log::info!("Starting on http://{addr}");
 
     let listener = TcpListener::bind(addr).await?;
@@ -702,6 +732,9 @@ pub async fn inner_main(
         h3.await.unwrap();
     }
     h4.await.unwrap();
+    if let Some(h5) = h5 {
+        h5.await.unwrap();
+    }
 
     log::info!("shutting down gracefully");
     Ok(())
@@ -721,6 +754,40 @@ async fn periodic_logging(state: Arc<State>, shutdown_signal: impl Future<Output
             }
             _ = interval.tick() => {
                 log_periodic_state(&state).await;
+            }
+        }
+    }
+}
+
+/// Accept loop of the dedicated metrics listener, see [`Arguments::metrics_listen`]
+async fn serve_metrics(
+    listener: TcpListener,
+    state: Arc<State>,
+    header_read_timeout: Duration,
+    shutdown_signal: impl Future<Output = ()>,
+) {
+    let mut signal = std::pin::pin!(shutdown_signal);
+    loop {
+        tokio::select! {
+            Ok((stream, _)) = listener.accept() => {
+                let io = TokioIo::new(stream);
+                let state = state.clone();
+                tokio::task::spawn(async move {
+                    let state = &state;
+                    let service = service_fn(move |req| infallible_metrics_route(state, req));
+                    let result = http1::Builder::new()
+                        .timer(TokioTimer::new())
+                        .header_read_timeout(header_read_timeout)
+                        .serve_connection(io, service)
+                        .await;
+                    if let Err(err) = result {
+                        log::warn!("Error serving metrics connection: {err:?}");
+                    }
+                });
+            },
+            _ = &mut signal => {
+                log::info!("metrics listener received shutdown signal");
+                return;
             }
         }
     }
