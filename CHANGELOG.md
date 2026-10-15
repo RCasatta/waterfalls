@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `/metrics` responses no longer carry a `Cache-Control` header: it reused the
+  `--cache-control-seconds` value meant for blockchain data, which could let a caching proxy
+  serve stale metrics to scrapers.
+
 ### Fixed
 
 - A transaction confirmed by a new block no longer disappears from responses for up to

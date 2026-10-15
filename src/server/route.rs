@@ -238,23 +238,7 @@ pub async fn route(
                 }
             }
         }
-        (&Method::GET, "/metrics", None) => {
-            let encoder = prometheus::TextEncoder::new();
-
-            state.update_descriptor_max_used_index_metrics().await;
-            let metric_families = prometheus::gather();
-            let mut buffer = vec![];
-            encoder
-                .encode(&metric_families, &mut buffer)
-                .map_err(|e| Error::String(format!("{e:?}")))?;
-            any_resp(
-                buffer,
-                StatusCode::OK,
-                Some("text/plain"),
-                Some(state.cache_control_seconds),
-                None,
-            )
-        }
+        (&Method::GET, "/metrics", None) => metrics_resp(state).await,
         (&Method::GET, path, None) => {
             let mut s = path.split('/');
             match (s.next(), s.next(), s.next(), s.next(), s.next()) {
@@ -1443,6 +1427,21 @@ pub async fn infallible_route(
     }
 
     Ok(response)
+}
+
+/// Encode all registered prometheus metrics in the text exposition format.
+///
+/// No cache header is set: every scrape must see fresh values.
+pub(crate) async fn metrics_resp(state: &State) -> Result<Resp, Error> {
+    let encoder = prometheus::TextEncoder::new();
+
+    state.update_descriptor_max_used_index_metrics().await;
+    let metric_families = prometheus::gather();
+    let mut buffer = vec![];
+    encoder
+        .encode(&metric_families, &mut buffer)
+        .map_err(|e| Error::String(format!("{e:?}")))?;
+    any_resp(buffer, StatusCode::OK, Some("text/plain"), None, None)
 }
 
 fn string_hash(s: &str) -> u64 {
