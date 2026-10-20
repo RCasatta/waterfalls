@@ -405,6 +405,39 @@ mod indexing_tests {
     }
 
     #[test]
+    fn bitcoin_block_txids_in_order() {
+        let coinbase = bitcoin::constants::genesis_block(bitcoin::Network::Regtest)
+            .txdata
+            .remove(0);
+        let spend = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![bitcoin::TxIn {
+                previous_output: bitcoin::OutPoint::new(coinbase.compute_txid(), 0),
+                ..Default::default()
+            }],
+            output: coinbase.output.clone(),
+        };
+        let block_txs = [coinbase, spend];
+        let meta = BlockMeta::new(1, BlockHash::all_zeros(), 1_296_688_603);
+
+        let (_, txids) = index_block_transactions(
+            &MemoryStore::new(),
+            &meta,
+            block_txs.iter().map(TransactionRef::Bitcoin),
+        )
+        .unwrap();
+
+        assert_eq!(
+            txids,
+            block_txs
+                .iter()
+                .map(|tx| tx.compute_txid().into())
+                .collect::<Vec<crate::be::Txid>>()
+        );
+    }
+
+    #[test]
     fn custom_genesis_issuance_and_sweep_memory() {
         assert_custom_genesis_issuance_and_sweep(&MemoryStore::new());
     }
@@ -434,7 +467,13 @@ mod indexing_tests {
             genesis_txs.iter().map(TransactionRef::Elements),
         )
         .unwrap();
-        assert_eq!(txids.len(), 2);
+        assert_eq!(
+            txids,
+            genesis_txs
+                .iter()
+                .map(|tx| tx.txid().into())
+                .collect::<Vec<crate::be::Txid>>()
+        );
 
         let issuance_outpoint = OutPoint::new(genesis_txs[1].txid().into(), 0);
         let nonstandard_script_hash = store.hash(b"");
