@@ -123,6 +123,14 @@ impl Store for MemoryStore {
 }
 
 impl MemoryStore {
+    /// Locks the history: store readers block until the returned guard is dropped.
+    #[cfg(test)]
+    pub(crate) fn lock_history(
+        &self,
+    ) -> std::sync::MutexGuard<'_, BTreeMap<ScriptHash, Vec<TxSeen>>> {
+        self.history.lock().unwrap()
+    }
+
     fn remove_utxos(&self, outpoints: &[OutPoint]) -> Vec<ScriptHash> {
         let mut result = Vec::with_capacity(outpoints.len());
         for outpoint in outpoints {

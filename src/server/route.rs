@@ -1842,4 +1842,98 @@ mod tests {
             vec![3]
         );
     }
+
+    /// Store access must not run on the async runtime (#53): while a store read is stuck, other
+    /// tasks of a `current_thread` runtime must keep making progress.
+    #[test]
+    fn slow_store_does_not_block_current_thread_runtime() {
+        const STORE_DELAY: Duration = Duration::from_millis(300);
+
+        let state = Arc::new(route_test_state());
+        let address = "ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh";
+        let address = be::Address::from_str(address, Network::Liquid).unwrap();
+        let script_hash = state.store.hash(address.script_pubkey().as_bytes());
+        let txid = "1111111111111111111111111111111111111111111111111111111111111111";
+        let txid = crate::be::Txid::from_str(txid).unwrap();
+
+        // Hold the store lock from another thread, so that store reads block for STORE_DELAY.
+        // The thread reports when it took the lock and returns when it is about to release it.
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+        let holder_state = Arc::clone(&state);
+        let holder = std::thread::spawn(move || {
+            #[allow(irrefutable_let_patterns)]
+            let crate::store::AnyStore::Mem(store) = &holder_state.store
+            else {
+                unreachable!("test state uses the memory store")
+            };
+            let mut history = store.lock_history();
+            history.insert(script_hash, vec![TxSeen::new(txid, 1, V::Vout(0))]);
+            locked_tx.send(Instant::now()).unwrap();
+            std::thread::sleep(STORE_DELAY);
+            Instant::now()
+        });
+        let locked_at = locked_rx.recv().unwrap();
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let (ticker_done, response_done) = rt.block_on(async {
+            let ticker = tokio::spawn(async {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                Instant::now()
+            });
+            let request = WaterfallRequest::Addresses(AddressesRequest {
+                addresses: vec![address],
+                page: 0,
+                utxo_only: false,
+            });
+            let response = async {
+                let response =
+                    handle_waterfalls_req(&state, request, WithTip::No, false, Network::Liquid)
+                        .await;
+                (response, Instant::now())
+            };
+            let ((response, response_done), ticker_done) = tokio::join!(response, ticker);
+
+            let response = response.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let body = std::str::from_utf8(&body).unwrap();
+            assert!(body.contains(&txid.to_string()), "{body}");
+
+            (ticker_done.unwrap(), response_done)
+        });
+        let released_at = holder.join().unwrap();
+
+        // The response needs the store, so it can't complete while the lock is held.
+        assert!(response_done.duration_since(locked_at) >= STORE_DELAY);
+        // The timer must fire while the store is still locked. A blocked runtime can only run it
+        // after the blocking read returns, so after the lock is released.
+        assert!(
+            ticker_done < released_at,
+            "runtime blocked by the store: timer fired {:?} after the store was locked",
+            ticker_done.duration_since(locked_at)
+        );
+    }
+
+    fn route_test_state() -> State {
+        State::new(
+            crate::store::AnyStore::Mem(crate::store::memory::MemoryStore::new()),
+            Identity::generate(),
+            bitcoin::PrivateKey::generate(bitcoin::NetworkKind::Test),
+            crate::server::StateConfig {
+                max_addresses: 100,
+                max_txs_seen: 100,
+                cache_control_seconds: 5,
+                server_timing: false,
+                derivation_cache_capacity: 1000,
+                subscription_limits: crate::server::SubscriptionLimits {
+                    max_active_subscriptions: 100,
+                    max_scripts_per_subscription: 100,
+                },
+            },
+        )
+        .unwrap()
+    }
 }
