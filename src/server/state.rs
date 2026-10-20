@@ -1,6 +1,7 @@
 use std::{
     cmp::Ordering,
     collections::HashMap,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -126,6 +127,32 @@ impl State {
     }
     pub fn address(&self) -> bitcoin::Address {
         p2pkh(&self.secp, &self.wif_key)
+    }
+
+    /// Runs `f` against the store on tokio's blocking thread pool and awaits its result.
+    ///
+    /// Store calls are synchronous and, with RocksDB, may wait on disk: running them directly
+    /// in an async task stalls every other task scheduled on the same worker, the whole server
+    /// on a `current_thread` runtime. Callers should batch all the lookups they can into one
+    /// call, since each one is a round trip to the blocking pool.
+    ///
+    /// Errors returned by `f`, and a panic inside it, are mapped to [`Error::String`].
+    pub(crate) async fn store_blocking<T, F>(self: &Arc<Self>, f: F) -> Result<T, Error>
+    where
+        F: FnOnce(&AnyStore) -> anyhow::Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let state = Arc::clone(self);
+        tokio::task::spawn_blocking(move || f(&state.store))
+            .await
+            .map_err(|e| {
+                log::error!("store task failed: {e}");
+                Error::String(format!("store task failed: {e}"))
+            })?
+            .map_err(|e| {
+                log::error!("store error: {e}");
+                Error::String(e.to_string())
+            })
     }
 
     pub async fn record_descriptor_access(&self, id: u64) {

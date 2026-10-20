@@ -1,10 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{
-    be,
-    store::{AnyStore, Store},
-    OutPoint, ScriptHash, TxSeen, V,
-};
+use crate::{be, OutPoint, ScriptHash, TxSeen, V};
 
 pub struct Mempool {
     txid_hashes: HashMap<crate::be::Txid, HashSet<ScriptHash>>,
@@ -34,14 +30,23 @@ impl Mempool {
         }
     }
 
+    /// The previous outputs spent by `txs`, in the order expected by [`Mempool::update`].
+    pub fn prevouts(txs: &[(crate::be::Txid, &be::MempoolTx)]) -> Vec<OutPoint> {
+        txs.iter().flat_map(|e| e.1.inputs_iter()).collect()
+    }
+
+    /// Removes `removed_txids` and adds `txs` to the mempool view.
+    ///
+    /// `prevouts_script_hashes` are the confirmed UTXO set lookups of [`Mempool::prevouts`] of
+    /// `txs`, done by the caller so that the store isn't accessed while holding the mempool.
     pub fn update(
         &mut self,
-        db: &AnyStore,
         removed_txids: &[crate::be::Txid],
         txs: &[(crate::be::Txid, &be::MempoolTx)],
+        prevouts_script_hashes: &[Option<ScriptHash>],
     ) -> HashSet<ScriptHash> {
         self.remove(removed_txids);
-        self.add(db, txs)
+        self.add(txs, prevouts_script_hashes)
     }
 
     /// Removes `txids` from the mempool view, the ones not present are ignored.
@@ -65,8 +70,8 @@ impl Mempool {
 
     fn add(
         &mut self,
-        db: &AnyStore,
         txs: &[(crate::be::Txid, &be::MempoolTx)],
+        spending_script_hashes: &[Option<ScriptHash>],
     ) -> HashSet<ScriptHash> {
         // update the unconfirmed utxo set
         let outputs_created = txs.iter().flat_map(|(txid, tx)| {
@@ -84,8 +89,11 @@ impl Mempool {
         let mut txid_script_positions: HashMap<crate::be::Txid, Vec<(ScriptHash, i32)>> =
             HashMap::with_capacity(txs.len());
 
-        let prevouts: Vec<OutPoint> = txs.iter().flat_map(|e| e.1.inputs_iter()).collect();
-        let spending_script_hashes = db.get_utxos(&prevouts).unwrap();
+        debug_assert_eq!(
+            spending_script_hashes.len(),
+            txs.iter().map(|e| e.1.inputs_iter().count()).sum::<usize>(),
+            "one prevout lookup per input expected"
+        );
 
         let mut prevouts_index = 0usize;
         for (txid, tx) in txs {

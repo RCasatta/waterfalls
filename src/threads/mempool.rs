@@ -2,7 +2,7 @@ use crate::{
     be::Family,
     cache_counter,
     fetch::Client,
-    server::{Error, State, SubscriptionEvent},
+    server::{Error, Mempool, State, SubscriptionEvent},
     store::Store,
 };
 use elements::BlockHash;
@@ -55,7 +55,6 @@ async fn sync_mempool_once(
             crate::MEMPOOL_CLIENT_DURATION.set(client_mempool_elapsed.as_millis() as i64);
             crate::MEMPOOL_TXS_COUNT.set(current.len() as i64);
 
-            let db = &state.store;
             let tip = state.tip_height().await;
             let new: Vec<_> = current.difference(mempool_txids).cloned().collect();
             let mut removed: Vec<_> = mempool_txids.difference(&current).cloned().collect();
@@ -122,6 +121,12 @@ async fn sync_mempool_once(
                 .iter()
                 .filter_map(|txid| mempool_cache.get(txid).map(|tx| (*txid, tx)))
                 .collect();
+            // Looked up before locking the mempool, so that readers aren't blocked on the store.
+            // A block indexed in between changes the tip, discarding this snapshot below.
+            let prevouts = Mempool::prevouts(&txs);
+            let prevouts_script_hashes = state
+                .store_blocking(move |db| db.get_utxos(&prevouts))
+                .await?;
             let changed_script_hashes = {
                 let mut m = state.mempool.lock().await;
                 if state.tip_hash().await != indexed_tip {
@@ -136,7 +141,7 @@ async fn sync_mempool_once(
                         processing_time: start.elapsed(),
                     });
                 }
-                let changed_script_hashes = m.update(db, &removed, &txs);
+                let changed_script_hashes = m.update(&removed, &txs, &prevouts_script_hashes);
                 mempool_txids.clear();
                 mempool_txids.extend(m.txids_iter());
                 if is_big_delta {

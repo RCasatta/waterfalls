@@ -291,11 +291,10 @@ pub async fn route(
                     // outpoint is of the form txid:vout
                     let outpoint =
                         crate::OutPoint::from_str(outpoint).map_err(|_| Error::InvalidOutpoint)?;
-                    let state = state
-                        .store
-                        .get_utxos(&[outpoint])
-                        .map_err(|e| Error::String(e.to_string()))?;
-                    if state[0].is_some() {
+                    let utxos = state
+                        .store_blocking(move |db| db.get_utxos(&[outpoint]))
+                        .await?;
+                    if utxos[0].is_some() {
                         str_resp("true".to_string(), StatusCode::OK)
                     } else {
                         str_resp("false".to_string(), StatusCode::NOT_FOUND)
@@ -602,10 +601,9 @@ async fn handle_single_address(state: &Arc<State>, address: &be::Address) -> Res
         block_hash: Option<BlockHash>,
     }
 
-    let db = &state.store;
     let script_pubkey = address.script_pubkey();
 
-    let script_hash = [db.hash(script_pubkey.as_bytes())];
+    let script_hash = [state.store.hash(script_pubkey.as_bytes())];
     // The mempool is read before the db, see `find_scripts`.
     let mut seen_mempool = vec![Vec::new()];
     state
@@ -613,7 +611,9 @@ async fn handle_single_address(state: &Arc<State>, address: &be::Address) -> Res
         .lock()
         .await
         .append_seen(&script_hash, &mut seen_mempool);
-    let mut seen_blockchain = db.get_history(&script_hash).unwrap();
+    let mut seen_blockchain = state
+        .store_blocking(move |db| db.get_history(&script_hash))
+        .await?;
     // TODO add pagination for `/address/:address/txs`; for now we only return the first capped page.
     truncate_history_page(&mut seen_blockchain, 0, state.max_txs_seen);
     remove_confirmed_from_mempool(&seen_blockchain, &mut seen_mempool);
@@ -672,7 +672,6 @@ async fn handle_waterfalls_req(
     cbor: bool,
     network: Network,
 ) -> Result<Resp, Error> {
-    let db = &state.store;
     let start = Instant::now();
     let is_descriptor = inputs.descriptor().is_some();
     let page = inputs.page();
@@ -711,7 +710,7 @@ async fn handle_waterfalls_req(
                         derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
                     derivations_duration += batch_derivations_duration;
 
-                    let find_result = find_scripts(state, db, &mut result, scripts, 0, true).await;
+                    let find_result = find_scripts(state, &mut result, scripts, 0, true).await?;
                     let max_used_index = find_result
                         .max_used_offset
                         .map(|offset| batch_start + offset);
@@ -745,7 +744,7 @@ async fn handle_waterfalls_req(
                     expand_subscriptions(state, desc, single_descriptor_id).await;
                 }
                 if utxo_only {
-                    filter_utxo_only(&mut result, db)?;
+                    filter_utxo_only(state, &mut result).await?;
                 }
                 map.insert(desc.to_string(), result);
             }
@@ -762,7 +761,7 @@ async fn handle_waterfalls_req(
             }
             let mut scripts = Vec::with_capacity(addresses.len());
             for addr in addresses.iter() {
-                scripts.push(db.hash(addr.script_pubkey().as_bytes()));
+                scripts.push(state.store.hash(addr.script_pubkey().as_bytes()));
             }
             let mut result = Vec::with_capacity(addresses.len());
             let page = if addresses.len() == 1 {
@@ -772,12 +771,12 @@ async fn handle_waterfalls_req(
             };
             let append_mempool = page == 0;
             let find_result =
-                find_scripts(state, db, &mut result, scripts, page, append_mempool).await;
+                find_scripts(state, &mut result, scripts, page, append_mempool).await?;
             if utxo_only && find_result.has_more.iter().any(|has_more| *has_more) {
                 return Err(Error::UtxoOnlyHistoryTooLarge);
             }
             if utxo_only {
-                filter_utxo_only(&mut result, db)?;
+                filter_utxo_only(state, &mut result).await?;
             }
             for (addr, has_more_for_addr) in addresses.iter().zip(find_result.has_more.iter()) {
                 if *has_more_for_addr {
@@ -889,7 +888,6 @@ async fn handle_last_used_index(
     state: &Arc<State>,
     descriptor: be::Descriptor,
 ) -> Result<Resp, Error> {
-    let db = &state.store;
     let start = Instant::now();
     let id = string_hash(&descriptor.normalized_id_string());
     state.record_descriptor_access(id).await;
@@ -917,7 +915,9 @@ async fn handle_last_used_index(
             // Check which scripts have history (either confirmed or mempool), the mempool is
             // read before the db, see `find_scripts`.
             let seen_mempool = state.mempool.lock().await.has_seen(&scripts);
-            let seen_blockchain = db.has_history(&scripts).unwrap();
+            let seen_blockchain = state
+                .store_blocking(move |db| db.has_history(&scripts))
+                .await?;
 
             // Find the max index with activity in this batch
             let mut batch_has_activity = false;
@@ -969,12 +969,17 @@ async fn handle_last_used_index(
     )
 }
 
-fn filter_utxo_only(result: &mut [Vec<TxSeen>], db: &crate::store::AnyStore) -> Result<(), Error> {
+async fn filter_utxo_only(state: &Arc<State>, result: &mut [Vec<TxSeen>]) -> Result<(), Error> {
     let outpoints = result
         .iter()
         .flat_map(|e| e.iter().filter_map(|f| f.outpoint()))
         .collect::<Vec<_>>();
-    let utxos = db.get_utxos(&outpoints).unwrap();
+    let (outpoints, utxos) = state
+        .store_blocking(move |db| {
+            let utxos = db.get_utxos(&outpoints)?;
+            Ok((outpoints, utxos))
+        })
+        .await?;
     let unspent: HashSet<_> = utxos
         .iter()
         .zip(outpoints.iter())
@@ -1022,7 +1027,7 @@ async fn subscribe_descriptor(
         let max_used_index = match state.descriptor_max_used_index(single_descriptor_id).await {
             Some(max_used_index) => max_used_index,
             None => {
-                let max_used_index = scan_descriptor_max_used_index(state, desc).await;
+                let max_used_index = scan_descriptor_max_used_index(state, desc).await?;
                 state
                     .record_descriptor_scan_max_used_index(single_descriptor_id, max_used_index)
                     .await;
@@ -1080,7 +1085,10 @@ async fn expand_subscriptions(
         .await;
 }
 
-async fn scan_descriptor_max_used_index(state: &Arc<State>, desc: &be::Descriptor) -> Option<u32> {
+async fn scan_descriptor_max_used_index(
+    state: &Arc<State>,
+    desc: &be::Descriptor,
+) -> Result<Option<u32>, Error> {
     let mut max_used_index = None;
 
     for batch in 0..MAX_BATCH {
@@ -1088,7 +1096,7 @@ async fn scan_descriptor_max_used_index(state: &Arc<State>, desc: &be::Descripto
         let (scripts, _) = derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
 
         let mut result = Vec::with_capacity(GAP_LIMIT as usize);
-        let find_result = find_scripts(state, &state.store, &mut result, scripts, 0, true).await;
+        let find_result = find_scripts(state, &mut result, scripts, 0, true).await?;
         if let Some(max_used_offset) = find_result.max_used_offset {
             max_used_index = Some(batch_start + max_used_offset);
         }
@@ -1098,7 +1106,7 @@ async fn scan_descriptor_max_used_index(state: &Arc<State>, desc: &be::Descripto
         }
     }
 
-    max_used_index
+    Ok(max_used_index)
 }
 
 fn sse_resp(
@@ -1249,12 +1257,11 @@ fn subscription_watch_count(max_used_index: Option<u32>) -> Result<u32, Error> {
 
 async fn find_scripts(
     state: &Arc<State>,
-    db: &crate::store::AnyStore,
     result: &mut Vec<Vec<TxSeen>>,
     scripts: Vec<u64>,
     address_history_page: usize,
     append_mempool: bool,
-) -> FindScriptsResult {
+) -> Result<FindScriptsResult, Error> {
     // The mempool is read before the db: the blocks thread removes txs from the mempool after
     // indexing the block confirming them, so a tx missing from this mempool read because it was
     // just confirmed is found in the db read that follows.
@@ -1266,7 +1273,9 @@ async fn find_scripts(
             .await
             .append_seen(&scripts, &mut seen_mempool);
     }
-    let mut seen_blockchain = db.get_history(&scripts).unwrap();
+    let mut seen_blockchain = state
+        .store_blocking(move |db| db.get_history(&scripts))
+        .await?;
     let has_more = truncate_history_page(
         &mut seen_blockchain,
         address_history_page,
@@ -1289,11 +1298,11 @@ async fn find_scripts(
         .max();
     let is_last = seen_blockchain.iter().all(|e| e.is_empty());
     result.extend(seen_blockchain);
-    FindScriptsResult {
+    Ok(FindScriptsResult {
         is_last,
         has_more,
         max_used_offset,
-    }
+    })
 }
 
 /// Removes from `seen_mempool` the txs also in `seen_blockchain` for the same script.
@@ -1363,7 +1372,6 @@ async fn derive_script_hashes_batch(
     start_index: u32,
     count: u32,
 ) -> (Vec<u64>, Duration) {
-    let db = &state.store;
     let desc_str = desc.to_string();
     let is_single_address = !desc.has_wildcard();
 
@@ -1379,7 +1387,7 @@ async fn derive_script_hashes_batch(
                 let (script_pubkey, duration) =
                     calculate_script_pubkey_with_timing(desc, index).unwrap();
                 derivations_duration += duration;
-                let script_hash = db.hash(&script_pubkey);
+                let script_hash = state.store.hash(&script_pubkey);
                 derivation_cache.add(der_ind_hash, script_hash);
                 script_hash
             }

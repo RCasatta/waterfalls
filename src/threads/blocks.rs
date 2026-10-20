@@ -81,7 +81,13 @@ async fn get_next_block_to_index(
                         previous_block_meta
                     );
                     *last_indexed = Some(previous_block_meta);
-                    state.store.reorg(reorged_height);
+                    state
+                        .store_blocking(move |db| {
+                            db.reorg(reorged_height);
+                            Ok(())
+                        })
+                        .await
+                        .unwrap_or_else(|e| error_panic!("reorg failed: {e}"));
                     state
                         .notify_all_subscriptions(SubscriptionEvent::Reorg)
                         .await;
@@ -248,9 +254,17 @@ pub async fn index(
             }
         };
 
-        let (changed_script_hashes, indexed_txs) =
-            index_block_transactions(db, &block_to_index, block.transactions_iter())
-                .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
+        let block_meta = block_to_index.clone();
+        let (changed_script_hashes, indexed_txs, confirmed_txids) = state
+            .store_blocking(move |db| {
+                let (changed_script_hashes, indexed_txs) =
+                    index_block_transactions(db, &block_meta, block.transactions_iter())?;
+                let confirmed_txids: Vec<_> =
+                    block.transactions_iter().map(|tx| tx.txid()).collect();
+                Ok((changed_script_hashes, indexed_txs, confirmed_txids))
+            })
+            .await
+            .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
         txs_count += indexed_txs;
         state.set_hash_ts(&block_to_index).await;
         // Drop the confirmed txs from the mempool view only now that they are in the db, so that
@@ -261,7 +275,6 @@ pub async fn index(
         // is reorged out before its next cycle, a tx returning to the node mempool isn't seen as
         // new and is added back one cycle later. Reorgs already leave such txs missing until the
         // mempool thread adds them back, this only extends that rare gap by a cycle.
-        let confirmed_txids: Vec<_> = block.transactions_iter().map(|tx| tx.txid()).collect();
         state.mempool.lock().await.remove(&confirmed_txids);
         state
             .notify_block_tip_subscriptions(changed_script_hashes)
