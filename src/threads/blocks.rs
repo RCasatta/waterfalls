@@ -255,17 +255,13 @@ pub async fn index(
         };
 
         let block_meta = block_to_index.clone();
-        let (changed_script_hashes, indexed_txs, confirmed_txids) = state
+        let (changed_script_hashes, confirmed_txids) = state
             .store_blocking(move |db| {
-                let (changed_script_hashes, indexed_txs) =
-                    index_block_transactions(db, &block_meta, block.transactions_iter())?;
-                let confirmed_txids: Vec<_> =
-                    block.transactions_iter().map(|tx| tx.txid()).collect();
-                Ok((changed_script_hashes, indexed_txs, confirmed_txids))
+                index_block_transactions(db, &block_meta, block.transactions_iter())
             })
             .await
             .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
-        txs_count += indexed_txs;
+        txs_count += confirmed_txids.len() as u64;
         state.set_hash_ts(&block_to_index).await;
         // Drop the confirmed txs from the mempool view only now that they are in the db, so that
         // readers looking at the mempool before the db always find them in one of the two.
@@ -305,19 +301,21 @@ async fn node_tip_height(client: &Client) -> Option<u32> {
     }
 }
 
+/// Indexes the transactions of a block, returning the script hashes whose history changed and
+/// the txids of the block transactions, in block order.
 fn index_block_transactions<'a>(
     db: &impl Store,
     block_meta: &BlockMeta,
     transactions: impl Iterator<Item = crate::be::TransactionRef<'a>>,
-) -> anyhow::Result<(Vec<crate::ScriptHash>, u64)> {
+) -> anyhow::Result<(Vec<crate::ScriptHash>, Vec<crate::be::Txid>)> {
     let mut history_map = BTreeMap::new();
     let mut utxo_created = BTreeMap::new();
     let mut utxo_spent = vec![];
-    let mut txs_count = 0;
+    let mut txids = vec![];
 
     for tx in transactions {
-        txs_count += 1;
         let txid = tx.txid();
+        txids.push(txid);
         for (vout, output) in tx.outputs_iter().enumerate() {
             if !output.skip_utxo() {
                 // Use an empty-bytes hash as a placeholder: outputs that are spendable
@@ -372,7 +370,7 @@ fn index_block_transactions<'a>(
     }
 
     let changed_script_hashes = db.update(block_meta, utxo_spent, history_map, utxo_created)?;
-    Ok((changed_script_hashes, txs_count))
+    Ok((changed_script_hashes, txids))
 }
 
 #[cfg(test)]
@@ -430,13 +428,13 @@ mod indexing_tests {
                 .unwrap(),
             1_296_688_602,
         );
-        let (_, txs_count) = index_block_transactions(
+        let (_, txids) = index_block_transactions(
             store,
             &genesis_meta,
             genesis_txs.iter().map(TransactionRef::Elements),
         )
         .unwrap();
-        assert_eq!(txs_count, 2);
+        assert_eq!(txids.len(), 2);
 
         let issuance_outpoint = OutPoint::new(genesis_txs[1].txid().into(), 0);
         let nonstandard_script_hash = store.hash(b"");
