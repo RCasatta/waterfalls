@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/metrics` responses no longer carry a `Cache-Control` header: it reused the
   `--cache-control-seconds` value meant for blockchain data, which could let a caching proxy
   serve stale metrics to scrapers.
+- Block indexing no longer computes every transaction id twice: the txids computed while
+  indexing a block are reused to drop its transactions from the mempool view.
 
 ### Deprecated
 
