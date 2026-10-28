@@ -379,7 +379,7 @@ fn block_hash_resp(block_hash: Option<elements::BlockHash>) -> Result<Resp, Erro
     }
 }
 
-fn parse_query(
+pub(crate) fn parse_query(
     query: &str,
     key: &Identity,
     is_testnet_or_regtest: bool,
@@ -454,7 +454,7 @@ fn parse_query(
 }
 
 /// Parse query parameters for the last_used_index endpoint (descriptor only)
-fn parse_descriptor_query(
+pub(crate) fn parse_descriptor_query(
     query: &str,
     key: &Identity,
     is_testnet_or_regtest: bool,

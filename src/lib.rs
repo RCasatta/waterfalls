@@ -34,6 +34,9 @@ pub mod server;
 mod store;
 mod threads;
 
+#[cfg(feature = "fuzz")]
+pub mod fuzz_api;
+
 #[cfg(feature = "test_env")]
 pub mod test_env;
 
