@@ -5,7 +5,7 @@ Waterfalls is a Rust project providing blockchain data to Liquid and Bitcoin lig
 ## Development Environment
 
 Use Nix (defined in `flake.nix`): `nix develop` or `direnv allow`.
-Provides: Rust toolchain (via rust-overlay), RocksDB, OpenSSL, bitcoind, elementsd, libclang, rust-analyzer.
+Provides: Rust toolchain (via rust-overlay), RocksDB, bitcoind, elementsd, libclang, rust-analyzer.
 
 When the nix env is not already active (e.g. sandbox), prefer `direnv exec . <command>`
 (e.g. `direnv exec . cargo check`) over `nix develop --command <command>` — it uses the
