@@ -14,7 +14,9 @@ pub fn encrypt(plaintext: &str, recipient: Recipient) -> Result<String, Error> {
     let mut writer = encryptor
         .wrap_output(&mut encrypted)
         .map_err(|_| Error::CannotEncrypt)?;
-    writer.write_all(plaintext.as_ref()).unwrap();
+    writer
+        .write_all(plaintext.as_ref())
+        .map_err(|_| Error::CannotEncrypt)?;
     writer.finish().map_err(|_| Error::CannotEncrypt)?;
     let result = BASE64_STANDARD_NO_PAD.encode(encrypted);
     Ok(result)
@@ -30,7 +32,9 @@ pub fn decrypt(base64_encrypted: &str, key: &Identity) -> Result<String, Error> 
     let mut reader = decryptor
         .decrypt(std::iter::once(key as &dyn age::Identity))
         .map_err(|_| Error::CannotDecrypt)?;
-    reader.read_to_end(&mut decrypted).unwrap();
+    reader
+        .read_to_end(&mut decrypted)
+        .map_err(|_| Error::CannotDecrypt)?;
 
     let result = std::str::from_utf8(&decrypted)
         .map_err(|_| Error::CannotDecrypt)?
@@ -58,6 +62,23 @@ mod test {
 
         assert_eq!(decrypted, plaintext);
         assert_ne!(encrypted, plaintext);
+    }
+
+    #[test]
+    fn corrupted_payload_fails() {
+        use base64::prelude::BASE64_STANDARD_NO_PAD;
+        use base64::Engine;
+
+        let identity = Identity::generate();
+        let encrypted = encrypt("Hello world!", identity.to_public()).unwrap();
+
+        // The header stays valid, only the last byte of the payload's tag changes.
+        let mut bytes = BASE64_STANDARD_NO_PAD.decode(encrypted).unwrap();
+        *bytes.last_mut().unwrap() ^= 1;
+        let corrupted = BASE64_STANDARD_NO_PAD.encode(bytes);
+
+        let result = decrypt(&corrupted, &identity);
+        assert!(matches!(result, Err(Error::CannotDecrypt)));
     }
 
     #[test]

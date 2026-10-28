@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An age-encrypted descriptor whose header is valid but whose payload is corrupted now returns
+  HTTP 422 instead of panicking the connection task.
 - Script derivation no longer holds the shared derivation cache lock, so a request deriving
   many scripts does not block the other requests needing the cache.
 - Descriptors longer than 8192 bytes, or expanding to more than eight paths (e.g.
