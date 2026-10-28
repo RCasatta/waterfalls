@@ -10,6 +10,10 @@ pub(crate) const MAX_DESCRIPTOR_LENGTH: usize = 8192;
 /// Normal wallets use one path, or two with `<0;1>`. Allow a few more while bounding scans.
 pub(crate) const MAX_SINGLE_DESCRIPTORS: usize = 8;
 
+/// Same as miniscript's `MAX_RECURSION_DEPTH`, which elements-miniscript applies to parentheses
+/// only: a long chain of wrappers like `elnnnn…:1` recurses once per letter while parsing.
+const MAX_DESCRIPTOR_DEPTH: usize = 402;
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Descriptor {
     Bitcoin(miniscript::descriptor::Descriptor<miniscript::DescriptorPublicKey>),
@@ -20,6 +24,12 @@ impl Descriptor {
     pub fn from_str(s: &str, network: Network) -> Result<Self, Error> {
         if s.len() > MAX_DESCRIPTOR_LENGTH {
             let message = format!("descriptor longer than {MAX_DESCRIPTOR_LENGTH} bytes");
+            log::error!("{message}");
+            return Err(Error::InvalidDescriptor(message));
+        }
+        // Parsing recurses on nesting, refuse deep descriptors before they overflow the stack.
+        if nesting_depth(s) > MAX_DESCRIPTOR_DEPTH {
+            let message = format!("descriptor nested deeper than {MAX_DESCRIPTOR_DEPTH} levels");
             log::error!("{message}");
             return Err(Error::InvalidDescriptor(message));
         }
@@ -367,6 +377,45 @@ fn elements_descriptor(s: &str) -> Result<Descriptor, Error> {
     Ok(Descriptor::Elements(desc))
 }
 
+/// Upper bound of the parser recursion for `s`: every open `(` or `{` and every wrapper letter
+/// before a `:` (as in `v:pk(K)`) adds a level.
+fn nesting_depth(s: &str) -> usize {
+    // Levels added by each open parenthesis or brace, including the wrappers it is applied to.
+    let mut open = Vec::new();
+    let mut depth = 0;
+    let mut wrappers = 0;
+    let mut letters = 0;
+    let mut max = 0;
+    for c in s.chars() {
+        match c {
+            '(' | '{' => {
+                let levels = wrappers + 1;
+                depth += levels;
+                open.push(levels);
+                wrappers = 0;
+                letters = 0;
+            }
+            ')' | '}' => {
+                depth -= open.pop().unwrap_or(0);
+                wrappers = 0;
+                letters = 0;
+            }
+            ':' => {
+                wrappers += letters;
+                letters = 0;
+            }
+            ',' => {
+                wrappers = 0;
+                letters = 0;
+            }
+            c if c.is_ascii_alphabetic() => letters += 1,
+            _ => letters = 0,
+        }
+        max = max.max(depth + wrappers);
+    }
+    max
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -549,6 +598,56 @@ mod tests {
                 matches!(result, Err(Error::InvalidDescriptor(ref m)) if !m.contains("longer")),
                 "{result:?}"
             );
+        }
+    }
+
+    #[test]
+    fn nesting_depth_counts_parentheses_and_wrappers() {
+        assert_eq!(nesting_depth("wpkh(K)"), 1);
+        assert_eq!(nesting_depth("wsh(v:and_v(v:pk(K),1))"), 5);
+        assert_eq!(nesting_depth("tr(K,{pk(A),{pk(B),pk(C)}})"), 4);
+        // The `el` prefix is counted too, an overestimate of two levels at most.
+        assert_eq!(nesting_depth("elvuuuun:1"), 8);
+        assert_eq!(nesting_depth("wpkh([d34db33f/44'/0'/0']K/<0;1>/*)"), 1);
+        // Unbalanced input does not underflow.
+        assert_eq!(nesting_depth("))(("), 2);
+    }
+
+    #[test]
+    fn descriptor_depth_bounded() {
+        let xpub = "tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M";
+        let n = MAX_DESCRIPTOR_LENGTH - 10;
+        let and_v = n / "and_v(v:1,)".len();
+        for (prefix, network) in [
+            ("", Network::BitcoinTestnet),
+            ("el", Network::LiquidTestnet),
+        ] {
+            let normal = format!("{prefix}wsh(and_v(v:pk({xpub}/0/*),older(144)))");
+            assert!(Descriptor::from_str(&normal, network).is_ok());
+
+            let deep = [
+                // Found by the descriptor fuzz target: overflowed a 2 MiB stack in debug builds.
+                format!("{prefix}{}:1", "n".repeat(n)),
+                format!("{prefix}wsh({}:1)", "l".repeat(n)),
+                format!(
+                    "{prefix}wsh({}1{})",
+                    "and_v(v:1,".repeat(and_v),
+                    ")".repeat(and_v)
+                ),
+            ];
+            for desc in deep {
+                // The stack of a tokio worker thread.
+                let result = std::thread::Builder::new()
+                    .stack_size(2 << 20)
+                    .spawn(move || Descriptor::from_str(&desc, network))
+                    .unwrap()
+                    .join()
+                    .unwrap();
+                assert!(
+                    matches!(result, Err(Error::InvalidDescriptor(ref m)) if m.contains("nested")),
+                    "{result:?}"
+                );
+            }
         }
     }
 
