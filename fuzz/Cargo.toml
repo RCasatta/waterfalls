@@ -1,0 +1,46 @@
+[package]
+name = "waterfalls-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+age = "0.11.0"
+base64 = "0.21"
+waterfalls = { path = "..", default-features = false, features = ["fuzz"] }
+
+# Keep the fuzz crate out of the main workspace, it's built with a nightly toolchain
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "descriptor"
+path = "fuzz_targets/descriptor.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_query"
+path = "fuzz_targets/parse_query.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decrypt"
+path = "fuzz_targets/decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parsers"
+path = "fuzz_targets/parsers.rs"
+test = false
+doc = false
+bench = false

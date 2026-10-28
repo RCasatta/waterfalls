@@ -23,6 +23,10 @@
           };
           inherit (pkgs) lib;
           rustToolchain = pkgs.pkgsBuildHost.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+          # cargo-fuzz needs nightly for the sanitizers, the version is pinned by flake.lock
+          fuzzToolchain = pkgs.pkgsBuildHost.rust-bin.selectLatestNightlyWith (toolchain: toolchain.minimal.override {
+            extensions = [ "rust-src" ];
+          });
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
           src = lib.cleanSourceWith {
@@ -114,6 +118,10 @@
             BITCOIND_EXEC = "${pkgs.bitcoind}/bin/bitcoind";
 
             buildInputs = with pkgs; [ cargo-audit heaptrack rocksdb.tools ];
+          };
+          # `nix develop .#fuzz`, then `cd fuzz && cargo fuzz run <target>`
+          devShells.fuzz = mkShell {
+            packages = [ fuzzToolchain pkgs.cargo-fuzz pkgs.pkg-config ];
           };
         }
       );
