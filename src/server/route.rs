@@ -558,10 +558,9 @@ fn full_body(bytes: Vec<u8>) -> RespBody {
 }
 
 fn error_resp(status: StatusCode, error: &Error) -> Resp {
-    Response::builder()
-        .status(status)
-        .body(full_body(error.to_string().into_bytes()))
-        .unwrap()
+    let mut response = Response::new(full_body(error.to_string().into_bytes()));
+    *response.status_mut() = status;
+    response
 }
 
 fn error_status(error: &Error) -> StatusCode {
@@ -651,7 +650,7 @@ async fn handle_single_address(state: &Arc<State>, address: &be::Address) -> Res
     }
 
     any_resp(
-        serde_json::to_vec(&result).unwrap(),
+        serde_json::to_vec(&result).expect("does not contain a map with non-string keys"),
         hyper::StatusCode::OK,
         Some("application/json"),
         Some(state.cache_control_seconds),
@@ -840,7 +839,7 @@ async fn handle_waterfalls_req(
     };
     let result = if cbor {
         let mut bytes = Vec::new();
-        minicbor::encode(&waterfall_response, &mut bytes).unwrap();
+        minicbor::encode(&waterfall_response, &mut bytes).expect("writing to a Vec cannot fail");
         bytes
     } else {
         serde_json::to_vec(&waterfall_response)
@@ -1428,14 +1427,17 @@ pub async fn infallible_route(
     // Add CORS headers if enabled
     if add_cors {
         let headers = response.headers_mut();
-        headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            header::HeaderValue::from_static("*"),
+        );
         headers.insert(
             header::ACCESS_CONTROL_ALLOW_METHODS,
-            "GET, HEAD, POST, OPTIONS".parse().unwrap(),
+            header::HeaderValue::from_static("GET, HEAD, POST, OPTIONS"),
         );
         headers.insert(
             header::ACCESS_CONTROL_ALLOW_HEADERS,
-            "Content-Type".parse().unwrap(),
+            header::HeaderValue::from_static("Content-Type"),
         );
     }
 

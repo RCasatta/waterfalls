@@ -1,5 +1,7 @@
 //! Inside this module everything is needed to run the service providing the waterfalls protocol
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
@@ -581,7 +583,7 @@ pub async fn inner_main(
 
     {
         let state = state.clone();
-        headers(state).await.unwrap();
+        headers(state).await?;
     }
 
     // Create oneshot channel to signal when initial block download is complete
@@ -771,14 +773,14 @@ pub async fn inner_main(
         }
     }
 
-    h1.await.unwrap();
-    h2.await.unwrap();
+    h1.await?;
+    h2.await?;
     if let Some(h3) = h3 {
-        h3.await.unwrap();
+        h3.await?;
     }
-    h4.await.unwrap();
+    h4.await?;
     if let Some(h5) = h5 {
-        h5.await.unwrap();
+        h5.await?;
     }
 
     log::info!("shutting down gracefully");

@@ -15,10 +15,10 @@ pub struct Txid(sha256d::Hash);
 
 impl std::hash::Hash for Txid {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let hash_bytes: &[u8] = self.0.as_ref();
+        let (first_half, second_half) = self.0.as_byte_array().split_at(16);
 
-        let first_half = u128::from_be_bytes(hash_bytes[0..16].try_into().unwrap());
-        let second_half = u128::from_be_bytes(hash_bytes[16..32].try_into().unwrap());
+        let first_half = u128::from_be_bytes(first_half.try_into().expect("16 of 32 bytes"));
+        let second_half = u128::from_be_bytes(second_half.try_into().expect("16 of 32 bytes"));
 
         let combined = first_half ^ second_half;
         state.write_u128(combined);
@@ -52,7 +52,7 @@ impl Txid {
     }
 
     pub fn all_zeros() -> Self {
-        Self(sha256d::Hash::from_slice(&[0u8; 32]).unwrap())
+        Self(sha256d::Hash::from_byte_array([0u8; 32]))
     }
 }
 
