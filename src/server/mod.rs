@@ -66,6 +66,7 @@ pub struct Arguments {
     pub network: Network,
 
     /// Address of the rest-enabled node used to fetch data, a default url according to the used network is used if not provided.
+    /// Must start with `http://`: waterfalls talks plain HTTP to the node and has no TLS support.
     #[arg(env, long)]
     pub node_url: Option<String>,
 
@@ -247,6 +248,14 @@ impl Arguments {
             Err(Error::String(
                 "You must specify --rpc-user-password-file".to_string(),
             ))
+        } else if self
+            .node_url
+            .as_deref()
+            .is_some_and(|url| !url.starts_with("http://"))
+        {
+            Err(Error::String(
+                "--node-url must use the http:// scheme: waterfalls talks plain HTTP to the node and has no TLS support".to_string(),
+            ))
         } else if self.max_txs_seen == Some(0) {
             Err(Error::String(
                 "Max txs seen must be greater than 0".to_string(),
@@ -287,6 +296,32 @@ mod argument_tests {
             Arguments::try_parse_from(["waterfalls", "--network", "liquid", "--server-timing"])
                 .unwrap();
         assert!(args.server_timing);
+    }
+
+    #[test]
+    fn node_url_must_be_plain_http() {
+        let base = Arguments {
+            rpc_user_password: Some("user:pass".to_string()),
+            request_timeout_seconds: 1,
+            ..Default::default()
+        };
+        for (url, ok) in [
+            ("http://127.0.0.1:7041", true),
+            ("https://node.example:7041", false),
+            ("127.0.0.1:7041", false),
+        ] {
+            let args = Arguments {
+                node_url: Some(url.to_string()),
+                ..base.clone()
+            };
+            match args.is_valid() {
+                Ok(()) => assert!(ok, "{url} should be rejected"),
+                Err(e) => {
+                    assert!(!ok, "{url} should be accepted, got {e}");
+                    assert!(e.to_string().contains("no TLS support"), "{url}: {e}");
+                }
+            }
+        }
     }
 
     #[test]

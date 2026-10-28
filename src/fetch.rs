@@ -908,7 +908,7 @@ mod test {
 
     #[tokio::test]
     async fn backend_validation_rejects_invalid_node_url() {
-        let client = node_client_url("not a url".to_string(), false);
+        let client = node_client_url("http://not a url".to_string(), false);
 
         let err = client.validate_backend(Network::Bitcoin).await.unwrap_err();
 

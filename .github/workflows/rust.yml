@@ -50,6 +50,28 @@ jobs:
       run: cargo check --no-default-features
     - name: Check no default features with test_env
       run: cargo check --no-default-features --features test_env
+    - name: Reject TLS crates in normal and build dependencies
+      # The binary talks plain HTTP to the node. Dev-dependencies (lwk, for the
+      # internet tests) still pull rustls, so only normal/build edges are checked.
+      # `cargo tree -i` errors out when the crate is not in Cargo.lock at all:
+      # that means "not present"; any other error fails the step.
+      run: |
+        status=0
+        for crate in rustls openssl openssl-sys native-tls; do
+          if tree=$(cargo tree --locked -e normal,build --all-features --target all -i "$crate" 2>/tmp/cargo-tree.err); then
+            if [ -n "$tree" ]; then
+              echo "::error::$crate is in the normal/build dependency tree"
+              echo "$tree"
+              status=1
+            fi
+          elif grep -q "did not match any packages" /tmp/cargo-tree.err; then
+            :
+          else
+            cat /tmp/cargo-tree.err
+            status=1
+          fi
+        done
+        exit $status
 
   audit:
     runs-on: ubuntu-latest

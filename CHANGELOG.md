@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Startup now fails with a clear error when `--node-url` (`NODE_URL`) does not start with `http://`.
+  Waterfalls talks plain HTTP to the node and has no TLS support: an `https://` URL used to
+  fail the backend preflight and be retried forever instead of being reported.
 - `/metrics` responses no longer carry a `Cache-Control` header: it reused the
   `--cache-control-seconds` value meant for blockchain data, which could let a caching proxy
   serve stale metrics to scrapers.
