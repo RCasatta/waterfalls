@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Script derivation no longer holds the shared derivation cache lock, so a request deriving
+  many scripts does not block the other requests needing the cache.
 - Descriptors longer than 8192 bytes, or expanding to more than eight paths (e.g.
   `<0;1;2;3;4;5;6;7;8>`), are rejected with HTTP 400 before any scan, bounding the work a
   single request can cause.

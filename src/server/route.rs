@@ -1381,16 +1381,21 @@ async fn derive_script_hashes_batch(
     let mut scripts = Vec::with_capacity(count as usize);
     let mut derivations_duration = Duration::from_secs(0);
 
-    let mut derivation_cache = state.derivation_cache.lock().await;
     for index in start_index..start_index + count {
         let der_ind_hash = DerivationCache::hash(&desc_str, index);
-        let script_hash = match derivation_cache.get(der_ind_hash) {
+        // The lock is released while deriving, so one large request does not block the others.
+        let cached = state.derivation_cache.lock().await.get(der_ind_hash);
+        let script_hash = match cached {
             Some(script_hash) => script_hash,
             None => {
                 let (script_pubkey, duration) = calculate_script_pubkey_with_timing(desc, index)?;
                 derivations_duration += duration;
                 let script_hash = state.store.hash(&script_pubkey);
-                derivation_cache.add(der_ind_hash, script_hash);
+                state
+                    .derivation_cache
+                    .lock()
+                    .await
+                    .add(der_ind_hash, script_hash);
                 script_hash
             }
         };
