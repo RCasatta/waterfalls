@@ -299,6 +299,32 @@ mod argument_tests {
     }
 
     #[test]
+    fn node_url_must_be_plain_http() {
+        let base = Arguments {
+            rpc_user_password: Some("user:pass".to_string()),
+            request_timeout_seconds: 1,
+            ..Default::default()
+        };
+        for (url, ok) in [
+            ("http://127.0.0.1:7041", true),
+            ("https://node.example:7041", false),
+            ("127.0.0.1:7041", false),
+        ] {
+            let args = Arguments {
+                node_url: Some(url.to_string()),
+                ..base.clone()
+            };
+            match args.is_valid() {
+                Ok(()) => assert!(ok, "{url} should be rejected"),
+                Err(e) => {
+                    assert!(!ok, "{url} should be accepted, got {e}");
+                    assert!(e.to_string().contains("no TLS support"), "{url}: {e}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn deprecated_rpc_user_password_keeps_node_mode_valid() {
         let args = Arguments {
             rpc_user_password: Some("user:pass".to_string()),
