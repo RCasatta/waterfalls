@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Descriptor expansion and script derivation errors in HTTP handlers now return an error
+  response instead of panicking the connection task.
 - Store (RocksDB) reads and writes no longer run directly on the async runtime: HTTP handlers,
   the mempool sync and the block indexing loop now offload them to tokio's blocking thread
   pool. A slow disk read stalled every other task on the same worker, and could hang the

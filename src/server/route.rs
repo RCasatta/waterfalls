@@ -700,14 +700,14 @@ async fn handle_waterfalls_req(
                 log::info!("{id:x}: page={page}, to_index={to_index}, utxo_only={utxo_only}");
             }
             utxo_only_req = utxo_only;
-            for desc in descriptor.into_single_descriptors().unwrap().iter() {
+            for desc in descriptor.into_single_descriptors()?.iter() {
                 let single_descriptor_id = string_hash(&desc.normalized_id_string());
                 let is_single_address = !desc.has_wildcard();
                 let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
                 for batch in 0..MAX_BATCH {
                     let batch_start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
                     let (scripts, batch_derivations_duration) =
-                        derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
+                        derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await?;
                     derivations_duration += batch_derivations_duration;
 
                     let find_result = find_scripts(state, &mut result, scripts, 0, true).await?;
@@ -741,7 +741,7 @@ async fn handle_waterfalls_req(
                     }
                 }
                 if !is_single_address {
-                    expand_subscriptions(state, desc, single_descriptor_id).await;
+                    expand_subscriptions(state, desc, single_descriptor_id).await?;
                 }
                 if utxo_only {
                     filter_utxo_only(state, &mut result).await?;
@@ -899,7 +899,7 @@ async fn handle_last_used_index(
     let mut external_last_used: Option<u32> = None;
     let mut internal_last_used: Option<u32> = None;
 
-    for desc in descriptor.into_single_descriptors().unwrap().iter() {
+    for desc in descriptor.into_single_descriptors()?.iter() {
         // Determine if this is external (0/*) or internal (1/*) chain
         let is_internal = desc.to_string().contains("/1/*");
 
@@ -910,7 +910,7 @@ async fn handle_last_used_index(
         for batch in 0..MAX_BATCH {
             let batch_start = batch * GAP_LIMIT;
             let (scripts, _) =
-                derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
+                derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await?;
 
             // Check which scripts have history (either confirmed or mempool), the mempool is
             // read before the db, see `find_scripts`.
@@ -1021,7 +1021,7 @@ async fn subscribe_descriptor(
 ) -> Result<(SubscriptionId, SubscriptionReceiver), Error> {
     let mut scripts = Vec::new();
     let mut descriptors = HashMap::new();
-    let single_descriptors = descriptor.into_single_descriptors().unwrap();
+    let single_descriptors = descriptor.into_single_descriptors()?;
     for desc in single_descriptors.iter() {
         let single_descriptor_id = string_hash(&desc.normalized_id_string());
         let max_used_index = match state.descriptor_max_used_index(single_descriptor_id).await {
@@ -1037,7 +1037,7 @@ async fn subscribe_descriptor(
         let watch_count = subscription_watch_count(max_used_index)?;
         scripts.extend(
             derive_script_hashes_batch(state, desc, 0, watch_count)
-                .await
+                .await?
                 .0,
         );
         if desc.has_wildcard() {
@@ -1054,7 +1054,7 @@ async fn subscribe_descriptor(
     // the subscription was registered, in which case the scan's expansion missed this subscription.
     // Scans record the index before expanding, so re-checking after registering closes the gap.
     for desc in single_descriptors.iter().filter(|desc| desc.has_wildcard()) {
-        expand_subscriptions(state, desc, string_hash(&desc.normalized_id_string())).await;
+        expand_subscriptions(state, desc, string_hash(&desc.normalized_id_string())).await?;
     }
 
     Ok(subscription)
@@ -1066,23 +1066,24 @@ async fn expand_subscriptions(
     state: &Arc<State>,
     desc: &be::Descriptor,
     single_descriptor_id: u64,
-) {
+) -> Result<(), Error> {
     let Some(max_used_index) = state.descriptor_max_used_index(single_descriptor_id).await else {
-        return;
+        return Ok(());
     };
     let Ok(watch_count) = subscription_watch_count(max_used_index) else {
-        return;
+        return Ok(());
     };
     let Some((start, end)) = state
         .subscription_expansion_range(single_descriptor_id, watch_count)
         .await
     else {
-        return;
+        return Ok(());
     };
-    let (scripts, _) = derive_script_hashes_batch(state, desc, start, end - start).await;
+    let (scripts, _) = derive_script_hashes_batch(state, desc, start, end - start).await?;
     state
         .expand_subscriptions(single_descriptor_id, start, &scripts)
         .await;
+    Ok(())
 }
 
 async fn scan_descriptor_max_used_index(
@@ -1093,7 +1094,7 @@ async fn scan_descriptor_max_used_index(
 
     for batch in 0..MAX_BATCH {
         let batch_start = batch * GAP_LIMIT;
-        let (scripts, _) = derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await;
+        let (scripts, _) = derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await?;
 
         let mut result = Vec::with_capacity(GAP_LIMIT as usize);
         let find_result = find_scripts(state, &mut result, scripts, 0, true).await?;
@@ -1356,7 +1357,9 @@ fn calculate_script_pubkey_with_timing(
     index: u32,
 ) -> Result<(Vec<u8>, std::time::Duration), Error> {
     let start = Instant::now();
-    let script_pubkey = desc.script_pubkey_at_derivation_index(index)?;
+    let script_pubkey = desc
+        .script_pubkey_at_derivation_index(index)
+        .inspect_err(|e| log::error!("script derivation failed: {e}"))?;
     let duration = start.elapsed();
     Ok((script_pubkey, duration))
 }
@@ -1371,7 +1374,7 @@ async fn derive_script_hashes_batch(
     desc: &be::Descriptor,
     start_index: u32,
     count: u32,
-) -> (Vec<u64>, Duration) {
+) -> Result<(Vec<u64>, Duration), Error> {
     let desc_str = desc.to_string();
     let is_single_address = !desc.has_wildcard();
 
@@ -1384,8 +1387,7 @@ async fn derive_script_hashes_batch(
         let script_hash = match derivation_cache.get(der_ind_hash) {
             Some(script_hash) => script_hash,
             None => {
-                let (script_pubkey, duration) =
-                    calculate_script_pubkey_with_timing(desc, index).unwrap();
+                let (script_pubkey, duration) = calculate_script_pubkey_with_timing(desc, index)?;
                 derivations_duration += duration;
                 let script_hash = state.store.hash(&script_pubkey);
                 derivation_cache.add(der_ind_hash, script_hash);
@@ -1399,7 +1401,7 @@ async fn derive_script_hashes_batch(
         }
     }
 
-    (scripts, derivations_duration)
+    Ok((scripts, derivations_duration))
 }
 
 /// This function is used to wrap the route function so that it never returns an error but always a response
