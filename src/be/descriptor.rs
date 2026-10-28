@@ -43,10 +43,10 @@ impl Descriptor {
             Network::BitcoinRegtest => bitcoin_descriptor(s)?,
             Network::BitcoinSignet => bitcoin_descriptor(s)?,
         };
-        // Deriving a hardened wildcard needs private keys, and elements-miniscript panics
+        // Deriving a hardened step or wildcard needs private keys, and miniscript panics
         // instead of returning an error, so refuse it before it reaches derivation.
-        if descriptor.has_hardened_wildcard() {
-            let message = "hardened wildcards are not supported";
+        if descriptor.has_hardened_derivation() {
+            let message = "hardened derivation steps and wildcards are not supported";
             log::error!("{message}");
             return Err(Error::InvalidDescriptor(message.to_string()));
         }
@@ -133,23 +133,31 @@ impl Descriptor {
         }
     }
 
-    fn has_hardened_wildcard(&self) -> bool {
+    /// True if a key derives a hardened step or wildcard after the xpub. Hardened steps in
+    /// the key origin (`[fingerprint/84'/1'/0']`) are only metadata and are not derived.
+    fn has_hardened_derivation(&self) -> bool {
+        use miniscript::bitcoin::bip32::DerivationPath;
+        let hardened = |path: &DerivationPath| path.into_iter().any(|c| c.is_hardened());
         match self {
             Descriptor::Bitcoin(desc) => !desc.for_each_key(|k| match k {
                 miniscript::DescriptorPublicKey::XPub(x) => {
                     x.wildcard != miniscript::descriptor::Wildcard::Hardened
+                        && !hardened(&x.derivation_path)
                 }
                 miniscript::DescriptorPublicKey::MultiXPub(x) => {
                     x.wildcard != miniscript::descriptor::Wildcard::Hardened
+                        && !x.derivation_paths.paths().iter().any(hardened)
                 }
                 miniscript::DescriptorPublicKey::Single(_) => true,
             }),
             Descriptor::Elements(desc) => !desc.for_each_key(|k| match k {
                 elements_miniscript::DescriptorPublicKey::XPub(x) => {
                     x.wildcard != elements_miniscript::descriptor::Wildcard::Hardened
+                        && !hardened(&x.derivation_path)
                 }
                 elements_miniscript::DescriptorPublicKey::MultiXPub(x) => {
                     x.wildcard != elements_miniscript::descriptor::Wildcard::Hardened
+                        && !x.derivation_paths.paths().iter().any(hardened)
                 }
                 elements_miniscript::DescriptorPublicKey::Single(_) => true,
             }),
@@ -546,6 +554,38 @@ mod tests {
                     "{multi}: {result:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn hardened_step_rejected() {
+        let xpub = "tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M";
+        for (prefix, network) in [
+            ("", Network::BitcoinTestnet),
+            ("el", Network::LiquidTestnet),
+        ] {
+            // Hardened steps in the key origin are not derived.
+            let origin = format!("{prefix}wpkh([73c5da0a/84'/1'/0']{xpub}/<0;1>/*)");
+            let desc = Descriptor::from_str(&origin, network).unwrap();
+            for single in desc.into_single_descriptors().unwrap() {
+                single.script_pubkey_at_derivation_index(3).unwrap();
+            }
+
+            // Found by the descriptor fuzz target: these panicked when deriving the script.
+            for path in ["0'/1", "0h/*", "1/<0';1'>/*", "<0;1>/2'/*"] {
+                let hardened = format!("{prefix}wpkh({xpub}/{path})");
+                let result = Descriptor::from_str(&hardened, network);
+                assert!(
+                    matches!(result, Err(Error::InvalidDescriptor(ref m)) if m.contains("hardened")),
+                    "{hardened}: {result:?}"
+                );
+            }
+            let tr = format!("{prefix}tr({xpub}/49'/43)");
+            let result = Descriptor::from_str(&tr, network);
+            assert!(
+                matches!(result, Err(Error::InvalidDescriptor(ref m)) if m.contains("hardened")),
+                "{tr}: {result:?}"
+            );
         }
     }
 

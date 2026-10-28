@@ -43,8 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Descriptors nested deeper than 402 levels, counting parentheses and miniscript wrappers
   (e.g. `elnnnn…:1`), are rejected with HTTP 400 before parsing. elements-miniscript recursed
   once per wrapper letter while parsing, which could overflow the stack.
-- Descriptors with a hardened wildcard (`/*h` or `/*'`) are rejected with HTTP 400. They
-  cannot be derived from public keys, and deriving one panicked the request task.
+- Descriptors with a hardened wildcard (`/*h` or `/*'`) or a hardened step after the xpub
+  (e.g. `xpub/0'/*`) are rejected with HTTP 400. They cannot be derived from public keys, and
+  deriving one panicked the request task. Hardened steps in the key origin are still accepted.
 - Descriptor expansion and script derivation errors in HTTP handlers now return an error
   response instead of panicking the connection task.
 - Store (RocksDB) reads and writes no longer run directly on the async runtime: HTTP handlers,
