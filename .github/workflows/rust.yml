@@ -50,6 +50,8 @@ jobs:
       run: cargo check --no-default-features
     - name: Check no default features with test_env
       run: cargo check --no-default-features --features test_env
+    - name: Clippy
+      run: cargo clippy --all-targets -- -D warnings
     - name: Reject TLS crates in normal and build dependencies
       # The binary talks plain HTTP to the node. Dev-dependencies (lwk, for the
       # internet tests) still pull rustls, so only normal/build edges are checked.

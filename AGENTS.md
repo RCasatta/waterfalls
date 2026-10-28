@@ -57,7 +57,7 @@ export RUST_LOG=debug                    # Optional: enable debug logging
 ```bash
 cargo fmt                                # Format code (default rustfmt settings)
 cargo clippy                             # Lint
-cargo clippy -- -D warnings              # Lint, fail on warnings (CI enforced)
+cargo clippy --all-targets -- -D warnings # Lint, fail on warnings (CI enforced)
 ```
 
 No `rustfmt.toml` or `clippy.toml` — default settings are used.
@@ -149,7 +149,8 @@ benches/benches.rs      # Criterion benchmarks
 Runs on push/PR to `master`:
 
 - **tests**: downloads bitcoind 28.0 & elementsd 23.2.4, runs `cargo test` and `cargo test -- --ignored`
-- **checks**: `cargo check` with various feature combinations
+- **checks**: `cargo check` with various feature combinations, and `cargo clippy --all-targets -- -D warnings`.
+  `be/` and `server/` deny `clippy::unwrap_used` and `clippy::indexing_slicing` outside tests
 - **nix**: `nix build .` with cachix
 
 ### Docker publish (`.github/workflows/docker-publish.yml`)
