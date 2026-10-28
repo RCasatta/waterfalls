@@ -43,6 +43,7 @@ cargo bench --features bench_test        # Run benchmarks (criterion)
 - `synced_node` — tests requiring a locally running synced node
 - `bench_test` — long-running benchmark tests
 - `examine_logs` — log inspection tests
+- `fuzz` — exposes internal parsers in `waterfalls::fuzz_api` to the fuzz targets
 
 ### Required Environment Variables for Tests
 
@@ -51,6 +52,26 @@ export BITCOIND_EXEC=/path/to/bitcoind   # Provided by nix develop
 export ELEMENTSD_EXEC=/path/to/elementsd # Provided by nix develop
 export RUST_LOG=debug                    # Optional: enable debug logging
 ```
+
+### Fuzzing
+
+`fuzz/` is a separate cargo-fuzz crate (own workspace and `Cargo.lock`, seeded from the root one
+so the fuzzers use the same dependency versions). It needs nightly, provided by the `fuzz` dev shell:
+
+```bash
+nix develop .#fuzz
+cd fuzz
+cargo fuzz list                                           # descriptor, parse_query, decrypt, parsers
+cargo fuzz run -O -s none descriptor corpus/descriptor seeds/descriptor -- -max_total_time=300 -timeout=5
+```
+
+Use `-s none`: the code under test is safe Rust, and AddressSanitizer inflates stack frames enough
+to report stack overflows (e.g. deeply nested miniscript wrappers) that a release build on a 2 MiB
+tokio worker stack does not hit.
+
+Seeds in `fuzz/seeds/<target>/` are committed. `corpus/` (grown by libFuzzer) and `artifacts/`
+(crashing inputs) are ignored. Each target documents its input layout at the top of the file.
+When adding a target, assert the bounds the server relies on, not only absence of panics.
 
 ## Formatting & Linting
 
@@ -140,6 +161,7 @@ src/
 build.rs                # Injects GIT_COMMIT_HASH at build time
 tests/integration.rs    # Integration tests
 benches/benches.rs      # Criterion benchmarks
+fuzz/                   # cargo-fuzz targets on request parsing (separate crate, nightly)
 ```
 
 ## CI
