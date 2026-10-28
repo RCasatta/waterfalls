@@ -66,6 +66,7 @@ pub struct Arguments {
     pub network: Network,
 
     /// Address of the rest-enabled node used to fetch data, a default url according to the used network is used if not provided.
+    /// Must start with `http://`: waterfalls talks plain HTTP to the node and has no TLS support.
     #[arg(env, long)]
     pub node_url: Option<String>,
 
@@ -246,6 +247,14 @@ impl Arguments {
         if self.rpc_user_password_file.is_none() && self.rpc_user_password.is_none() {
             Err(Error::String(
                 "You must specify --rpc-user-password-file".to_string(),
+            ))
+        } else if self
+            .node_url
+            .as_deref()
+            .is_some_and(|url| !url.starts_with("http://"))
+        {
+            Err(Error::String(
+                "--node-url must use the http:// scheme: waterfalls talks plain HTTP to the node and has no TLS support".to_string(),
             ))
         } else if self.max_txs_seen == Some(0) {
             Err(Error::String(
