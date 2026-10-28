@@ -4,6 +4,12 @@ use crate::server::{Error, Network};
 use elements_miniscript::TranslatePk as ElementsTranslatePk;
 use miniscript::{ForEachKey, TranslatePk as BitcoinTranslatePk};
 
+/// Allows large multisig descriptors with many xpubs and key origins, while bounding parsing work.
+pub(crate) const MAX_DESCRIPTOR_LENGTH: usize = 8192;
+
+/// Normal wallets use one path, or two with `<0;1>`. Allow a few more while bounding scans.
+pub(crate) const MAX_SINGLE_DESCRIPTORS: usize = 8;
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Descriptor {
     Bitcoin(miniscript::descriptor::Descriptor<miniscript::DescriptorPublicKey>),
@@ -12,6 +18,11 @@ pub enum Descriptor {
 
 impl Descriptor {
     pub fn from_str(s: &str, network: Network) -> Result<Self, Error> {
+        if s.len() > MAX_DESCRIPTOR_LENGTH {
+            let message = format!("descriptor longer than {MAX_DESCRIPTOR_LENGTH} bytes");
+            log::error!("{message}");
+            return Err(Error::InvalidDescriptor(message));
+        }
         let descriptor = match network {
             Network::Liquid => elements_descriptor(s)?,
             Network::LiquidTestnet => elements_descriptor(s)?,
@@ -28,6 +39,12 @@ impl Descriptor {
             let message = "hardened wildcards are not supported";
             log::error!("{message}");
             return Err(Error::InvalidDescriptor(message.to_string()));
+        }
+        // Every single descriptor is scanned separately, bound the work done per request.
+        if descriptor.clone().into_single_descriptors()?.len() > MAX_SINGLE_DESCRIPTORS {
+            let message = format!("descriptor expands to more than {MAX_SINGLE_DESCRIPTORS} paths");
+            log::error!("{message}");
+            return Err(Error::InvalidDescriptor(message));
         }
         Ok(descriptor)
     }
@@ -58,14 +75,14 @@ impl Descriptor {
                 let desc = desc
                     .clone()
                     .into_single_descriptors()
-                    .map_err(|e| Error::String(e.to_string()))?;
+                    .map_err(|e| Error::InvalidDescriptor(e.to_string()))?;
                 desc.into_iter().map(Descriptor::Bitcoin).collect()
             }
             Descriptor::Elements(desc) => {
                 let desc = desc
                     .clone()
                     .into_single_descriptors()
-                    .map_err(|e| Error::String(e.to_string()))?;
+                    .map_err(|e| Error::InvalidDescriptor(e.to_string()))?;
                 desc.into_iter().map(Descriptor::Elements).collect()
             }
         })
@@ -480,6 +497,58 @@ mod tests {
                     "{multi}: {result:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn descriptor_paths_bounded() {
+        let xpub = "tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M";
+        let paths = |n: usize| (0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(";");
+        for (prefix, network) in [
+            ("", Network::BitcoinTestnet),
+            ("el", Network::LiquidTestnet),
+        ] {
+            let limit = format!("{prefix}wpkh({xpub}/<{}>/*)", paths(MAX_SINGLE_DESCRIPTORS));
+            let desc = Descriptor::from_str(&limit, network).unwrap();
+            assert_eq!(
+                desc.into_single_descriptors().unwrap().len(),
+                MAX_SINGLE_DESCRIPTORS
+            );
+
+            let over = format!(
+                "{prefix}wpkh({xpub}/<{}>/*)",
+                paths(MAX_SINGLE_DESCRIPTORS + 1)
+            );
+            let result = Descriptor::from_str(&over, network);
+            assert!(
+                matches!(result, Err(Error::InvalidDescriptor(ref m)) if m.contains("paths")),
+                "{result:?}"
+            );
+
+            // Multipath keys with a different number of paths cannot be expanded.
+            let mismatch = format!("{prefix}wsh(multi(1,{xpub}/<0;1>/*,{xpub}/<0;1;2>/*))");
+            let result = Descriptor::from_str(&mismatch, network);
+            assert!(
+                matches!(result, Err(Error::InvalidDescriptor(_))),
+                "{result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn descriptor_length_bounded() {
+        for network in [Network::Liquid, Network::Bitcoin] {
+            let result = Descriptor::from_str(&"x".repeat(MAX_DESCRIPTOR_LENGTH + 1), network);
+            assert!(
+                matches!(result, Err(Error::InvalidDescriptor(ref m)) if m.contains("longer")),
+                "{result:?}"
+            );
+            // At the limit the string reaches the parser.
+            let result = Descriptor::from_str(&"x".repeat(MAX_DESCRIPTOR_LENGTH), network);
+            assert!(
+                matches!(result, Err(Error::InvalidDescriptor(ref m)) if !m.contains("longer")),
+                "{result:?}"
+            );
         }
     }
 

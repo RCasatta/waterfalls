@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Descriptors longer than 8192 bytes, or expanding to more than eight paths (e.g.
+  `<0;1;2;3;4;5;6;7;8>`), are rejected with HTTP 400 before any scan, bounding the work a
+  single request can cause.
 - Descriptors with a hardened wildcard (`/*h` or `/*'`) are rejected with HTTP 400. They
   cannot be derived from public keys, and deriving one panicked the request task.
 - Descriptor expansion and script derivation errors in HTTP handlers now return an error
