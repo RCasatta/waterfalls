@@ -95,17 +95,16 @@ impl Mempool {
             "one prevout lookup per input expected"
         );
 
-        let mut prevouts_index = 0usize;
+        let mut spending_script_hashes = spending_script_hashes.iter();
         for (txid, tx) in txs {
             for (vin, previous_output) in tx.inputs_iter().enumerate() {
-                let e = match spending_script_hashes[prevouts_index] {
+                let e = match spending_script_hashes.next().copied().flatten() {
                     Some(e) => e,
                     None => {
                         match self.outpoints_created.get(&previous_output) {
                             Some(e) => *e,
                             None => {
                                 // in optimal condition should never happen, however, for example at startup we may have incomplete mempool data
-                                prevouts_index += 1;
                                 continue;
                             }
                         }
@@ -118,7 +117,6 @@ impl Mempool {
                     .entry(*txid)
                     .or_default()
                     .push((e, -(vin as i32) - 1));
-                prevouts_index += 1;
             }
 
             for (vout, script_hash) in tx.output_script_hashes_iter().enumerate() {

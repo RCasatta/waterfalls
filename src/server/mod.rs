@@ -1,6 +1,6 @@
 //! Inside this module everything is needed to run the service providing the waterfalls protocol
 
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::indexing_slicing))]
 
 use std::collections::HashMap;
 use std::future::Future;

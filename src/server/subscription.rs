@@ -314,7 +314,10 @@ impl Subscriptions {
             if available == 0 {
                 continue;
             }
-            let missing = &scripts[(*watched - start) as usize..];
+            // In range: `start <= *watched < end` is checked above.
+            let missing = scripts
+                .get((*watched - start) as usize..)
+                .unwrap_or_default();
             if missing.len() > available {
                 log::warn!(
                     "subscription expansion truncated, script limit reached: id={id}, limit={}",

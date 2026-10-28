@@ -294,7 +294,7 @@ pub async fn route(
                     let utxos = state
                         .store_blocking(move |db| db.get_utxos(&[outpoint]))
                         .await?;
-                    if utxos[0].is_some() {
+                    if matches!(utxos.first(), Some(Some(_))) {
                         str_resp("true".to_string(), StatusCode::OK)
                     } else {
                         str_resp("false".to_string(), StatusCode::NOT_FOUND)
@@ -617,7 +617,9 @@ async fn handle_single_address(state: &Arc<State>, address: &be::Address) -> Res
     truncate_history_page(&mut seen_blockchain, 0, state.max_txs_seen);
     remove_confirmed_from_mempool(&seen_blockchain, &mut seen_mempool);
     let mut result: Vec<_> = seen_blockchain
-        .remove(0)
+        .into_iter()
+        .next()
+        .unwrap_or_default()
         .iter()
         .map(|e| EsploraTx {
             txid: e.txid,
@@ -628,7 +630,7 @@ async fn handle_single_address(state: &Arc<State>, address: &be::Address) -> Res
         })
         .collect();
 
-    result.extend(seen_mempool[0].iter().map(|tx_seen| EsploraTx {
+    result.extend(seen_mempool.iter().flatten().map(|tx_seen| EsploraTx {
         txid: tx_seen.txid,
         status: Status {
             block_height: Some(-1),
