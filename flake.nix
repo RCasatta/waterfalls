@@ -35,7 +35,7 @@
           };
 
           nativeBuildInputs = with pkgs; [ rustToolchain pkg-config clang ];
-          buildInputs = with pkgs; [ openssl ];
+          buildInputs = [ ];
           commonArgs = {
             inherit src buildInputs nativeBuildInputs;
 
