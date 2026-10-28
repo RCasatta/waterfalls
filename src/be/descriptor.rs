@@ -12,7 +12,7 @@ pub enum Descriptor {
 
 impl Descriptor {
     pub fn from_str(s: &str, network: Network) -> Result<Self, Error> {
-        Ok(match network {
+        let descriptor = match network {
             Network::Liquid => elements_descriptor(s)?,
             Network::LiquidTestnet => elements_descriptor(s)?,
             Network::ElementsRegtest => elements_descriptor(s)?,
@@ -21,7 +21,15 @@ impl Descriptor {
             Network::BitcoinTestnet4 => bitcoin_descriptor(s)?,
             Network::BitcoinRegtest => bitcoin_descriptor(s)?,
             Network::BitcoinSignet => bitcoin_descriptor(s)?,
-        })
+        };
+        // Deriving a hardened wildcard needs private keys, and elements-miniscript panics
+        // instead of returning an error, so refuse it before it reaches derivation.
+        if descriptor.has_hardened_wildcard() {
+            let message = "hardened wildcards are not supported";
+            log::error!("{message}");
+            return Err(Error::InvalidDescriptor(message.to_string()));
+        }
+        Ok(descriptor)
     }
 
     pub fn bitcoin(
@@ -95,6 +103,29 @@ impl Descriptor {
         match self {
             Descriptor::Bitcoin(desc) => desc.has_wildcard(),
             Descriptor::Elements(desc) => desc.has_wildcard(),
+        }
+    }
+
+    fn has_hardened_wildcard(&self) -> bool {
+        match self {
+            Descriptor::Bitcoin(desc) => !desc.for_each_key(|k| match k {
+                miniscript::DescriptorPublicKey::XPub(x) => {
+                    x.wildcard != miniscript::descriptor::Wildcard::Hardened
+                }
+                miniscript::DescriptorPublicKey::MultiXPub(x) => {
+                    x.wildcard != miniscript::descriptor::Wildcard::Hardened
+                }
+                miniscript::DescriptorPublicKey::Single(_) => true,
+            }),
+            Descriptor::Elements(desc) => !desc.for_each_key(|k| match k {
+                elements_miniscript::DescriptorPublicKey::XPub(x) => {
+                    x.wildcard != elements_miniscript::descriptor::Wildcard::Hardened
+                }
+                elements_miniscript::DescriptorPublicKey::MultiXPub(x) => {
+                    x.wildcard != elements_miniscript::descriptor::Wildcard::Hardened
+                }
+                elements_miniscript::DescriptorPublicKey::Single(_) => true,
+            }),
         }
     }
 
@@ -421,6 +452,35 @@ mod tests {
         // Malformed descriptor
         let result = Descriptor::from_str("wpkh(", Network::Bitcoin);
         assert!(matches!(result, Err(Error::InvalidDescriptor(_))));
+    }
+
+    #[test]
+    fn hardened_wildcard_rejected() {
+        let xpub = "tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M";
+        for (prefix, network) in [
+            ("", Network::BitcoinTestnet),
+            ("el", Network::LiquidTestnet),
+        ] {
+            let normal = format!("{prefix}wpkh({xpub}/<0;1>/*)");
+            assert!(Descriptor::from_str(&normal, network).is_ok());
+            for wildcard in ["*h", "*'"] {
+                for path in ["<0;1>", "0"] {
+                    let hardened = format!("{prefix}wpkh({xpub}/{path}/{wildcard})");
+                    let result = Descriptor::from_str(&hardened, network);
+                    assert!(
+                        matches!(result, Err(Error::InvalidDescriptor(ref m)) if m.contains("hardened")),
+                        "{hardened}: {result:?}"
+                    );
+                }
+                // Only one of the keys has a hardened wildcard.
+                let multi = format!("{prefix}wsh(multi(1,{xpub}/0/*,{xpub}/1/{wildcard}))");
+                let result = Descriptor::from_str(&multi, network);
+                assert!(
+                    matches!(result, Err(Error::InvalidDescriptor(ref m)) if m.contains("hardened")),
+                    "{multi}: {result:?}"
+                );
+            }
+        }
     }
 
     #[test]

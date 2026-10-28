@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Descriptors with a hardened wildcard (`/*h` or `/*'`) are rejected with HTTP 400. They
+  cannot be derived from public keys, and deriving one panicked the request task.
 - Descriptor expansion and script derivation errors in HTTP handlers now return an error
   response instead of panicking the connection task.
 - Store (RocksDB) reads and writes no longer run directly on the async runtime: HTTP handlers,
