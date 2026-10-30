@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Descriptors longer than 8192 bytes, or expanding to more than eight paths (e.g.
   `<0;1;2;3;4;5;6;7;8>`), are rejected with HTTP 400 before any scan, bounding the work a
   single request can cause.
-- Descriptors nested deeper than 402 levels, counting parentheses and miniscript wrappers
+- Descriptors nested deeper than 64 levels, counting parentheses and miniscript wrappers
   (e.g. `elnnnn…:1`), are rejected with HTTP 400 before parsing. elements-miniscript recursed
   once per wrapper letter while parsing, which could overflow the stack.
 - Descriptors with a hardened wildcard (`/*h` or `/*'`) or a hardened step after the xpub

@@ -10,9 +10,11 @@ pub(crate) const MAX_DESCRIPTOR_LENGTH: usize = 8192;
 /// Normal wallets use one path, or two with `<0;1>`. Allow a few more while bounding scans.
 pub(crate) const MAX_SINGLE_DESCRIPTORS: usize = 8;
 
-/// Same as miniscript's `MAX_RECURSION_DEPTH`, which elements-miniscript applies to parentheses
-/// only: a long chain of wrappers like `elnnnn…:1` recurses once per letter while parsing.
-const MAX_DESCRIPTOR_DEPTH: usize = 402;
+/// Parsing and deriving recurse once per level, including each wrapper letter like in
+/// `elnnnn…:1`, which elements-miniscript does not bound. Real wallets use fewer than 20 levels.
+/// At this depth a release build needs less than 512 KiB of the 2 MiB tokio worker stack, a debug
+/// build less than 2 MiB.
+const MAX_DESCRIPTOR_DEPTH: usize = 64;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Descriptor {
@@ -664,6 +666,39 @@ mod tests {
         ] {
             let normal = format!("{prefix}wsh(and_v(v:pk({xpub}/0/*),older(144)))");
             assert!(Descriptor::from_str(&normal, network).is_ok());
+
+            // At the limit, parsing and deriving fit the stack of a tokio worker thread.
+            let limit = [
+                format!(
+                    "{prefix}wsh({}pk({xpub}/0/*){})",
+                    "and_v(v:1,".repeat(MAX_DESCRIPTOR_DEPTH - 2),
+                    ")".repeat(MAX_DESCRIPTOR_DEPTH - 2)
+                ),
+                format!(
+                    "{prefix}wsh(and_v(v:pk({xpub}/0/*),{}:1))",
+                    "n".repeat(MAX_DESCRIPTOR_DEPTH - 2)
+                ),
+            ];
+            for desc in limit {
+                assert_eq!(nesting_depth(&desc), MAX_DESCRIPTOR_DEPTH);
+                let over = desc.replacen("wsh(", "wsh(n:", 1);
+                assert_eq!(nesting_depth(&over), MAX_DESCRIPTOR_DEPTH + 1);
+                let (display, over) = std::thread::Builder::new()
+                    .stack_size(2 << 20)
+                    .spawn(move || {
+                        let desc = Descriptor::from_str(&desc, network).unwrap();
+                        desc.script_pubkey_at_derivation_index(0).unwrap();
+                        (desc.to_string(), Descriptor::from_str(&over, network))
+                    })
+                    .unwrap()
+                    .join()
+                    .unwrap();
+                assert!(!display.is_empty());
+                assert!(
+                    matches!(over, Err(Error::InvalidDescriptor(ref m)) if m.contains("nested")),
+                    "{over:?}"
+                );
+            }
 
             let deep = [
                 // Found by the descriptor fuzz target: overflowed a 2 MiB stack in debug builds.
