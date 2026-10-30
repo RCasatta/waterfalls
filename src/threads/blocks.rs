@@ -67,6 +67,7 @@ async fn get_next_block_to_index(
 
                     let reorged_height = last.height;
                     let previous_height = reorged_height - 1;
+                    let block_update = state.begin_block_update();
                     let previous_block_meta = {
                         let mut blocks_hash_ts = state.blocks_hash_ts.lock().await;
                         let (hash, ts) = blocks_hash_ts
@@ -88,6 +89,7 @@ async fn get_next_block_to_index(
                         })
                         .await
                         .unwrap_or_else(|e| error_panic!("reorg failed: {e}"));
+                    drop(block_update);
                     state
                         .notify_all_subscriptions(SubscriptionEvent::Reorg)
                         .await;
@@ -255,6 +257,8 @@ pub async fn index(
         };
 
         let block_meta = block_to_index.clone();
+        // The store is written before `blocks_hash_ts`: readers must see both or neither.
+        let block_update = state.begin_block_update();
         let (changed_script_hashes, confirmed_txids) = state
             .store_blocking(move |db| {
                 index_block_transactions(db, &block_meta, block.transactions_iter())
@@ -263,6 +267,7 @@ pub async fn index(
             .unwrap_or_else(|e| error_panic!("error updating db: {e}"));
         txs_count += confirmed_txids.len() as u64;
         state.set_hash_ts(&block_to_index).await;
+        drop(block_update);
         // Drop the confirmed txs from the mempool view only now that they are in the db, so that
         // readers looking at the mempool before the db always find them in one of the two.
         // The mempool thread doesn't remove txs missing from the node mempool while the node tip
