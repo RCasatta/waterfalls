@@ -58,6 +58,12 @@ const FEE_ESTIMATES_TTL: u32 = 30; // cache fee estimates for 30 seconds
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const SSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 const SSE_KEEPALIVE: &[u8] = b": keepalive\n\n";
+/// Attempts of a waterfalls scan before giving up when blocks are indexed while it runs
+const SNAPSHOT_ATTEMPTS: usize = 3;
+/// Max wait for a block update in progress to finish before starting a waterfalls scan
+const BLOCK_UPDATE_WAIT: Duration = Duration::from_secs(2);
+const BLOCK_UPDATE_POLL: Duration = Duration::from_millis(10);
+const BLOCKCHAIN_CHANGED_RETRY_AFTER_SECONDS: u32 = 1;
 
 type RespBody = BoxBody<Bytes, Infallible>;
 type Resp = Response<RespBody>;
@@ -560,6 +566,12 @@ fn full_body(bytes: Vec<u8>) -> RespBody {
 fn error_resp(status: StatusCode, error: &Error) -> Resp {
     let mut response = Response::new(full_body(error.to_string().into_bytes()));
     *response.status_mut() = status;
+    if matches!(error, Error::BlockchainChanged) {
+        response.headers_mut().insert(
+            header::RETRY_AFTER,
+            header::HeaderValue::from(BLOCKCHAIN_CHANGED_RETRY_AFTER_SECONDS),
+        );
+    }
     response
 }
 
@@ -583,6 +595,7 @@ fn error_status(error: &Error) -> StatusCode {
         | Error::UtxoOnlyHistoryTooLarge => StatusCode::BAD_REQUEST,
         Error::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         Error::BodyReadTimeout => StatusCode::REQUEST_TIMEOUT,
+        Error::BlockchainChanged => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -660,6 +673,7 @@ async fn handle_single_address(state: &Arc<State>, address: &be::Address) -> Res
     )
 }
 
+#[derive(Clone, Copy)]
 enum WithTip {
     No,
     Hash,
@@ -676,17 +690,111 @@ async fn handle_waterfalls_req(
     let start = Instant::now();
     let is_descriptor = inputs.descriptor().is_some();
     let page = inputs.page();
-    let mut derivations_duration = Duration::from_secs(0);
 
     // TODO add label with batches?
     let timer = crate::WATERFALLS_HISTOGRAM
         .with_label_values(&["all"])
         .start_timer();
 
+    let id = match &inputs {
+        WaterfallRequest::Descriptor(DescriptorRequest {
+            descriptor,
+            page,
+            to_index,
+            utxo_only,
+        }) => {
+            let id = string_hash(&descriptor.normalized_id_string());
+            state.record_descriptor_access(id).await;
+            if *page != 0 || *to_index != 0 || *utxo_only {
+                log::info!("{id:x}: page={page}, to_index={to_index}, utxo_only={utxo_only}");
+            }
+            id
+        }
+        WaterfallRequest::Addresses(AddressesRequest {
+            addresses,
+            page,
+            utxo_only,
+        }) => {
+            if *utxo_only && *page > 0 {
+                return Err(Error::UtxoOnlyHistoryTooLarge);
+            }
+            string_hash(&format!("{:?}", addresses))
+        }
+    };
+
+    let WaterfallsScan {
+        map,
+        has_more,
+        tip_hash,
+        tip_meta,
+        derivations_duration,
+    } = with_block_snapshot(state, || scan_waterfalls(state, &inputs, with_tip, network)).await?;
+
+    let elements: usize = map.values().map(|v| v.len()).sum();
+
+    let waterfall_response = WaterfallResponse {
+        txs_seen: map,
+        page,
+        tip: tip_hash,
+        tip_meta,
+        has_more: if has_more.is_empty() {
+            None
+        } else {
+            Some(has_more)
+        },
+    };
+    let content = if cbor {
+        "application/cbor"
+    } else {
+        "application/json"
+    };
+    let result = if cbor {
+        let mut bytes = Vec::new();
+        minicbor::encode(&waterfall_response, &mut bytes).expect("writing to a Vec cannot fail");
+        bytes
+    } else {
+        serde_json::to_vec(&waterfall_response)
+            .expect("does not contain a map with non-string keys")
+    };
+
+    let m = sign_response(&state.secp, &state.wif_key, &result);
+    let m = m.to_msg_sig_address(state.address());
+
+    log::info!(
+        "{id:x}: {elements} elements, elapsed: {:.2?} ({:.2?} derivations)",
+        start.elapsed(),
+        derivations_duration
+    );
+    crate::WATERFALLS_COUNTER.inc();
+    timer.observe_duration();
+
+    let mut response = any_resp(
+        result,
+        hyper::StatusCode::OK,
+        Some(content),
+        Some(state.cache_control_seconds),
+        Some(m),
+    )?;
+    if state.server_timing && is_descriptor {
+        add_server_timing_header(&mut response, start.elapsed())?;
+    }
+    Ok(response)
+}
+
+/// Reads the history, the tip and the block hashes needed by a waterfalls response.
+///
+/// It must run inside [`with_block_snapshot`] so that all of them come from the same indexed
+/// blocks.
+async fn scan_waterfalls(
+    state: &Arc<State>,
+    inputs: &WaterfallRequest,
+    with_tip: WithTip,
+    network: Network,
+) -> Result<WaterfallsScan, Error> {
+    let mut derivations_duration = Duration::from_secs(0);
     let mut map = BTreeMap::new();
     let mut has_more = Vec::new();
     let utxo_only_req;
-    let id;
 
     match inputs {
         WaterfallRequest::Descriptor(DescriptorRequest {
@@ -695,13 +803,9 @@ async fn handle_waterfalls_req(
             to_index,
             utxo_only,
         }) => {
-            id = string_hash(&descriptor.normalized_id_string());
-            state.record_descriptor_access(id).await;
-            if page != 0 || to_index != 0 || utxo_only {
-                log::info!("{id:x}: page={page}, to_index={to_index}, utxo_only={utxo_only}");
-            }
+            let (page, to_index, utxo_only) = (*page, *to_index, *utxo_only);
             utxo_only_req = utxo_only;
-            for desc in descriptor.into_single_descriptors()?.iter() {
+            for desc in descriptor.clone().into_single_descriptors()?.iter() {
                 let single_descriptor_id = string_hash(&desc.normalized_id_string());
                 let is_single_address = !desc.has_wildcard();
                 let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
@@ -755,18 +859,15 @@ async fn handle_waterfalls_req(
             page,
             utxo_only,
         }) => {
-            id = string_hash(&format!("{:?}", addresses));
+            let utxo_only = *utxo_only;
             utxo_only_req = utxo_only;
-            if utxo_only && page > 0 {
-                return Err(Error::UtxoOnlyHistoryTooLarge);
-            }
             let mut scripts = Vec::with_capacity(addresses.len());
             for addr in addresses.iter() {
                 scripts.push(state.store.hash(addr.script_pubkey().as_bytes()));
             }
             let mut result = Vec::with_capacity(addresses.len());
             let page = if addresses.len() == 1 {
-                page as usize
+                *page as usize
             } else {
                 0
             };
@@ -812,8 +913,6 @@ async fn handle_waterfalls_req(
         }
     }
 
-    let elements: usize = map.values().map(|v| v.len()).sum();
-
     let (tip_hash, tip_meta) = match with_tip {
         WithTip::No => (None, None),
         WithTip::Hash => (state.tip_hash().await, None),
@@ -823,53 +922,53 @@ async fn handle_waterfalls_req(
         },
     };
 
-    let waterfall_response = WaterfallResponse {
-        txs_seen: map,
-        page,
-        tip: tip_hash,
+    Ok(WaterfallsScan {
+        map,
+        has_more,
+        tip_hash,
         tip_meta,
-        has_more: if has_more.is_empty() {
-            None
-        } else {
-            Some(has_more)
-        },
-    };
-    let content = if cbor {
-        "application/cbor"
-    } else {
-        "application/json"
-    };
-    let result = if cbor {
-        let mut bytes = Vec::new();
-        minicbor::encode(&waterfall_response, &mut bytes).expect("writing to a Vec cannot fail");
-        bytes
-    } else {
-        serde_json::to_vec(&waterfall_response)
-            .expect("does not contain a map with non-string keys")
-    };
+        derivations_duration,
+    })
+}
 
-    let m = sign_response(&state.secp, &state.wif_key, &result);
-    let m = m.to_msg_sig_address(state.address());
-
-    log::info!(
-        "{id:x}: {elements} elements, elapsed: {:.2?} ({:.2?} derivations)",
-        start.elapsed(),
-        derivations_duration
-    );
-    crate::WATERFALLS_COUNTER.inc();
-    timer.observe_duration();
-
-    let mut response = any_resp(
-        result,
-        hyper::StatusCode::OK,
-        Some(content),
-        Some(state.cache_control_seconds),
-        Some(m),
-    )?;
-    if state.server_timing && is_descriptor {
-        add_server_timing_header(&mut response, start.elapsed())?;
+/// Runs `read` so that everything it reads comes from the same indexed blocks.
+///
+/// The store and the in-memory block hashes are updated separately while a block is indexed or
+/// reorged, so a read overlapping an update could mix data from before and after it. Such a
+/// read is detected with [`State::block_update_seq`] and attempted again, up to
+/// `SNAPSHOT_ATTEMPTS` times, before giving up with [`Error::BlockchainChanged`].
+/// An error from an overlapping read is discarded too, since it may come from mixed data.
+async fn with_block_snapshot<T, F, Fut>(state: &State, mut read: F) -> Result<T, Error>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, Error>>,
+{
+    for attempt in 1..=SNAPSHOT_ATTEMPTS {
+        let seq = wait_block_update_done(state).await?;
+        let result = read().await;
+        if state.block_update_seq() == seq {
+            return result;
+        }
+        log::info!("blocks changed during a read, attempt {attempt}/{SNAPSHOT_ATTEMPTS}");
     }
-    Ok(response)
+    log::warn!("blocks changed during {SNAPSHOT_ATTEMPTS} reads, giving up");
+    Err(Error::BlockchainChanged)
+}
+
+/// Waits for a block update in progress to finish, returning the block update counter.
+async fn wait_block_update_done(state: &State) -> Result<u64, Error> {
+    let deadline = Instant::now() + BLOCK_UPDATE_WAIT;
+    loop {
+        let seq = state.block_update_seq();
+        if seq % 2 == 0 {
+            return Ok(seq);
+        }
+        if Instant::now() >= deadline {
+            log::warn!("block update still in progress after {BLOCK_UPDATE_WAIT:?}");
+            return Err(Error::BlockchainChanged);
+        }
+        tokio::time::sleep(BLOCK_UPDATE_POLL).await;
+    }
 }
 
 fn add_server_timing_header(response: &mut Resp, duration: Duration) -> Result<(), Error> {
@@ -1345,6 +1444,15 @@ fn truncate_history_page(
     }
 
     has_more
+}
+
+/// Everything a waterfalls response needs, read from the same indexed blocks
+struct WaterfallsScan {
+    map: BTreeMap<String, Vec<Vec<TxSeen>>>,
+    has_more: Vec<String>,
+    tip_hash: Option<BlockHash>,
+    tip_meta: Option<crate::BlockMeta>,
+    derivations_duration: Duration,
 }
 
 struct FindScriptsResult {
@@ -1926,6 +2034,165 @@ mod tests {
             "runtime blocked by the store: timer fired {:?} after the store was locked",
             ticker_done.duration_since(locked_at)
         );
+    }
+
+    #[tokio::test]
+    async fn block_snapshot_retries_read_overlapping_block_update() {
+        let state = route_test_state();
+        let mut attempts = 0;
+        let result = with_block_snapshot(&state, || {
+            attempts += 1;
+            if attempts == 1 {
+                // A block is indexed while the first read runs
+                drop(state.begin_block_update());
+            }
+            let attempt = attempts;
+            async move { Ok(attempt) }
+        })
+        .await;
+        assert_eq!(result.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn block_snapshot_discards_error_of_overlapping_read() {
+        let state = route_test_state();
+        let mut attempts = 0;
+        let result = with_block_snapshot(&state, || {
+            attempts += 1;
+            let first = attempts == 1;
+            if first {
+                drop(state.begin_block_update());
+            }
+            async move {
+                if first {
+                    Err(Error::UtxoOnlyHistoryTooLarge)
+                } else {
+                    Ok(())
+                }
+            }
+        })
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn block_snapshot_gives_up_when_blocks_keep_changing() {
+        let state = route_test_state();
+        let mut attempts = 0;
+        let result = with_block_snapshot(&state, || {
+            attempts += 1;
+            drop(state.begin_block_update());
+            async { Ok(()) }
+        })
+        .await;
+        assert!(matches!(result, Err(Error::BlockchainChanged)));
+        assert_eq!(attempts, SNAPSHOT_ATTEMPTS);
+
+        let response = error_resp(
+            error_status(&Error::BlockchainChanged),
+            &Error::BlockchainChanged,
+        );
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[header::RETRY_AFTER], "1");
+    }
+
+    #[tokio::test]
+    async fn block_snapshot_waits_for_update_in_progress() {
+        let state = Arc::new(route_test_state());
+        let guard_state = Arc::clone(&state);
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let updater = std::thread::spawn(move || {
+            let guard = guard_state.begin_block_update();
+            started_tx.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(50));
+            drop(guard);
+        });
+        started_rx.await.unwrap();
+
+        let result = with_block_snapshot(&state, || {
+            // The read starts only once the update is over
+            let seq = state.block_update_seq();
+            async move { Ok(seq) }
+        })
+        .await;
+        assert_eq!(result.unwrap(), 2);
+        updater.join().unwrap();
+    }
+
+    /// A block indexed while a waterfalls request reads the store must not produce a response
+    /// mixing the tip from before the block with the history from after it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn waterfalls_response_not_mixed_with_block_indexed_meanwhile() {
+        let state = Arc::new(route_test_state());
+        let address = "ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh";
+        let address = be::Address::from_str(address, Network::Liquid).unwrap();
+        let script_hash = state.store.hash(address.script_pubkey().as_bytes());
+        let block_hash = |n: u8| BlockHash::from_str(&format!("{n:064x}")).unwrap();
+        let txid = |n: u8| crate::be::Txid::from_str(&format!("{n:064x}")).unwrap();
+        for height in 0..2u8 {
+            state
+                .set_hash_ts(&crate::store::BlockMeta::new(
+                    height.into(),
+                    block_hash(height + 1),
+                    0,
+                ))
+                .await;
+        }
+        #[allow(irrefutable_let_patterns)]
+        let crate::store::AnyStore::Mem(store) = &state.store
+        else {
+            unreachable!("test state uses the memory store")
+        };
+        store
+            .lock_history()
+            .insert(script_hash, vec![TxSeen::new(txid(1), 1, V::Vout(0))]);
+
+        // Index block 2 while the request is blocked on the store, after it read the tip
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+        let indexer_state = Arc::clone(&state);
+        let indexer = std::thread::spawn(move || {
+            #[allow(irrefutable_let_patterns)]
+            let crate::store::AnyStore::Mem(store) = &indexer_state.store
+            else {
+                unreachable!("test state uses the memory store")
+            };
+            let mut history = store.lock_history();
+            locked_tx.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(100));
+            let block_update = indexer_state.begin_block_update();
+            history
+                .get_mut(&script_hash)
+                .unwrap()
+                .push(TxSeen::new(txid(2), 2, V::Vout(0)));
+            indexer_state
+                .blocks_hash_ts
+                .blocking_lock()
+                .push((block_hash(3), 0));
+            drop(block_update);
+        });
+        locked_rx.recv().unwrap();
+
+        let request = WaterfallRequest::Addresses(AddressesRequest {
+            addresses: vec![address],
+            page: 0,
+            utxo_only: false,
+        });
+        let response = handle_waterfalls_req(&state, request, WithTip::All, false, Network::Liquid)
+            .await
+            .unwrap();
+        indexer.join().unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let response: WaterfallResponse = serde_json::from_slice(&body).unwrap();
+
+        let tip = response.tip_meta.unwrap();
+        assert_eq!((tip.h, tip.b), (2, block_hash(3)));
+        let history = &response.txs_seen["addresses"][0];
+        assert_eq!(
+            history.iter().map(|tx| tx.height).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert!(history.iter().all(|tx| tx.block_hash.is_some()));
     }
 
     fn route_test_state() -> State {

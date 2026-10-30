@@ -1,7 +1,10 @@
 use std::{
     cmp::Ordering,
     collections::HashMap,
-    sync::Arc,
+    sync::{
+        atomic::{self, AtomicU64},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -39,6 +42,10 @@ pub struct State {
     pub mempool_cache: Mutex<HashMap<crate::be::Txid, crate::be::MempoolTx>>,
     pub blocks_hash_ts: Mutex<Vec<(BlockHash, Timestamp)>>, // TODO should be moved into the Store, but in memory for db
 
+    /// Incremented at the start and at the end of every update of the indexed blocks, so it is
+    /// odd while one is in progress. See [`State::begin_block_update`].
+    block_update_seq: AtomicU64,
+
     pub secp: Secp256k1<All>,
 
     pub max_addresses: usize,
@@ -71,6 +78,7 @@ impl State {
             mempool: Mutex::new(Mempool::new()),
             mempool_cache: Mutex::new(HashMap::new()),
             blocks_hash_ts: Mutex::new(Vec::new()),
+            block_update_seq: AtomicU64::new(0),
             secp: bitcoin::key::Secp256k1::new(),
             max_addresses: config.max_addresses,
             max_txs_seen: config.max_txs_seen,
@@ -125,6 +133,24 @@ impl State {
         let mut blocks_hash_ts = self.blocks_hash_ts.lock().await;
         update_hash_ts(&mut blocks_hash_ts, meta);
     }
+
+    /// Marks the start of an update of the indexed blocks, ending when the returned guard is
+    /// dropped. An update covers both the store and `blocks_hash_ts`, which are not written
+    /// atomically: readers compare [`State::block_update_seq`] before and after their reads to
+    /// detect an update overlapping them.
+    pub fn begin_block_update(&self) -> BlockUpdateGuard<'_> {
+        let previous = self.block_update_seq.fetch_add(1, atomic::Ordering::SeqCst);
+        debug_assert!(previous % 2 == 0, "nested block update");
+        BlockUpdateGuard {
+            seq: &self.block_update_seq,
+        }
+    }
+
+    /// Current value of the block update counter, odd while an update is in progress.
+    pub fn block_update_seq(&self) -> u64 {
+        self.block_update_seq.load(atomic::Ordering::SeqCst)
+    }
+
     pub fn address(&self) -> bitcoin::Address {
         p2pkh(&self.secp, &self.wif_key)
     }
@@ -351,6 +377,21 @@ pub struct StateConfig {
     pub server_timing: bool,
     pub derivation_cache_capacity: usize,
     pub subscription_limits: SubscriptionLimits,
+}
+
+/// Ends the block update started by [`State::begin_block_update`] when dropped.
+pub struct BlockUpdateGuard<'a> {
+    seq: &'a AtomicU64,
+}
+
+impl Drop for BlockUpdateGuard<'_> {
+    fn drop(&mut self) {
+        // An update interrupted by a panic is left in progress: the indexed data may be half
+        // written, so readers must not see it as consistent.
+        if !std::thread::panicking() {
+            self.seq.fetch_add(1, atomic::Ordering::SeqCst);
+        }
+    }
 }
 
 #[cfg(test)]

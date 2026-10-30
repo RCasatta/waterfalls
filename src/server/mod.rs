@@ -477,6 +477,9 @@ pub enum Error {
     BodyTooLarge,
     BodyReadTimeout,
     CannotEstimateFee,
+    /// Blocks kept being indexed while the request was served, so a consistent response could
+    /// not be built. Transient: the client should retry.
+    BlockchainChanged,
 }
 
 impl std::fmt::Display for Error {
