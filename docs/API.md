@@ -89,6 +89,12 @@ GET /v2/waterfalls.cbor?<query_params>
 **Differences between v1 and v2:**
 - v2 includes `tip` field in response
 
+**Consistency:** all the data in a response, tip included, comes from the same indexed
+blocks. If blocks keep being indexed while the request is served, the server returns
+`503 Service Unavailable` with `Retry-After: 1`. The chain can still change between
+requests: clients paging through results should compare the tip of each response. See
+[consistency.md](consistency.md).
+
 ### Waterfalls Data with Full Tip Metadata (v4)
 
 ```

@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Waterfalls responses no longer mix data from before and after a block indexed or reorged
+  while the request is served: the tip, the history and its block hashes now always come
+  from the same indexed blocks. The request is retried internally; if blocks keep changing
+  it fails with `503 Service Unavailable` and `Retry-After: 1`, a new transient error
+  clients should retry. See `docs/consistency.md`.
 - Startup now fails with a clear error when `--node-url` (`NODE_URL`) does not start with `http://`.
   Waterfalls talks plain HTTP to the node and has no TLS support: an `https://` URL used to
   fail the backend preflight and be retried forever instead of being reported.

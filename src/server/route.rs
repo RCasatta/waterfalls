@@ -58,6 +58,12 @@ const FEE_ESTIMATES_TTL: u32 = 30; // cache fee estimates for 30 seconds
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const SSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 const SSE_KEEPALIVE: &[u8] = b": keepalive\n\n";
+/// Attempts of a waterfalls scan before giving up when blocks are indexed while it runs
+const SNAPSHOT_ATTEMPTS: usize = 3;
+/// Max wait for a block update in progress to finish before starting a waterfalls scan
+const BLOCK_UPDATE_WAIT: Duration = Duration::from_secs(2);
+const BLOCK_UPDATE_POLL: Duration = Duration::from_millis(10);
+const BLOCKCHAIN_CHANGED_RETRY_AFTER_SECONDS: u32 = 1;
 
 type RespBody = BoxBody<Bytes, Infallible>;
 type Resp = Response<RespBody>;
@@ -560,6 +566,12 @@ fn full_body(bytes: Vec<u8>) -> RespBody {
 fn error_resp(status: StatusCode, error: &Error) -> Resp {
     let mut response = Response::new(full_body(error.to_string().into_bytes()));
     *response.status_mut() = status;
+    if matches!(error, Error::BlockchainChanged) {
+        response.headers_mut().insert(
+            header::RETRY_AFTER,
+            header::HeaderValue::from(BLOCKCHAIN_CHANGED_RETRY_AFTER_SECONDS),
+        );
+    }
     response
 }
 
@@ -583,6 +595,7 @@ fn error_status(error: &Error) -> StatusCode {
         | Error::UtxoOnlyHistoryTooLarge => StatusCode::BAD_REQUEST,
         Error::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         Error::BodyReadTimeout => StatusCode::REQUEST_TIMEOUT,
+        Error::BlockchainChanged => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -715,7 +728,7 @@ async fn handle_waterfalls_req(
         tip_hash,
         tip_meta,
         derivations_duration,
-    } = scan_waterfalls(state, &inputs, with_tip, network).await?;
+    } = with_block_snapshot(state, || scan_waterfalls(state, &inputs, with_tip, network)).await?;
 
     let elements: usize = map.values().map(|v| v.len()).sum();
 
@@ -769,6 +782,10 @@ async fn handle_waterfalls_req(
 }
 
 /// Reads the history, the tip and the block hashes needed by a waterfalls response.
+///
+/// It must run inside [`with_block_snapshot`] so that all of them come from the same indexed
+/// blocks. It may then run more than once per request: its side effects (the max used index
+/// of the descriptor and the subscription expansion) are idempotent, so this is harmless.
 async fn scan_waterfalls(
     state: &Arc<State>,
     inputs: &WaterfallRequest,
@@ -913,6 +930,46 @@ async fn scan_waterfalls(
         tip_meta,
         derivations_duration,
     })
+}
+
+/// Runs `read` so that everything it reads comes from the same indexed blocks.
+///
+/// The store and the in-memory block hashes are updated separately while a block is indexed or
+/// reorged, so a read overlapping an update could mix data from before and after it. Such a
+/// read is detected with [`State::block_update_seq`] and attempted again, up to
+/// `SNAPSHOT_ATTEMPTS` times, before giving up with [`Error::BlockchainChanged`].
+/// An error from an overlapping read is discarded too, since it may come from mixed data.
+async fn with_block_snapshot<T, F, Fut>(state: &State, mut read: F) -> Result<T, Error>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, Error>>,
+{
+    for attempt in 1..=SNAPSHOT_ATTEMPTS {
+        let seq = wait_block_update_done(state).await?;
+        let result = read().await;
+        if state.block_update_seq() == seq {
+            return result;
+        }
+        log::info!("blocks changed during a read, attempt {attempt}/{SNAPSHOT_ATTEMPTS}");
+    }
+    log::warn!("blocks changed during {SNAPSHOT_ATTEMPTS} reads, giving up");
+    Err(Error::BlockchainChanged)
+}
+
+/// Waits for a block update in progress to finish, returning the block update counter.
+async fn wait_block_update_done(state: &State) -> Result<u64, Error> {
+    let deadline = Instant::now() + BLOCK_UPDATE_WAIT;
+    loop {
+        let seq = state.block_update_seq();
+        if seq % 2 == 0 {
+            return Ok(seq);
+        }
+        if Instant::now() >= deadline {
+            log::warn!("block update still in progress after {BLOCK_UPDATE_WAIT:?}");
+            return Err(Error::BlockchainChanged);
+        }
+        tokio::time::sleep(BLOCK_UPDATE_POLL).await;
+    }
 }
 
 fn add_server_timing_header(response: &mut Resp, duration: Duration) -> Result<(), Error> {
@@ -1390,7 +1447,7 @@ fn truncate_history_page(
     has_more
 }
 
-/// Everything a waterfalls response needs
+/// Everything a waterfalls response needs, read from the same indexed blocks
 struct WaterfallsScan {
     map: BTreeMap<String, Vec<Vec<TxSeen>>>,
     has_more: Vec<String>,
@@ -1978,6 +2035,89 @@ mod tests {
             "runtime blocked by the store: timer fired {:?} after the store was locked",
             ticker_done.duration_since(locked_at)
         );
+    }
+
+    #[tokio::test]
+    async fn block_snapshot_retries_read_overlapping_block_update() {
+        let state = route_test_state();
+        let mut attempts = 0;
+        let result = with_block_snapshot(&state, || {
+            attempts += 1;
+            if attempts == 1 {
+                // A block is indexed while the first read runs
+                drop(state.begin_block_update());
+            }
+            let attempt = attempts;
+            async move { Ok(attempt) }
+        })
+        .await;
+        assert_eq!(result.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn block_snapshot_discards_error_of_overlapping_read() {
+        let state = route_test_state();
+        let mut attempts = 0;
+        let result = with_block_snapshot(&state, || {
+            attempts += 1;
+            let first = attempts == 1;
+            if first {
+                drop(state.begin_block_update());
+            }
+            async move {
+                if first {
+                    Err(Error::UtxoOnlyHistoryTooLarge)
+                } else {
+                    Ok(())
+                }
+            }
+        })
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn block_snapshot_gives_up_when_blocks_keep_changing() {
+        let state = route_test_state();
+        let mut attempts = 0;
+        let result = with_block_snapshot(&state, || {
+            attempts += 1;
+            drop(state.begin_block_update());
+            async { Ok(()) }
+        })
+        .await;
+        assert!(matches!(result, Err(Error::BlockchainChanged)));
+        assert_eq!(attempts, SNAPSHOT_ATTEMPTS);
+
+        let response = error_resp(
+            error_status(&Error::BlockchainChanged),
+            &Error::BlockchainChanged,
+        );
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[header::RETRY_AFTER], "1");
+    }
+
+    #[tokio::test]
+    async fn block_snapshot_waits_for_update_in_progress() {
+        let state = Arc::new(route_test_state());
+        let guard_state = Arc::clone(&state);
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let updater = std::thread::spawn(move || {
+            let guard = guard_state.begin_block_update();
+            started_tx.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(50));
+            drop(guard);
+        });
+        started_rx.await.unwrap();
+
+        let result = with_block_snapshot(&state, || {
+            // The read starts only once the update is over
+            let seq = state.block_update_seq();
+            async move { Ok(seq) }
+        })
+        .await;
+        assert_eq!(result.unwrap(), 2);
+        updater.join().unwrap();
     }
 
     fn route_test_state() -> State {
