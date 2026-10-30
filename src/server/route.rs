@@ -660,6 +660,7 @@ async fn handle_single_address(state: &Arc<State>, address: &be::Address) -> Res
     )
 }
 
+#[derive(Clone, Copy)]
 enum WithTip {
     No,
     Hash,
@@ -676,17 +677,108 @@ async fn handle_waterfalls_req(
     let start = Instant::now();
     let is_descriptor = inputs.descriptor().is_some();
     let page = inputs.page();
-    let mut derivations_duration = Duration::from_secs(0);
 
     // TODO add label with batches?
     let timer = crate::WATERFALLS_HISTOGRAM
         .with_label_values(&["all"])
         .start_timer();
 
+    let id = match &inputs {
+        WaterfallRequest::Descriptor(DescriptorRequest {
+            descriptor,
+            page,
+            to_index,
+            utxo_only,
+        }) => {
+            let id = string_hash(&descriptor.normalized_id_string());
+            state.record_descriptor_access(id).await;
+            if *page != 0 || *to_index != 0 || *utxo_only {
+                log::info!("{id:x}: page={page}, to_index={to_index}, utxo_only={utxo_only}");
+            }
+            id
+        }
+        WaterfallRequest::Addresses(AddressesRequest {
+            addresses,
+            page,
+            utxo_only,
+        }) => {
+            if *utxo_only && *page > 0 {
+                return Err(Error::UtxoOnlyHistoryTooLarge);
+            }
+            string_hash(&format!("{:?}", addresses))
+        }
+    };
+
+    let WaterfallsScan {
+        map,
+        has_more,
+        tip_hash,
+        tip_meta,
+        derivations_duration,
+    } = scan_waterfalls(state, &inputs, with_tip, network).await?;
+
+    let elements: usize = map.values().map(|v| v.len()).sum();
+
+    let waterfall_response = WaterfallResponse {
+        txs_seen: map,
+        page,
+        tip: tip_hash,
+        tip_meta,
+        has_more: if has_more.is_empty() {
+            None
+        } else {
+            Some(has_more)
+        },
+    };
+    let content = if cbor {
+        "application/cbor"
+    } else {
+        "application/json"
+    };
+    let result = if cbor {
+        let mut bytes = Vec::new();
+        minicbor::encode(&waterfall_response, &mut bytes).expect("writing to a Vec cannot fail");
+        bytes
+    } else {
+        serde_json::to_vec(&waterfall_response)
+            .expect("does not contain a map with non-string keys")
+    };
+
+    let m = sign_response(&state.secp, &state.wif_key, &result);
+    let m = m.to_msg_sig_address(state.address());
+
+    log::info!(
+        "{id:x}: {elements} elements, elapsed: {:.2?} ({:.2?} derivations)",
+        start.elapsed(),
+        derivations_duration
+    );
+    crate::WATERFALLS_COUNTER.inc();
+    timer.observe_duration();
+
+    let mut response = any_resp(
+        result,
+        hyper::StatusCode::OK,
+        Some(content),
+        Some(state.cache_control_seconds),
+        Some(m),
+    )?;
+    if state.server_timing && is_descriptor {
+        add_server_timing_header(&mut response, start.elapsed())?;
+    }
+    Ok(response)
+}
+
+/// Reads the history, the tip and the block hashes needed by a waterfalls response.
+async fn scan_waterfalls(
+    state: &Arc<State>,
+    inputs: &WaterfallRequest,
+    with_tip: WithTip,
+    network: Network,
+) -> Result<WaterfallsScan, Error> {
+    let mut derivations_duration = Duration::from_secs(0);
     let mut map = BTreeMap::new();
     let mut has_more = Vec::new();
     let utxo_only_req;
-    let id;
 
     match inputs {
         WaterfallRequest::Descriptor(DescriptorRequest {
@@ -695,13 +787,9 @@ async fn handle_waterfalls_req(
             to_index,
             utxo_only,
         }) => {
-            id = string_hash(&descriptor.normalized_id_string());
-            state.record_descriptor_access(id).await;
-            if page != 0 || to_index != 0 || utxo_only {
-                log::info!("{id:x}: page={page}, to_index={to_index}, utxo_only={utxo_only}");
-            }
+            let (page, to_index, utxo_only) = (*page, *to_index, *utxo_only);
             utxo_only_req = utxo_only;
-            for desc in descriptor.into_single_descriptors()?.iter() {
+            for desc in descriptor.clone().into_single_descriptors()?.iter() {
                 let single_descriptor_id = string_hash(&desc.normalized_id_string());
                 let is_single_address = !desc.has_wildcard();
                 let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
@@ -755,18 +843,15 @@ async fn handle_waterfalls_req(
             page,
             utxo_only,
         }) => {
-            id = string_hash(&format!("{:?}", addresses));
+            let utxo_only = *utxo_only;
             utxo_only_req = utxo_only;
-            if utxo_only && page > 0 {
-                return Err(Error::UtxoOnlyHistoryTooLarge);
-            }
             let mut scripts = Vec::with_capacity(addresses.len());
             for addr in addresses.iter() {
                 scripts.push(state.store.hash(addr.script_pubkey().as_bytes()));
             }
             let mut result = Vec::with_capacity(addresses.len());
             let page = if addresses.len() == 1 {
-                page as usize
+                *page as usize
             } else {
                 0
             };
@@ -812,8 +897,6 @@ async fn handle_waterfalls_req(
         }
     }
 
-    let elements: usize = map.values().map(|v| v.len()).sum();
-
     let (tip_hash, tip_meta) = match with_tip {
         WithTip::No => (None, None),
         WithTip::Hash => (state.tip_hash().await, None),
@@ -823,53 +906,13 @@ async fn handle_waterfalls_req(
         },
     };
 
-    let waterfall_response = WaterfallResponse {
-        txs_seen: map,
-        page,
-        tip: tip_hash,
+    Ok(WaterfallsScan {
+        map,
+        has_more,
+        tip_hash,
         tip_meta,
-        has_more: if has_more.is_empty() {
-            None
-        } else {
-            Some(has_more)
-        },
-    };
-    let content = if cbor {
-        "application/cbor"
-    } else {
-        "application/json"
-    };
-    let result = if cbor {
-        let mut bytes = Vec::new();
-        minicbor::encode(&waterfall_response, &mut bytes).expect("writing to a Vec cannot fail");
-        bytes
-    } else {
-        serde_json::to_vec(&waterfall_response)
-            .expect("does not contain a map with non-string keys")
-    };
-
-    let m = sign_response(&state.secp, &state.wif_key, &result);
-    let m = m.to_msg_sig_address(state.address());
-
-    log::info!(
-        "{id:x}: {elements} elements, elapsed: {:.2?} ({:.2?} derivations)",
-        start.elapsed(),
-        derivations_duration
-    );
-    crate::WATERFALLS_COUNTER.inc();
-    timer.observe_duration();
-
-    let mut response = any_resp(
-        result,
-        hyper::StatusCode::OK,
-        Some(content),
-        Some(state.cache_control_seconds),
-        Some(m),
-    )?;
-    if state.server_timing && is_descriptor {
-        add_server_timing_header(&mut response, start.elapsed())?;
-    }
-    Ok(response)
+        derivations_duration,
+    })
 }
 
 fn add_server_timing_header(response: &mut Resp, duration: Duration) -> Result<(), Error> {
@@ -1345,6 +1388,15 @@ fn truncate_history_page(
     }
 
     has_more
+}
+
+/// Everything a waterfalls response needs
+struct WaterfallsScan {
+    map: BTreeMap<String, Vec<Vec<TxSeen>>>,
+    has_more: Vec<String>,
+    tip_hash: Option<BlockHash>,
+    tip_meta: Option<crate::BlockMeta>,
+    derivations_duration: Duration,
 }
 
 struct FindScriptsResult {
