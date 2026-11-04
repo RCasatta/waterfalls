@@ -606,7 +606,7 @@ pub async fn inner_main(
     #[cfg(not(feature = "db"))]
     let reorg_data_keep_heights = DEFAULT_REORG_DATA_KEEP_HEIGHTS;
 
-    let h1 = {
+    let mut h1 = {
         let state = state.clone();
         let client: Client =
             Client::new(&args).unwrap_or_else(|e| error_panic!("Failed to create client: {e}"));
@@ -772,6 +772,19 @@ pub async fn inner_main(
                 let _ = shutdown_tx.send(());
                 // stop the accept loop
                 break;
+            }
+
+            // The blocks task ends before the shutdown signal only if it panicked. Exit rather
+            // than keep serving data that no longer follows the chain, so the process can be
+            // restarted.
+            result = &mut h1 => {
+                let reason = match result {
+                    Err(e) => format!("blocks task panicked: {e}"),
+                    Ok(()) => "blocks task ended unexpectedly".to_string(),
+                };
+                log::error!("{reason}, shutting down");
+                let _ = shutdown_tx.send(());
+                return Err(reason.into());
             }
         }
     }

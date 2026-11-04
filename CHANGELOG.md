@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns confirmed entries with a null `block_hash`. See `docs/consistency.md`.
 - With `--add-cors`, responses carry `Access-Control-Expose-Headers: Retry-After`, so
   browser clients can read when to retry a 503.
+- The process now exits with an error when the block indexing task panics. It used to keep
+  serving data no longer following the chain; with the block snapshot it would have answered
+  every waterfalls request with a 503 after a 2 seconds wait.
 - Startup now fails with a clear error when `--node-url` (`NODE_URL`) does not start with `http://`.
   Waterfalls talks plain HTTP to the node and has no TLS support: an `https://` URL used to
   fail the backend preflight and be retried forever instead of being reported.
