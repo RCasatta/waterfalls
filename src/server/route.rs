@@ -1555,6 +1555,11 @@ pub async fn infallible_route(
             header::ACCESS_CONTROL_ALLOW_HEADERS,
             header::HeaderValue::from_static("Content-Type"),
         );
+        // Let browser clients read when to retry a 503
+        headers.insert(
+            header::ACCESS_CONTROL_EXPOSE_HEADERS,
+            header::HeaderValue::from_static("Retry-After"),
+        );
     }
 
     if is_head {

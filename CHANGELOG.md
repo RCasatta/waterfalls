@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it fails with `503 Service Unavailable` and `Retry-After: 1`, a new transient error
   clients should retry. The same applies to `/address/{address}/txs`, which no longer
   returns confirmed entries with a null `block_hash`. See `docs/consistency.md`.
+- With `--add-cors`, responses carry `Access-Control-Expose-Headers: Retry-After`, so
+  browser clients can read when to retry a 503.
 - Startup now fails with a clear error when `--node-url` (`NODE_URL`) does not start with `http://`.
   Waterfalls talks plain HTTP to the node and has no TLS support: an `https://` URL used to
   fail the backend preflight and be retried forever instead of being reported.
