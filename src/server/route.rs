@@ -616,53 +616,58 @@ async fn handle_single_address(state: &Arc<State>, address: &be::Address) -> Res
     let script_pubkey = address.script_pubkey();
 
     let script_hash = [state.store.hash(script_pubkey.as_bytes())];
-    // The mempool is read before the db, see `find_scripts`.
-    let mut seen_mempool = vec![Vec::new()];
-    state
-        .mempool
-        .lock()
-        .await
-        .append_seen(&script_hash, &mut seen_mempool);
-    let mut seen_blockchain = state
-        .store_blocking(move |db| db.get_history(&script_hash))
-        .await?;
-    // TODO add pagination for `/address/:address/txs`; for now we only return the first capped page.
-    truncate_history_page(&mut seen_blockchain, 0, state.max_txs_seen);
-    remove_confirmed_from_mempool(&seen_blockchain, &mut seen_mempool);
-    let mut result: Vec<_> = seen_blockchain
-        .into_iter()
-        .next()
-        .unwrap_or_default()
-        .iter()
-        .map(|e| EsploraTx {
-            txid: e.txid,
+    // Read in a block snapshot, so that every confirmed entry has its block hash.
+    let result = with_block_snapshot(state, || async move {
+        // The mempool is read before the db, see `find_scripts`.
+        let mut seen_mempool = vec![Vec::new()];
+        state
+            .mempool
+            .lock()
+            .await
+            .append_seen(&script_hash, &mut seen_mempool);
+        let mut seen_blockchain = state
+            .store_blocking(move |db| db.get_history(&script_hash))
+            .await?;
+        // TODO add pagination for `/address/:address/txs`; for now we only return the first capped page.
+        truncate_history_page(&mut seen_blockchain, 0, state.max_txs_seen);
+        remove_confirmed_from_mempool(&seen_blockchain, &mut seen_mempool);
+        let mut result: Vec<_> = seen_blockchain
+            .into_iter()
+            .next()
+            .unwrap_or_default()
+            .iter()
+            .map(|e| EsploraTx {
+                txid: e.txid,
+                status: Status {
+                    block_height: Some(e.height as i32),
+                    block_hash: None,
+                },
+            })
+            .collect();
+
+        result.extend(seen_mempool.iter().flatten().map(|tx_seen| EsploraTx {
+            txid: tx_seen.txid,
             status: Status {
-                block_height: Some(e.height as i32),
+                block_height: Some(-1),
                 block_hash: None,
             },
-        })
-        .collect();
+        }));
 
-    result.extend(seen_mempool.iter().flatten().map(|tx_seen| EsploraTx {
-        txid: tx_seen.txid,
-        status: Status {
-            block_height: Some(-1),
-            block_hash: None,
-        },
-    }));
-
-    {
-        let blocks_hash_ts = state.blocks_hash_ts.lock().await;
-        for esplora_tx in result.iter_mut() {
-            if let Some(h) = esplora_tx.status.block_height {
-                if h > 0 {
-                    if let Some((block_hash, _)) = blocks_hash_ts.get(h as usize) {
-                        esplora_tx.status.block_hash = Some(*block_hash)
+        {
+            let blocks_hash_ts = state.blocks_hash_ts.lock().await;
+            for esplora_tx in result.iter_mut() {
+                if let Some(h) = esplora_tx.status.block_height {
+                    if h > 0 {
+                        if let Some((block_hash, _)) = blocks_hash_ts.get(h as usize) {
+                            esplora_tx.status.block_hash = Some(*block_hash)
+                        }
                     }
                 }
             }
         }
-    }
+        Ok(result)
+    })
+    .await?;
 
     any_resp(
         serde_json::to_vec(&result).expect("does not contain a map with non-string keys"),

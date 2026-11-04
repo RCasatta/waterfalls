@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while the request is served: the tip, the history and its block hashes now always come
   from the same indexed blocks. The request is retried internally; if blocks keep changing
   it fails with `503 Service Unavailable` and `Retry-After: 1`, a new transient error
-  clients should retry. See `docs/consistency.md`.
+  clients should retry. The same applies to `/address/{address}/txs`, which no longer
+  returns confirmed entries with a null `block_hash`. See `docs/consistency.md`.
 - Startup now fails with a clear error when `--node-url` (`NODE_URL`) does not start with `http://`.
   Waterfalls talks plain HTTP to the node and has no TLS support: an `https://` URL used to
   fail the backend preflight and be retried forever instead of being reported.

@@ -11,6 +11,13 @@ Every waterfalls response reflects a single state of the indexed blocks: the his
 `tip_meta` in v4) all come from the same chain. Every confirmed entry has a `block_hash` at
 a height not above the returned tip.
 
+The same applies to the Esplora-compatible `/address/{address}/txs`: every confirmed entry
+has its `block_hash`.
+
+`/v1/last_used_index` is not covered: its indexes and its `tip` may come from different
+indexed blocks. The indexes only tell which scripts were used and the next request sees the
+new block anyway, so this is not worth the retries.
+
 Indexing a block writes the store first and then updates the in-memory list of block
 hashes; a reorg does the opposite. Neither is atomic for readers, so the blocks thread
 increments a counter (`State::block_update_seq`) when an update starts and again when it

@@ -151,6 +151,10 @@ Returns the highest derivation index that has been used (has transaction history
   - Supports encryption using age encryption with server's public key
   - Network validation: mainnet descriptors (xpub) cannot be used on testnet/regtest
 
+The indexes and the `tip` are not read from the same indexed blocks: a block indexed while
+the request is served can be counted in the indexes and not in the `tip`, or the opposite
+during a reorg. See [consistency.md](consistency.md).
+
 **Response Format (JSON):**
 ```json
 {
@@ -353,6 +357,9 @@ Returns transaction history for a specific address in Esplora-compatible format.
 - Confirmed history is capped by the same server-side truncation threshold used by the waterfalls endpoints
 - This endpoint currently returns only the first capped page of confirmed history, plus current mempool entries
 - If an address has more history than the cap, older confirmed transactions are not returned by this endpoint
+- Every confirmed entry has its `block_hash`: the history and the block hashes come from the
+  same indexed blocks. If blocks keep being indexed while the request is served, the server
+  returns `503 Service Unavailable` with `Retry-After: 1`. See [consistency.md](consistency.md).
 
 **Response (JSON):**
 ```json
