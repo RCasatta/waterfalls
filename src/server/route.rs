@@ -2120,6 +2120,86 @@ mod tests {
         updater.join().unwrap();
     }
 
+    /// A block indexed while a waterfalls request reads the store must not produce a response
+    /// mixing the tip from before the block with the history from after it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn waterfalls_response_not_mixed_with_block_indexed_meanwhile() {
+        let state = Arc::new(route_test_state());
+        let address = "ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh";
+        let address = be::Address::from_str(address, Network::Liquid).unwrap();
+        let script_hash = state.store.hash(address.script_pubkey().as_bytes());
+        let block_hash = |n: u8| BlockHash::from_str(&format!("{n:064x}")).unwrap();
+        let txid = |n: u8| crate::be::Txid::from_str(&format!("{n:064x}")).unwrap();
+        for height in 0..2u8 {
+            state
+                .set_hash_ts(&crate::store::BlockMeta::new(
+                    height.into(),
+                    block_hash(height + 1),
+                    0,
+                ))
+                .await;
+        }
+        #[allow(irrefutable_let_patterns)]
+        let crate::store::AnyStore::Mem(store) = &state.store
+        else {
+            unreachable!("test state uses the memory store")
+        };
+        store
+            .lock_history()
+            .insert(script_hash, vec![TxSeen::new(txid(1), 1, V::Vout(0))]);
+
+        // Index block 2 while the request is blocked on the store. As the real indexer does, the
+        // store write ends before the block hash is added, leaving the request a window where
+        // it sees the new history but not the new block hash and tip.
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+        let indexer_state = Arc::clone(&state);
+        let indexer = std::thread::spawn(move || {
+            #[allow(irrefutable_let_patterns)]
+            let crate::store::AnyStore::Mem(store) = &indexer_state.store
+            else {
+                unreachable!("test state uses the memory store")
+            };
+            let mut history = store.lock_history();
+            locked_tx.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(100));
+            let block_update = indexer_state.begin_block_update();
+            history
+                .get_mut(&script_hash)
+                .unwrap()
+                .push(TxSeen::new(txid(2), 2, V::Vout(0)));
+            drop(history);
+            std::thread::sleep(Duration::from_millis(200));
+            indexer_state
+                .blocks_hash_ts
+                .blocking_lock()
+                .push((block_hash(3), 0));
+            drop(block_update);
+        });
+        locked_rx.recv().unwrap();
+
+        let request = WaterfallRequest::Addresses(AddressesRequest {
+            addresses: vec![address],
+            page: 0,
+            utxo_only: false,
+        });
+        let response = handle_waterfalls_req(&state, request, WithTip::All, false, Network::Liquid)
+            .await
+            .unwrap();
+        indexer.join().unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let response: WaterfallResponse = serde_json::from_slice(&body).unwrap();
+
+        let tip = response.tip_meta.unwrap();
+        assert_eq!((tip.h, tip.b), (2, block_hash(3)));
+        let history = &response.txs_seen["addresses"][0];
+        assert_eq!(
+            history.iter().map(|tx| tx.height).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert!(history.iter().all(|tx| tx.block_hash.is_some()));
+    }
+
     fn route_test_state() -> State {
         State::new(
             crate::store::AnyStore::Mem(crate::store::memory::MemoryStore::new()),
