@@ -551,7 +551,8 @@ impl DBStore {
             self.remove_history_entries_batch(&mut batch, &reorg_data.history)?;
         }
 
-        // Delete the reorg data entry from the database since it's been applied
+        // Delete the rolled-back block metadata and the reorg data since it's been applied
+        batch.delete_cf(&self.hashes_cf(), height.to_be_bytes());
         batch.delete_cf(&reorg_cf, height.to_be_bytes());
 
         self.write(batch)?;
@@ -974,6 +975,39 @@ mod test {
             .unwrap()
             .is_none());
         assert_eq!(db.get_utxos(&[OutPoint::new(txid, 2)]).unwrap(), vec![None]);
+    }
+
+    #[test]
+    fn rollback_tip_stays_removed_after_reopen() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let db = DBStore::open(tempdir.path(), 64, false, 6).unwrap();
+        db.ibd_finished();
+
+        for height in 0..=1 {
+            let block = BlockMeta::new(
+                height,
+                BlockHash::from_byte_array([height as u8; 32]),
+                height,
+            );
+            db.update(&block, vec![], BTreeMap::new(), BTreeMap::new())
+                .unwrap();
+        }
+        assert_eq!(db.iter_hash_ts().last().unwrap().height(), 1);
+
+        db.reorg(1);
+        drop(db);
+
+        // Restart before a replacement block has been indexed.
+        let db = DBStore::open(tempdir.path(), 64, false, 6).unwrap();
+        let blocks: Vec<_> = db.iter_hash_ts().collect();
+        assert_eq!(blocks.last().unwrap().height(), 0);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].hash(), BlockHash::all_zeros());
+        assert_eq!(blocks[0].timestamp(), 0);
+
+        // The preceding block's undo row must still allow a deeper rollback.
+        db.reorg(0);
+        assert!(db.iter_hash_ts().next().is_none());
     }
 
     #[test]

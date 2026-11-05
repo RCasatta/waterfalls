@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Rolling back a block now atomically removes its stored hash and timestamp, so restarting
+  before a replacement block is indexed cannot restore the rolled-back block as the tip.
 - An age-encrypted descriptor whose header is valid but whose payload is corrupted now returns
   HTTP 422 instead of panicking the connection task.
 - Script derivation no longer holds the shared derivation cache lock, so a request deriving
