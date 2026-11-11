@@ -451,7 +451,7 @@ mod indexing_tests {
     #[test]
     fn custom_genesis_issuance_and_sweep_db() {
         let tempdir = tempfile::TempDir::new().unwrap();
-        let store = crate::store::db::DBStore::open(tempdir.path(), 64, true, 6).unwrap();
+        let store = crate::store::db::DBStore::open(tempdir.path(), 64, true, 6, false).unwrap();
         assert_custom_genesis_issuance_and_sweep(&store);
     }
 

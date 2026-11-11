@@ -77,7 +77,7 @@ const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF, REO
 
 // height key for indexed blocks
 // const INDEXED_KEY: &[u8] = b"I";
-// salt of the FxHash script hash, see `ScriptHasher::SaltedFx`
+// salt of the script hash, its meaning depends on the format version, see `ScriptHasher`
 const SALT_KEY: &[u8] = b"S";
 
 /// Format version of the database, see [`read_format_version`]. Only in databases of a format
@@ -87,7 +87,10 @@ const META_CF: &str = "meta";
 const FORMAT_VERSION_KEY: &[u8] = b"V";
 
 /// Highest format version this binary can open.
-const FORMAT_VERSION: u32 = 1;
+///
+/// 1. Script hashes computed by FxHash with a salt, see `ScriptHasher::SaltedFx`.
+/// 2. Script hashes computed by SipHash-2-4 with a key, see `ScriptHasher::KeyedSip`.
+const FORMAT_VERSION: u32 = 2;
 
 const VEC_TX_SEEN_MAX_SIZE: usize = 50; // 32 bytes (txid) + 9 bytes (height) + 9 bytes (v) (most of the time height/v is much less)
 const VEC_TX_SEEN_MIN_SIZE: usize = 34; // 32 bytes (txid) + 1 byte (height) + 1 byte (v)
@@ -189,11 +192,15 @@ impl DBStore {
             .collect()
     }
 
+    /// A new database hashes scripts with keyed SipHash. A database created by a previous
+    /// release, with the legacy salted script hash, fails to open unless
+    /// `allow_legacy_script_hash` is set, see `--allow-legacy-script-hash`.
     pub fn open(
         path: &Path,
         shared_db_cache_mb: u64,
         enable_statistics: bool,
         reorg_data_keep_heights: u32,
+        allow_legacy_script_hash: bool,
     ) -> Result<Self> {
         let mut db_opts = Options::default();
 
@@ -230,8 +237,10 @@ impl DBStore {
                 path.display()
             );
         }
-        let script_hasher = get_or_init_script_hasher(&db)
-            .with_context(|| format!("failed to open DB: {}", path.display()))?;
+        let script_hasher =
+            get_or_init_script_hasher(&db, format_version, allow_legacy_script_hash)
+                .with_context(|| format!("failed to open DB: {}", path.display()))?;
+        log::info!("script hash: {}", script_hasher.name());
         let store = DBStore {
             db,
             script_hasher,
@@ -822,25 +831,63 @@ fn read_format_version(db: &DB) -> Result<u32> {
     Ok(u32::from_be_bytes(version))
 }
 
-/// Reads the script hasher of the database, or creates one with a random salt for a new one.
+/// Reads the script hasher of the database, or creates a keyed one with a random key for a new
+/// database.
 ///
 /// The script hash is the key of the history and is stored in the UTXO set, so it cannot change
-/// without reindexing: the database keeps the one it was created with.
-fn get_or_init_script_hasher(db: &DB) -> Result<ScriptHasher> {
+/// without reindexing: an existing database keeps the one it was created with. A database
+/// created by a previous release uses the legacy salted script hash, and is refused unless
+/// `allow_legacy_script_hash` is set: switching to the keyed one needs a reindex.
+///
+/// The format version tells how the stored salt is used: the 8 bytes of the FxHash salt in
+/// version 1, the 16 bytes of the SipHash-2-4 key in version 2. A keyed database is created with
+/// format version 2, so that previous releases, which would read its salt as an FxHash one,
+/// refuse to open it.
+fn get_or_init_script_hasher(
+    db: &DB,
+    format_version: u32,
+    allow_legacy_script_hash: bool,
+) -> Result<ScriptHasher> {
     let cf = db.cf_handle(OTHER_CF).expect("missing OTHER_CF");
-    match db.get_cf(&cf, SALT_KEY)? {
-        Some(salt) => {
+    match (format_version, db.get_cf(&cf, SALT_KEY)?) {
+        (2, Some(key)) => {
+            let key: [u8; 16] = key
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("invalid script hash key length"))?;
+            Ok(ScriptHasher::keyed(key))
+        }
+        (1, Some(salt)) if allow_legacy_script_hash => {
             let salt: [u8; 8] = salt
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("invalid script hash salt length"))?;
+            log::warn!(
+                "using the legacy script hash of a database created by a previous release, \
+                 reindex into a new --db-dir to switch to the keyed one"
+            );
             Ok(ScriptHasher::SaltedFx(u64::from_be_bytes(salt)))
         }
-        None => {
-            let mut salt = [0u8; 8];
-            thread_rng().fill(&mut salt);
-            db.put_cf(&cf, SALT_KEY, salt)?;
-            Ok(ScriptHasher::SaltedFx(u64::from_be_bytes(salt)))
+        (1, Some(_)) => anyhow::bail!(
+            "the database was created by a previous release, with the legacy script hash: \
+             point --db-dir to an empty directory to reindex with the keyed script hash, or \
+             start with --allow-legacy-script-hash to keep using this database"
+        ),
+        (1, None) => {
+            let mut key = [0u8; 16];
+            thread_rng().fill(&mut key);
+            db.create_cf(META_CF, &Options::default())?;
+            let meta_cf = db.cf_handle(META_CF).expect("just created");
+            // The version and the key are written together: a database has both or neither.
+            let mut batch = rocksdb::WriteBatch::default();
+            batch.put_cf(&meta_cf, FORMAT_VERSION_KEY, 2u32.to_be_bytes());
+            batch.put_cf(&cf, SALT_KEY, key);
+            db.write(batch)?;
+            Ok(ScriptHasher::keyed(key))
         }
+        (version, None) => {
+            anyhow::bail!("missing script hash salt in a database of format version {version}")
+        }
+        // Versions above FORMAT_VERSION are refused before getting here.
+        (version, Some(_)) => anyhow::bail!("unknown format version {version}"),
     }
 }
 
@@ -864,11 +911,21 @@ fn concat_merge(
 /// How a database hashes scripts, chosen when it is created.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScriptHasher {
-    /// FxHash seeded with a random 64-bit salt
+    /// FxHash seeded with a random 64-bit salt, in databases created by previous releases
     SaltedFx(u64),
+    /// SipHash-2-4 keyed with a random 128-bit key
+    KeyedSip { k0: u64, k1: u64 },
 }
 
 impl ScriptHasher {
+    fn keyed(key: [u8; 16]) -> Self {
+        let (k0, k1) = key.split_at(8);
+        ScriptHasher::KeyedSip {
+            k0: u64::from_le_bytes(k0.try_into().expect("8 bytes")),
+            k1: u64::from_le_bytes(k1.try_into().expect("8 bytes")),
+        }
+    }
+
     fn hash(&self, script: &[u8]) -> ScriptHash {
         match self {
             ScriptHasher::SaltedFx(salt) => {
@@ -877,6 +934,16 @@ impl ScriptHasher {
                 hasher.write(script);
                 hasher.finish()
             }
+            ScriptHasher::KeyedSip { k0, k1 } => {
+                elements::hashes::siphash24::Hash::hash_to_u64_with_keys(*k0, *k1, script)
+            }
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        match self {
+            ScriptHasher::SaltedFx(_) => "salted FxHash",
+            ScriptHasher::KeyedSip { .. } => "keyed SipHash-2-4",
         }
     }
 }
@@ -901,8 +968,8 @@ mod test {
     use crate::V;
 
     use super::{
-        DBStore, ScriptHasher, COLUMN_FAMILIES, FORMAT_VERSION, FORMAT_VERSION_KEY, META_CF,
-        REORG_CF,
+        read_format_version, DBStore, ScriptHasher, COLUMN_FAMILIES, FORMAT_VERSION,
+        FORMAT_VERSION_KEY, META_CF, OTHER_CF, REORG_CF, SALT_KEY,
     };
 
     /// Adds a META_CF storing `version` to the database at `path`.
@@ -920,24 +987,35 @@ mod test {
         DB::list_cf(&rocksdb::Options::default(), path).unwrap()
     }
 
+    /// Creates a database as previous releases did: format version 1, salted script hash.
+    fn create_legacy_database(path: &std::path::Path, salt: u64) {
+        let mut opts = rocksdb::Options::default();
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+        let db = DB::open_cf(&opts, path, COLUMN_FAMILIES).unwrap();
+        let cf = db.cf_handle(OTHER_CF).unwrap();
+        db.put_cf(&cf, SALT_KEY, salt.to_be_bytes()).unwrap();
+    }
+
     #[test]
     fn format_version_one_without_meta_cf() {
         let tempdir = tempfile::TempDir::new().unwrap();
-        drop(DBStore::open(tempdir.path(), 64, false, 6).unwrap());
+        create_legacy_database(tempdir.path(), 42);
+        drop(DBStore::open(tempdir.path(), 64, false, 6, true).unwrap());
         // Databases of version 1 stay readable by binaries without META_CF.
         assert!(!column_families(tempdir.path()).contains(&META_CF.to_string()));
 
         write_format_version(tempdir.path(), 1);
-        DBStore::open(tempdir.path(), 64, false, 6).unwrap();
+        DBStore::open(tempdir.path(), 64, false, 6, true).unwrap();
     }
 
     #[test]
     fn newer_format_version_refused() {
         let tempdir = tempfile::TempDir::new().unwrap();
-        drop(DBStore::open(tempdir.path(), 64, false, 6).unwrap());
+        drop(DBStore::open(tempdir.path(), 64, false, 6, false).unwrap());
         write_format_version(tempdir.path(), FORMAT_VERSION + 1);
 
-        let err = DBStore::open(tempdir.path(), 64, false, 6).unwrap_err();
+        let err = DBStore::open(tempdir.path(), 64, false, 6, false).unwrap_err();
         assert!(format!("{err:#}").contains("newer waterfalls"), "{err:#}");
     }
 
@@ -955,16 +1033,84 @@ mod test {
         };
         let hash = db.hash(b"test");
         assert_eq!(hash, 2879782050633127044);
+
+        // The keyed script hash of existing databases must not change either.
+        let key: [u8; 16] = std::array::from_fn(|i| i as u8);
+        let hash = ScriptHasher::keyed(key).hash(b"test");
+        // SipHash-2-4 of "test" with key 00..0f, matching the reference implementation
+        assert_eq!(hash, 2771506328522617498);
+    }
+
+    #[test]
+    fn new_database_uses_keyed_script_hash() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let db = DBStore::open(tempdir.path(), 64, false, 6, false).unwrap();
+        let hasher = db.script_hasher;
+        assert!(matches!(hasher, ScriptHasher::KeyedSip { .. }));
+        let hash = db.hash(b"test");
+        // The key is stored as the salt, the format version tells how to use it.
+        let other_cf = db.db.cf_handle(OTHER_CF).unwrap();
+        let salt = db.db.get_cf(&other_cf, SALT_KEY).unwrap().unwrap();
+        assert_eq!(salt.len(), 16);
+        drop(other_cf);
+        drop(db);
+        assert!(column_families(tempdir.path()).contains(&META_CF.to_string()));
+
+        // The database keeps its key, the legacy flag does not matter.
+        for allow_legacy_script_hash in [false, true] {
+            let db = DBStore::open(tempdir.path(), 64, false, 6, allow_legacy_script_hash).unwrap();
+            assert_eq!(db.script_hasher, hasher);
+            assert_eq!(db.hash(b"test"), hash);
+        }
+
+        // Another database gets another key, even with the legacy flag.
+        let other_dir = tempfile::TempDir::new().unwrap();
+        let other = DBStore::open(other_dir.path(), 64, false, 6, true).unwrap();
+        assert!(matches!(other.script_hasher, ScriptHasher::KeyedSip { .. }));
+        assert_ne!(other.hash(b"test"), hash);
+    }
+
+    #[test]
+    fn keyed_database_not_opened_by_previous_binaries() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        drop(DBStore::open(tempdir.path(), 64, false, 6, false).unwrap());
+
+        // Previous binaries open the database with these column families only.
+        let mut opts = rocksdb::Options::default();
+        opts.create_missing_column_families(true);
+        let err = DB::open_cf(&opts, tempdir.path(), COLUMN_FAMILIES).unwrap_err();
+        assert!(err.to_string().contains(META_CF), "{err}");
+    }
+
+    #[test]
+    fn legacy_database_needs_flag() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        create_legacy_database(tempdir.path(), 42);
+
+        let err = DBStore::open(tempdir.path(), 64, false, 6, false).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("--allow-legacy-script-hash"),
+            "{err:#}"
+        );
+
+        // With the flag it opens with its salt, unchanged.
+        let db = DBStore::open(tempdir.path(), 64, false, 6, true).unwrap();
+        assert_eq!(db.script_hasher, ScriptHasher::SaltedFx(42));
+        drop(db);
+        // And it is still readable by previous binaries.
+        assert!(!column_families(tempdir.path()).contains(&META_CF.to_string()));
     }
 
     #[test]
     fn test_db() {
         let tempdir = tempfile::TempDir::new().unwrap();
-        let db = DBStore::open(tempdir.path(), 64, true, 6).unwrap();
+        let db = DBStore::open(tempdir.path(), 64, true, 6, false).unwrap();
 
-        let hasher = get_or_init_script_hasher(&db.db).unwrap();
-        assert!(matches!(hasher, ScriptHasher::SaltedFx(salt) if salt != 0));
-        assert_eq!(get_or_init_script_hasher(&db.db).unwrap(), hasher);
+        let format_version = read_format_version(&db.db).unwrap();
+        assert_eq!(format_version, 2);
+        let hasher = get_or_init_script_hasher(&db.db, format_version, false).unwrap();
+        assert!(matches!(hasher, ScriptHasher::KeyedSip { .. }));
+        assert_eq!(hasher, db.script_hasher);
 
         let o = OutPoint::null();
         let o1 = {
@@ -1026,7 +1172,7 @@ mod test {
     #[test]
     fn test_reorg_data_written_only_after_ibd_finished() {
         let tempdir = tempfile::TempDir::new().unwrap();
-        let db = DBStore::open(tempdir.path(), 64, false, 6).unwrap();
+        let db = DBStore::open(tempdir.path(), 64, false, 6, false).unwrap();
         let reorg_cf = db.db.cf_handle(REORG_CF).unwrap();
         let txid = crate::be::Txid::all_zeros();
 
@@ -1078,7 +1224,7 @@ mod test {
     #[test]
     fn rollback_tip_stays_removed_after_reopen() {
         let tempdir = tempfile::TempDir::new().unwrap();
-        let db = DBStore::open(tempdir.path(), 64, false, 6).unwrap();
+        let db = DBStore::open(tempdir.path(), 64, false, 6, false).unwrap();
         db.ibd_finished();
 
         for height in 0..=1 {
@@ -1096,7 +1242,7 @@ mod test {
         drop(db);
 
         // Restart before a replacement block has been indexed.
-        let db = DBStore::open(tempdir.path(), 64, false, 6).unwrap();
+        let db = DBStore::open(tempdir.path(), 64, false, 6, false).unwrap();
         let blocks: Vec<_> = db.iter_hash_ts().collect();
         assert_eq!(blocks.last().unwrap().height(), 0);
         assert_eq!(blocks.len(), 1);

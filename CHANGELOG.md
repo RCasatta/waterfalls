@@ -13,9 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listener serving only the prometheus `/metrics` endpoint, so it can be bound to a loopback
   or private interface separate from the public one. When set, the public listener no
   longer serves `/metrics` and returns 404.
+- `--allow-legacy-script-hash` (`ALLOW_LEGACY_SCRIPT_HASH` environment variable) allows
+  starting on a database created by a previous release, see the breaking change below.
+- The database records a format version, and a database with a format version newer than the
+  running binary supports is refused at startup.
 
 ### Changed
 
+- **Breaking:** new databases hash scripts with SipHash-2-4 and a random 128-bit key, instead
+  of FxHash with a random 64-bit salt. The script hash cannot change without reindexing, so
+  starting on a database created by a previous release fails: point `--db-dir` to an empty
+  directory to reindex with the keyed script hash, or pass `--allow-legacy-script-hash` to keep
+  using the existing database. To avoid downtime, index into a new `--db-dir` with a second
+  instance while the current one keeps serving, then switch. A new database has format
+  version 2, stored in a new `meta` column family: previous releases refuse to open it, so
+  a deployment on a new database cannot be rolled back to them. A database of a previous
+  release opened with `--allow-legacy-script-hash` is left unchanged.
 - Waterfalls responses no longer mix data from before and after a block indexed or reorged
   while the request is served: the tip, the history and its block hashes now always come
   from the same indexed blocks. The request is retried internally; if blocks keep changing

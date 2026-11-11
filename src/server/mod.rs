@@ -88,6 +88,18 @@ pub struct Arguments {
     #[arg(env, long)]
     pub db_dir: Option<std::path::PathBuf>,
 
+    /// Allow starting on a database created by a previous release, which uses the legacy script
+    /// hash: FxHash with a random 64-bit salt.
+    ///
+    /// New databases hash scripts with SipHash-2-4 and a random 128-bit key. The script hash is
+    /// chosen when the database is created and cannot change without reindexing, so without
+    /// this flag a database of a previous release is refused at startup: reindex into a new
+    /// `--db-dir` to switch to the keyed script hash. Releases before the keyed script hash
+    /// cannot open a database created with it, so such a deployment cannot be rolled back to them.
+    #[cfg(feature = "db")]
+    #[arg(env, long)]
+    pub allow_legacy_script_hash: bool,
+
     /// An optional age server key to decrypt descriptor query string.
     /// If not provided is randomly generated.
     #[arg(long, env)]
@@ -238,6 +250,7 @@ impl std::fmt::Debug for Arguments {
         #[cfg(feature = "db")]
         let d = d
             .field("db_dir", &self.db_dir)
+            .field("allow_legacy_script_hash", &self.allow_legacy_script_hash)
             .field("reorg_data_keep_heights", &self.reorg_data_keep_heights);
 
         d.finish()
@@ -298,6 +311,22 @@ mod argument_tests {
             Arguments::try_parse_from(["waterfalls", "--network", "liquid", "--server-timing"])
                 .unwrap();
         assert!(args.server_timing);
+    }
+
+    #[cfg(feature = "db")]
+    #[test]
+    fn legacy_script_hash_is_opt_in() {
+        let args = Arguments::try_parse_from(["waterfalls", "--network", "liquid"]).unwrap();
+        assert!(!args.allow_legacy_script_hash);
+
+        let args = Arguments::try_parse_from([
+            "waterfalls",
+            "--network",
+            "liquid",
+            "--allow-legacy-script-hash",
+        ])
+        .unwrap();
+        assert!(args.allow_legacy_script_hash);
     }
 
     #[test]
@@ -508,6 +537,7 @@ fn get_store(args: &Arguments) -> Result<AnyStore, Error> {
                 args.enable_db_statistics,
                 args.reorg_data_keep_heights
                     .unwrap_or(DEFAULT_REORG_DATA_KEEP_HEIGHTS),
+                args.allow_legacy_script_hash,
             )
             .map_err(|e| Error::DBOpen(format!("{e:?}")))?;
 
@@ -520,7 +550,12 @@ fn get_store(args: &Arguments) -> Result<AnyStore, Error> {
 
             AnyStore::Db(db_store)
         }
-        None => AnyStore::Mem(MemoryStore::new()),
+        None => {
+            if args.allow_legacy_script_hash {
+                log::warn!("--allow-legacy-script-hash is ignored without --db-dir");
+            }
+            AnyStore::Mem(MemoryStore::new())
+        }
     })
 }
 
