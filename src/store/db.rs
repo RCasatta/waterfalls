@@ -7,8 +7,8 @@ use elements::{
 };
 use fxhash::FxHasher;
 use rocksdb::{
-    BlockBasedOptions, BoundColumnFamily, Cache, DBCompressionType, DBPinnableSlice, MergeOperands,
-    Options, DB,
+    BlockBasedOptions, BoundColumnFamily, Cache, ColumnFamilyDescriptor, DBCompressionType,
+    DBPinnableSlice, MergeOperands, Options, DB,
 };
 
 use crate::V;
@@ -79,6 +79,15 @@ const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF, REO
 // const INDEXED_KEY: &[u8] = b"I";
 // salt of the FxHash script hash, see `ScriptHasher::SaltedFx`
 const SALT_KEY: &[u8] = b"S";
+
+/// Format version of the database, see [`read_format_version`]. Only in databases of a format
+/// version above 1, which binaries released before it existed must not open: they don't list
+/// this column family, and RocksDB refuses to open a database without all its column families.
+const META_CF: &str = "meta";
+const FORMAT_VERSION_KEY: &[u8] = b"V";
+
+/// Highest format version this binary can open.
+const FORMAT_VERSION: u32 = 1;
 
 const VEC_TX_SEEN_MAX_SIZE: usize = 50; // 32 bytes (txid) + 9 bytes (height) + 9 bytes (v) (most of the time height/v is much less)
 const VEC_TX_SEEN_MIN_SIZE: usize = 34; // 32 bytes (txid) + 1 byte (height) + 1 byte (v)
@@ -202,13 +211,25 @@ impl DBStore {
         db_opts.increase_parallelism(parallelism);
         db_opts.set_max_background_jobs(parallelism);
 
-        let db = rocksdb::DB::open_cf_descriptors(
-            &db_opts,
-            path,
-            Self::create_cf_descriptors(shared_db_cache_mb),
-        )
-        .with_context(|| format!("failed to open DB: {}", path.display()))?;
+        // A new database, for which listing fails, has no META_CF either.
+        let has_meta_cf =
+            DB::list_cf(&db_opts, path).is_ok_and(|cfs| cfs.iter().any(|cf| cf == META_CF));
+        let mut cf_descriptors = Self::create_cf_descriptors(shared_db_cache_mb);
+        if has_meta_cf {
+            cf_descriptors.push(ColumnFamilyDescriptor::new(META_CF, Options::default()));
+        }
+        let db = rocksdb::DB::open_cf_descriptors(&db_opts, path, cf_descriptors)
+            .with_context(|| format!("failed to open DB: {}", path.display()))?;
         log::info!("DB opened at path: {}", path.display());
+        let format_version = read_format_version(&db)
+            .with_context(|| format!("failed to open DB: {}", path.display()))?;
+        if format_version > FORMAT_VERSION {
+            anyhow::bail!(
+                "failed to open DB: {}: its format version is {format_version}, it was created by \
+                 a newer waterfalls supporting it, this one supports up to {FORMAT_VERSION}",
+                path.display()
+            );
+        }
         let script_hasher = get_or_init_script_hasher(&db)
             .with_context(|| format!("failed to open DB: {}", path.display()))?;
         let store = DBStore {
@@ -784,6 +805,23 @@ pub(super) fn vec_tx_seen_from_be_bytes(s: &[u8]) -> Result<Vec<TxSeen>> {
     Ok(result)
 }
 
+/// Format version of `db`: the value stored in [`META_CF`], or 1 for a database without it.
+///
+/// A database gets a format version above 1, and the column family storing it, when it needs a
+/// binary knowing that version to be read correctly.
+fn read_format_version(db: &DB) -> Result<u32> {
+    let Some(cf) = db.cf_handle(META_CF) else {
+        return Ok(1);
+    };
+    let version = db
+        .get_cf(&cf, FORMAT_VERSION_KEY)?
+        .ok_or_else(|| anyhow::anyhow!("missing format version"))?;
+    let version: [u8; 4] = version
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("invalid format version length"))?;
+    Ok(u32::from_be_bytes(version))
+}
+
 /// Reads the script hasher of the database, or creates one with a random salt for a new one.
 ///
 /// The script hash is the key of the history and is stored in the UTXO set, so it cannot change
@@ -862,7 +900,46 @@ mod test {
     use crate::OutPoint;
     use crate::V;
 
-    use super::{DBStore, ScriptHasher, REORG_CF};
+    use super::{
+        DBStore, ScriptHasher, COLUMN_FAMILIES, FORMAT_VERSION, FORMAT_VERSION_KEY, META_CF,
+        REORG_CF,
+    };
+
+    /// Adds a META_CF storing `version` to the database at `path`.
+    fn write_format_version(path: &std::path::Path, version: u32) {
+        let mut opts = rocksdb::Options::default();
+        opts.create_missing_column_families(true);
+        let cfs = COLUMN_FAMILIES.iter().copied().chain([META_CF]);
+        let db = DB::open_cf(&opts, path, cfs).unwrap();
+        let cf = db.cf_handle(META_CF).unwrap();
+        db.put_cf(&cf, FORMAT_VERSION_KEY, version.to_be_bytes())
+            .unwrap();
+    }
+
+    fn column_families(path: &std::path::Path) -> Vec<String> {
+        DB::list_cf(&rocksdb::Options::default(), path).unwrap()
+    }
+
+    #[test]
+    fn format_version_one_without_meta_cf() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        drop(DBStore::open(tempdir.path(), 64, false, 6).unwrap());
+        // Databases of version 1 stay readable by binaries without META_CF.
+        assert!(!column_families(tempdir.path()).contains(&META_CF.to_string()));
+
+        write_format_version(tempdir.path(), 1);
+        DBStore::open(tempdir.path(), 64, false, 6).unwrap();
+    }
+
+    #[test]
+    fn newer_format_version_refused() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        drop(DBStore::open(tempdir.path(), 64, false, 6).unwrap());
+        write_format_version(tempdir.path(), FORMAT_VERSION + 1);
+
+        let err = DBStore::open(tempdir.path(), 64, false, 6).unwrap_err();
+        assert!(format!("{err:#}").contains("newer waterfalls"), "{err:#}");
+    }
 
     #[test]
     fn test_db_hash_compatibility() {
