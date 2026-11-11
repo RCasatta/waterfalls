@@ -2210,6 +2210,31 @@ mod tests {
         assert!(history.iter().all(|tx| tx.block_hash.is_some()));
     }
 
+    /// Records `max_used_index` for every path of `desc`, as a previous scan would.
+    async fn record_max_used_index(state: &State, desc: &be::Descriptor, max_used_index: u32) {
+        for single in desc.clone().into_single_descriptors().unwrap() {
+            let id = string_hash(&single.normalized_id_string());
+            state
+                .record_descriptor_scan_max_used_index(id, Some(max_used_index))
+                .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn subscribe_script_limit_counts_every_path() {
+        // The test state allows 100 scripts, `<0;1>` watches max_used_index + 21 per path.
+        let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
+
+        let state = Arc::new(route_test_state());
+        record_max_used_index(&state, &desc, 29).await;
+        assert!(subscribe_descriptor(&state, desc.clone()).await.is_ok());
+
+        let state = Arc::new(route_test_state());
+        record_max_used_index(&state, &desc, 30).await;
+        let err = subscribe_descriptor(&state, desc).await.unwrap_err();
+        assert_eq!(err, Error::String("TooManyScripts".to_string()));
+    }
+
     fn route_test_state() -> State {
         State::new(
             crate::store::AnyStore::Mem(crate::store::memory::MemoryStore::new()),
