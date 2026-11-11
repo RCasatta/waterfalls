@@ -30,6 +30,7 @@ GET /v2/waterfalls.cbor?<query_params>
   - Cannot be used together with `addresses`
   - Supports encryption using age encryption with server's public key
   - Network validation: mainnet descriptors (xpub) cannot be used on testnet/regtest
+  - Descriptor limits, see [Descriptor limits](#descriptor-limits)
   
 - `addresses` (string): Comma-separated list of Bitcoin/Elements addresses
   - Cannot be used together with `descriptor`
@@ -449,6 +450,16 @@ returns 404 for it.
 **Deprecated:** without `--metrics-listen`, `/metrics` is still served on the public
 listener. A future release will stop doing so by default; set `--metrics-listen` to keep
 scraping metrics.
+
+## Descriptor limits
+
+The descriptor endpoints (`/vN/waterfalls`, `/v1/last_used_index` and `/v1/subscribe`) refuse
+with `400 InvalidDescriptor` a descriptor:
+
+- longer than 8192 bytes
+- expanding to more paths than `--max-descriptor-paths` (default 2, as `<0;1>`)
+- with more keys than `--max-descriptor-keys` (default 20), counting every occurrence of a key
+- with a hardened derivation step or wildcard after the xpub
 
 ## Error Responses
 

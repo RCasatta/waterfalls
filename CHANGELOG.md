@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   starting on a database created by a previous release, see the breaking change below.
 - The database records a format version, and a database with a format version newer than the
   running binary supports is refused at startup.
+- `--max-descriptor-paths` (`MAX_DESCRIPTOR_PATHS`, default 2) and `--max-descriptor-keys`
+  (`MAX_DESCRIPTOR_KEYS`, default 20) bound the descriptors accepted by the descriptor
+  endpoints: the number of paths a descriptor expands to (2 with `<0;1>`), and the number of
+  keys it contains.
 
 ### Changed
 
@@ -29,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version 2, stored in a new `meta` column family: previous releases refuse to open it, so
   a deployment on a new database cannot be rolled back to them. A database of a previous
   release opened with `--allow-legacy-script-hash` is left unchanged.
+- **Breaking:** descriptors expanding to more than 2 paths (e.g. `<0;1;2>`) or with more than
+  20 keys are rejected with HTTP 400 by default. Raise `--max-descriptor-paths` or
+  `--max-descriptor-keys` to accept them.
 - Waterfalls responses no longer mix data from before and after a block indexed or reorged
   while the request is served: the tip, the history and its block hashes now always come
   from the same indexed blocks. The request is retried internally; if blocks keep changing
@@ -66,9 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HTTP 422 instead of panicking the connection task.
 - Script derivation no longer holds the shared derivation cache lock, so a request deriving
   many scripts does not block the other requests needing the cache.
-- Descriptors longer than 8192 bytes, or expanding to more than eight paths (e.g.
-  `<0;1;2;3;4;5;6;7;8>`), are rejected with HTTP 400 before any scan, bounding the work a
-  single request can cause.
+- Descriptors longer than 8192 bytes are rejected with HTTP 400 before any scan, bounding the
+  work a single request can cause.
 - Descriptors nested deeper than 64 levels, counting parentheses and miniscript wrappers
   (e.g. `elnnnn…:1`), are rejected with HTTP 400 before parsing. elements-miniscript recursed
   once per wrapper letter while parsing, which could overflow the stack.

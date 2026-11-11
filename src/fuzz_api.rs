@@ -7,7 +7,8 @@ use crate::server::{route, Error, Network};
 use crate::WaterfallRequest;
 
 pub const MAX_DESCRIPTOR_LENGTH: usize = be::MAX_DESCRIPTOR_LENGTH;
-pub const MAX_SINGLE_DESCRIPTORS: usize = be::MAX_SINGLE_DESCRIPTORS;
+pub const MAX_DESCRIPTOR_PATHS: usize = be::DEFAULT_MAX_DESCRIPTOR_PATHS;
+pub const MAX_DESCRIPTOR_KEYS: usize = be::DEFAULT_MAX_DESCRIPTOR_KEYS;
 
 pub const NETWORKS: [Network; 8] = [
     Network::Liquid,
@@ -24,7 +25,7 @@ fn is_testnet_or_regtest(network: Network) -> bool {
     !matches!(network, Network::Liquid | Network::Bitcoin)
 }
 
-/// Same parsing done by the `/vN/waterfalls` endpoints.
+/// Same parsing done by the `/vN/waterfalls` endpoints, with the default descriptor limits.
 pub fn parse_query(
     query: &str,
     key: &Identity,
@@ -37,16 +38,24 @@ pub fn parse_query(
         is_testnet_or_regtest(network),
         max_addresses,
         network,
+        &be::DescriptorLimits::default(),
     )
 }
 
-/// Same parsing done by the `/v1/last_used_index` and `/v1/subscribe` endpoints.
+/// Same parsing done by the `/v1/last_used_index` and `/v1/subscribe` endpoints, with the
+/// default descriptor limits.
 pub fn parse_descriptor_query(
     query: &str,
     key: &Identity,
     network: Network,
 ) -> Result<be::Descriptor, Error> {
-    route::parse_descriptor_query(query, key, is_testnet_or_regtest(network), network)
+    route::parse_descriptor_query(
+        query,
+        key,
+        is_testnet_or_regtest(network),
+        network,
+        &be::DescriptorLimits::default(),
+    )
 }
 
 pub fn request_descriptor(request: &WaterfallRequest) -> Option<&be::Descriptor> {
@@ -74,6 +83,10 @@ pub fn address_at_derivation_index(
     network: Network,
 ) -> Result<be::Address, Error> {
     descriptor.address_at_derivation_index(index, network)
+}
+
+pub fn key_count(descriptor: &be::Descriptor) -> usize {
+    descriptor.key_count()
 }
 
 pub fn has_wildcard(descriptor: &be::Descriptor) -> bool {

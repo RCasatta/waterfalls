@@ -7,8 +7,11 @@ use miniscript::{ForEachKey, TranslatePk as BitcoinTranslatePk};
 /// Allows large multisig descriptors with many xpubs and key origins, while bounding parsing work.
 pub(crate) const MAX_DESCRIPTOR_LENGTH: usize = 8192;
 
-/// Normal wallets use one path, or two with `<0;1>`. Allow a few more while bounding scans.
-pub(crate) const MAX_SINGLE_DESCRIPTORS: usize = 8;
+/// Normal wallets use one path, or two with `<0;1>`. Default of `--max-descriptor-paths`.
+pub const DEFAULT_MAX_DESCRIPTOR_PATHS: usize = 2;
+
+/// Every key is derived for every index scanned. Default of `--max-descriptor-keys`.
+pub const DEFAULT_MAX_DESCRIPTOR_KEYS: usize = 20;
 
 /// Parsing and deriving recurse once per level, including each wrapper letter like in
 /// `elnnnn…:1`, which elements-miniscript does not bound. Real wallets use fewer than 20 levels.
@@ -23,7 +26,16 @@ pub enum Descriptor {
 }
 
 impl Descriptor {
+    /// Parses `s` with the default [`DescriptorLimits`].
     pub fn from_str(s: &str, network: Network) -> Result<Self, Error> {
+        Self::from_str_with_limits(s, network, &DescriptorLimits::default())
+    }
+
+    pub fn from_str_with_limits(
+        s: &str,
+        network: Network,
+        limits: &DescriptorLimits,
+    ) -> Result<Self, Error> {
         if s.len() > MAX_DESCRIPTOR_LENGTH {
             let message = format!("descriptor longer than {MAX_DESCRIPTOR_LENGTH} bytes");
             log::error!("{message}");
@@ -52,13 +64,57 @@ impl Descriptor {
             log::error!("{message}");
             return Err(Error::InvalidDescriptor(message.to_string()));
         }
-        // Every single descriptor is scanned separately, bound the work done per request.
-        if descriptor.clone().into_single_descriptors()?.len() > MAX_SINGLE_DESCRIPTORS {
-            let message = format!("descriptor expands to more than {MAX_SINGLE_DESCRIPTORS} paths");
+        // Every single descriptor is scanned separately, and every key derived for every index
+        // scanned: bound the work done per request. Counted without expanding the descriptor.
+        if descriptor.path_count() > limits.max_paths {
+            let message = format!("descriptor expands to more than {} paths", limits.max_paths);
             log::error!("{message}");
             return Err(Error::InvalidDescriptor(message));
         }
+        if descriptor.key_count() > limits.max_keys {
+            let message = format!("descriptor has more than {} keys", limits.max_keys);
+            log::error!("{message}");
+            return Err(Error::InvalidDescriptor(message));
+        }
+        // Refuse multipath keys with a different number of paths, which cannot be expanded.
+        descriptor.clone().into_single_descriptors()?;
         Ok(descriptor)
+    }
+
+    /// Number of single descriptors this descriptor expands to, without expanding it.
+    pub(crate) fn path_count(&self) -> usize {
+        let mut count = 1;
+        match self {
+            Descriptor::Bitcoin(desc) => desc.for_each_key(|k| {
+                if let miniscript::DescriptorPublicKey::MultiXPub(x) = k {
+                    count = count.max(x.derivation_paths.paths().len());
+                }
+                true
+            }),
+            Descriptor::Elements(desc) => desc.for_each_key(|k| {
+                if let elements_miniscript::DescriptorPublicKey::MultiXPub(x) = k {
+                    count = count.max(x.derivation_paths.paths().len());
+                }
+                true
+            }),
+        };
+        count
+    }
+
+    /// Number of keys, counting every occurrence: deriving an index derives each of them.
+    pub(crate) fn key_count(&self) -> usize {
+        let mut count = 0;
+        match self {
+            Descriptor::Bitcoin(desc) => desc.for_each_key(|_| {
+                count += 1;
+                true
+            }),
+            Descriptor::Elements(desc) => desc.for_each_key(|_| {
+                count += 1;
+                true
+            }),
+        };
+        count
     }
 
     pub fn bitcoin(
@@ -426,6 +482,23 @@ fn nesting_depth(s: &str) -> usize {
     max
 }
 
+/// Bounds on the descriptors accepted by the server, see `--max-descriptor-paths` and
+/// `--max-descriptor-keys`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DescriptorLimits {
+    pub max_paths: usize,
+    pub max_keys: usize,
+}
+
+impl Default for DescriptorLimits {
+    fn default() -> Self {
+        Self {
+            max_paths: DEFAULT_MAX_DESCRIPTOR_PATHS,
+            max_keys: DEFAULT_MAX_DESCRIPTOR_KEYS,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -599,30 +672,76 @@ mod tests {
             ("", Network::BitcoinTestnet),
             ("el", Network::LiquidTestnet),
         ] {
-            let limit = format!("{prefix}wpkh({xpub}/<{}>/*)", paths(MAX_SINGLE_DESCRIPTORS));
-            let desc = Descriptor::from_str(&limit, network).unwrap();
-            assert_eq!(
-                desc.into_single_descriptors().unwrap().len(),
-                MAX_SINGLE_DESCRIPTORS
-            );
+            let eight = DescriptorLimits {
+                max_paths: 8,
+                ..Default::default()
+            };
+            for (limits, max_paths) in [
+                (DescriptorLimits::default(), DEFAULT_MAX_DESCRIPTOR_PATHS),
+                (eight, 8),
+            ] {
+                let limit = format!("{prefix}wpkh({xpub}/<{}>/*)", paths(max_paths));
+                let desc = Descriptor::from_str_with_limits(&limit, network, &limits).unwrap();
+                assert_eq!(desc.path_count(), max_paths);
+                assert_eq!(desc.into_single_descriptors().unwrap().len(), max_paths);
 
-            let over = format!(
-                "{prefix}wpkh({xpub}/<{}>/*)",
-                paths(MAX_SINGLE_DESCRIPTORS + 1)
-            );
-            let result = Descriptor::from_str(&over, network);
-            assert!(
-                matches!(result, Err(Error::InvalidDescriptor(ref m)) if m.contains("paths")),
-                "{result:?}"
+                let over = format!("{prefix}wpkh({xpub}/<{}>/*)", paths(max_paths + 1));
+                let result = Descriptor::from_str_with_limits(&over, network, &limits);
+                assert!(
+                    matches!(result, Err(Error::InvalidDescriptor(ref m)) if m.contains("paths")),
+                    "{result:?}"
+                );
+            }
+
+            // Without multipath keys a descriptor has a single path.
+            let single = format!("{prefix}wpkh({xpub}/0/*)");
+            assert_eq!(
+                Descriptor::from_str(&single, network).unwrap().path_count(),
+                1
             );
 
             // Multipath keys with a different number of paths cannot be expanded.
             let mismatch = format!("{prefix}wsh(multi(1,{xpub}/<0;1>/*,{xpub}/<0;1;2>/*))");
-            let result = Descriptor::from_str(&mismatch, network);
+            let result = Descriptor::from_str_with_limits(&mismatch, network, &eight);
             assert!(
-                matches!(result, Err(Error::InvalidDescriptor(_))),
+                matches!(result, Err(Error::InvalidDescriptor(ref m)) if !m.contains("paths")),
                 "{result:?}"
             );
+        }
+    }
+
+    #[test]
+    fn descriptor_keys_bounded() {
+        let xpub = "tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M";
+        let multi_a = |n: usize| {
+            let keys: Vec<_> = (0..n).map(|i| format!("{xpub}/{i}/<0;1>/*")).collect();
+            let keys = keys.join(",");
+            format!("tr({xpub}/<0;1>/*,multi_a(1,{keys}))")
+        };
+        for (prefix, network) in [
+            ("", Network::BitcoinTestnet),
+            ("el", Network::LiquidTestnet),
+        ] {
+            let three = DescriptorLimits {
+                max_keys: 3,
+                ..Default::default()
+            };
+            for (limits, max_keys) in [
+                (DescriptorLimits::default(), DEFAULT_MAX_DESCRIPTOR_KEYS),
+                (three, 3),
+            ] {
+                // The internal key is one of them.
+                let limit = format!("{prefix}{}", multi_a(max_keys - 1));
+                let desc = Descriptor::from_str_with_limits(&limit, network, &limits).unwrap();
+                assert_eq!(desc.key_count(), max_keys);
+
+                let over = format!("{prefix}{}", multi_a(max_keys));
+                let result = Descriptor::from_str_with_limits(&over, network, &limits);
+                assert!(
+                    matches!(result, Err(Error::InvalidDescriptor(ref m)) if m.contains("keys")),
+                    "{result:?}"
+                );
+            }
         }
     }
 

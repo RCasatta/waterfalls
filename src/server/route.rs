@@ -101,6 +101,7 @@ pub async fn route(
                 is_testnet_or_regtest,
                 state.max_addresses,
                 network,
+                &state.descriptor_limits,
             )?;
             handle_waterfalls_req(state, inputs, WithTip::No, false, network).await
         }
@@ -111,6 +112,7 @@ pub async fn route(
                 is_testnet_or_regtest,
                 state.max_addresses,
                 network,
+                &state.descriptor_limits,
             )?;
             handle_waterfalls_req(state, inputs, WithTip::Hash, false, network).await
         }
@@ -124,6 +126,7 @@ pub async fn route(
                 is_testnet_or_regtest,
                 state.max_addresses,
                 network,
+                &state.descriptor_limits,
             )?;
             handle_waterfalls_req(state, inputs, WithTip::No, true, network).await
         }
@@ -134,6 +137,7 @@ pub async fn route(
                 is_testnet_or_regtest,
                 state.max_addresses,
                 network,
+                &state.descriptor_limits,
             )?;
             handle_waterfalls_req(state, inputs, WithTip::Hash, true, network).await
         }
@@ -147,6 +151,7 @@ pub async fn route(
                 is_testnet_or_regtest,
                 state.max_addresses,
                 network,
+                &state.descriptor_limits,
             )?;
             handle_waterfalls_req(state, inputs, WithTip::All, false, network).await
         }
@@ -157,17 +162,28 @@ pub async fn route(
                 is_testnet_or_regtest,
                 state.max_addresses,
                 network,
+                &state.descriptor_limits,
             )?;
             handle_waterfalls_req(state, inputs, WithTip::All, true, network).await
         }
         (&Method::GET, "/v1/last_used_index", Some(query)) => {
-            let descriptor =
-                parse_descriptor_query(query, &state.key, is_testnet_or_regtest, network)?;
+            let descriptor = parse_descriptor_query(
+                query,
+                &state.key,
+                is_testnet_or_regtest,
+                network,
+                &state.descriptor_limits,
+            )?;
             handle_last_used_index(state, descriptor).await
         }
         (&Method::GET, "/v1/subscribe", Some(query)) => {
-            let descriptor =
-                parse_descriptor_query(query, &state.key, is_testnet_or_regtest, network)?;
+            let descriptor = parse_descriptor_query(
+                query,
+                &state.key,
+                is_testnet_or_regtest,
+                network,
+                &state.descriptor_limits,
+            )?;
             handle_subscribe_req(state, descriptor).await
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {
@@ -391,6 +407,7 @@ pub(crate) fn parse_query(
     is_testnet_or_regtest: bool,
     max_addresses: usize,
     network: Network,
+    descriptor_limits: &be::DescriptorLimits,
 ) -> Result<WaterfallRequest, Error> {
     let mut page = 0u16;
     let mut to_index = 0u32;
@@ -418,7 +435,8 @@ pub(crate) fn parse_query(
                 desc_str
             };
 
-            let descriptor = be::Descriptor::from_str(&desc_str, network)?;
+            let descriptor =
+                be::Descriptor::from_str_with_limits(&desc_str, network, descriptor_limits)?;
 
             if is_testnet_or_regtest == descriptor.is_mainnet() {
                 return Err(Error::WrongNetwork);
@@ -465,6 +483,7 @@ pub(crate) fn parse_descriptor_query(
     key: &Identity,
     is_testnet_or_regtest: bool,
     network: Network,
+    descriptor_limits: &be::DescriptorLimits,
 ) -> Result<be::Descriptor, Error> {
     let mut descriptor = None;
     for (key, value) in form_urlencoded::parse(query.as_bytes()) {
@@ -481,7 +500,7 @@ pub(crate) fn parse_descriptor_query(
         desc_str
     };
 
-    let descriptor = be::Descriptor::from_str(&desc_str, network)?;
+    let descriptor = be::Descriptor::from_str_with_limits(&desc_str, network, descriptor_limits)?;
 
     if !descriptor.has_wildcard() {
         return Err(Error::DescriptorMustHaveWildcard);
@@ -1689,11 +1708,68 @@ mod tests {
     use super::*;
     use crate::server::subscription::Subscriptions;
 
+    /// [`super::parse_query`] with the default descriptor limits
+    fn parse_query(
+        query: &str,
+        key: &Identity,
+        is_testnet_or_regtest: bool,
+        max_addresses: usize,
+        network: Network,
+    ) -> Result<WaterfallRequest, Error> {
+        super::parse_query(
+            query,
+            key,
+            is_testnet_or_regtest,
+            max_addresses,
+            network,
+            &Default::default(),
+        )
+    }
+
     const MAINNET_DESC: &str = "elwpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#20ufqv7z";
     const TESTNET_DESC: &str = "elwpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)#v7pu3vak";
     const BITCOIN_MAINNET_DESC: &str = "wpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#20ufqv7z";
     const BITCOIN_TESTNET_DESC: &str = "wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)#v7pu3vak";
     const CONFIDENTIAL_TESTNET_DESC: &str = "ct(slip77(1bda6cd71a1e206e3eb793e5a4d98a46c3fa473c9ab7bdef9bb9c814764d6614),elwpkh([cb4ba44a/84'/1'/0']tpubDDrybtUajFcgXC85rvwPsh1oU7Azx4kJ9BAiRzMbByqK7UnVXY3gDRJPwEDfaQwguNUZFzrhavJGgEhbsfuebyxUSZQnjLezWVm2Vdqb7UM/<0;1>/*))#za9ktavp";
+
+    #[test]
+    fn query_parsing_applies_configured_descriptor_limits() {
+        let key = age::x25519::Identity::generate();
+        let three_paths = TESTNET_DESC
+            .split('#')
+            .next()
+            .unwrap()
+            .replace("<0;1>", "<0;1;2>");
+        let query = encode_query(&three_paths, None);
+        let network = Network::LiquidTestnet;
+
+        let default = be::DescriptorLimits::default();
+        let three = be::DescriptorLimits {
+            max_paths: 3,
+            ..default
+        };
+        let one_key = be::DescriptorLimits {
+            max_keys: 1,
+            ..three
+        };
+
+        let parse = |limits| super::parse_query(&query, &key, true, 100, network, limits);
+        assert!(matches!(parse(&default), Err(Error::InvalidDescriptor(_))));
+        assert!(parse(&three).is_ok());
+        assert!(parse(&one_key).is_ok());
+        let zero_keys = be::DescriptorLimits {
+            max_keys: 0,
+            ..three
+        };
+        assert!(matches!(
+            parse(&zero_keys),
+            Err(Error::InvalidDescriptor(_))
+        ));
+
+        let parse = |limits| super::parse_descriptor_query(&query, &key, true, network, limits);
+        assert!(matches!(parse(&default), Err(Error::InvalidDescriptor(_))));
+        assert!(parse(&three).is_ok());
+    }
 
     #[test]
     fn test_parse_query() {
@@ -2414,6 +2490,7 @@ mod tests {
             crate::server::StateConfig {
                 max_addresses: 100,
                 max_txs_seen: 100,
+                descriptor_limits: Default::default(),
                 cache_control_seconds: 5,
                 server_timing: false,
                 derivation_cache_capacity: 1000,

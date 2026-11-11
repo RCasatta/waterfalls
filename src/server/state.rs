@@ -50,6 +50,7 @@ pub struct State {
 
     pub max_addresses: usize,
     pub max_txs_seen: usize,
+    pub descriptor_limits: crate::be::DescriptorLimits,
 
     pub cache_control_seconds: u32,
 
@@ -85,6 +86,7 @@ impl State {
             secp: bitcoin::key::Secp256k1::new(),
             max_addresses: config.max_addresses,
             max_txs_seen: config.max_txs_seen,
+            descriptor_limits: config.descriptor_limits,
             cache_control_seconds: config.cache_control_seconds,
             server_timing: config.server_timing,
             derivation_cache: Mutex::new(DerivationCache::new(config.derivation_cache_capacity)),
@@ -386,6 +388,7 @@ pub struct SubscriptionLimits {
 pub struct StateConfig {
     pub max_addresses: usize,
     pub max_txs_seen: usize,
+    pub descriptor_limits: crate::be::DescriptorLimits,
     pub cache_control_seconds: u32,
     pub server_timing: bool,
     pub derivation_cache_capacity: usize,
