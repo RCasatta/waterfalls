@@ -1503,23 +1503,17 @@ struct FindScriptsResult {
     max_used_offset: Option<u32>,
 }
 
-fn calculate_script_pubkey_with_timing(
-    desc: &be::Descriptor,
-    index: u32,
-) -> Result<(Vec<u8>, std::time::Duration), Error> {
-    let start = Instant::now();
-    let script_pubkey = desc
-        .script_pubkey_at_derivation_index(index)
-        .inspect_err(|e| log::error!("script derivation failed: {e}"))?;
-    let duration = start.elapsed();
-    Ok((script_pubkey, duration))
-}
-
 /// Derive script hashes for a batch of indices from a descriptor.
 ///
 /// Returns a tuple of (script_hashes, derivation_duration).
-/// The derivation_duration is the total time spent computing script pubkeys
-/// (not including cache hits).
+/// The derivation_duration is the time spent deriving the indexes missing from the cache.
+///
+/// Derivation is CPU bound and costs one key derivation per key of the descriptor and index:
+/// it runs on tokio's blocking thread pool, so that heavy requests don't stall the other
+/// tasks scheduled on the async workers. [`State::derivation_permits`] bounds the derivations
+/// running at once to the number of cores, so they don't compete for the CPU with the async
+/// workers either. The derived scripts are cached by the blocking task itself, so they are kept
+/// even if the request is cancelled while waiting for it.
 async fn derive_script_hashes_batch(
     state: &Arc<State>,
     desc: &be::Descriptor,
@@ -1527,35 +1521,69 @@ async fn derive_script_hashes_batch(
     count: u32,
 ) -> Result<(Vec<u64>, Duration), Error> {
     let desc_str = desc.to_string();
-    let is_single_address = !desc.has_wildcard();
+    // a descriptor without wildcard has a single script
+    let count = if desc.has_wildcard() {
+        count
+    } else {
+        count.min(1)
+    };
+    let keys: Vec<_> = (start_index..start_index + count)
+        .map(|index| (index, DerivationCache::hash(&desc_str, index)))
+        .collect();
 
-    let mut scripts = Vec::with_capacity(count as usize);
-    let mut derivations_duration = Duration::from_secs(0);
-
-    for index in start_index..start_index + count {
-        let der_ind_hash = DerivationCache::hash(&desc_str, index);
-        // The lock is released while deriving, so one large request does not block the others.
-        let cached = state.derivation_cache.lock().await.get(der_ind_hash);
-        let script_hash = match cached {
-            Some(script_hash) => script_hash,
-            None => {
-                let (script_pubkey, duration) = calculate_script_pubkey_with_timing(desc, index)?;
-                derivations_duration += duration;
-                let script_hash = state.store.hash(&script_pubkey);
-                state
-                    .derivation_cache
-                    .lock()
-                    .await
-                    .add(der_ind_hash, script_hash);
-                script_hash
-            }
-        };
-
-        scripts.push(script_hash);
-        if is_single_address {
-            break;
-        }
+    let cached: Vec<_> = {
+        let mut cache = state.derivation_cache.lock().await;
+        keys.iter().map(|(_, key)| cache.get(*key)).collect()
+    };
+    let missing: Vec<_> = keys
+        .iter()
+        .zip(cached.iter())
+        .filter(|(_, cached)| cached.is_none())
+        .map(|(index_key, _)| *index_key)
+        .collect();
+    if missing.is_empty() {
+        return Ok((cached.into_iter().flatten().collect(), Duration::ZERO));
     }
+
+    // The semaphore is never closed, so acquiring doesn't fail.
+    let permit = Arc::clone(&state.derivation_permits)
+        .acquire_owned()
+        .await
+        .map_err(|e| Error::String(format!("derivation permits closed: {e}")))?;
+    // The cache lock is released while deriving, so one large request does not block the others.
+    let (derived, derivations_duration) = {
+        let state = Arc::clone(state);
+        let desc = desc.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let start = Instant::now();
+            let derived = missing
+                .iter()
+                .map(|(index, _)| {
+                    desc.script_pubkey_at_derivation_index(*index)
+                        .map(|script_pubkey| state.store.hash(&script_pubkey))
+                        .inspect_err(|e| log::error!("script derivation failed: {e}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut cache = state.derivation_cache.blocking_lock();
+            for ((_, key), script_hash) in missing.iter().zip(derived.iter()) {
+                cache.add(*key, *script_hash);
+            }
+            Ok::<_, Error>((derived, start.elapsed()))
+        })
+        .await
+        .map_err(|e| {
+            log::error!("derivation task failed: {e}");
+            Error::String(format!("derivation task failed: {e}"))
+        })??
+    };
+
+    let mut derived = derived.into_iter();
+    let scripts = cached
+        .into_iter()
+        .map(|cached| cached.or_else(|| derived.next()))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| Error::String("missing derived script".to_string()))?;
 
     Ok((scripts, derivations_duration))
 }
@@ -2244,6 +2272,50 @@ mod tests {
             vec![1, 2]
         );
         assert!(history.iter().all(|tx| tx.block_hash.is_some()));
+    }
+
+    #[tokio::test]
+    async fn derivation_batch_mixes_cached_and_derived_indexes() {
+        let state = Arc::new(route_test_state());
+        let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
+        let single = desc.into_single_descriptors().unwrap().remove(0);
+        let expected: Vec<_> = (0..10)
+            .map(|i| {
+                let script_pubkey = single.script_pubkey_at_derivation_index(i).unwrap();
+                state.store.hash(&script_pubkey)
+            })
+            .collect();
+
+        // Indexes 3 and 4 are cached, the others are derived.
+        let (scripts, _) = derive_script_hashes_batch(&state, &single, 3, 2)
+            .await
+            .unwrap();
+        assert_eq!(scripts, expected[3..5]);
+        let (scripts, _) = derive_script_hashes_batch(&state, &single, 0, 10)
+            .await
+            .unwrap();
+        assert_eq!(scripts, expected);
+
+        // Every index is now cached.
+        let (scripts, duration) = derive_script_hashes_batch(&state, &single, 0, 10)
+            .await
+            .unwrap();
+        assert_eq!(scripts, expected);
+        assert_eq!(duration, Duration::ZERO);
+    }
+
+    #[tokio::test]
+    async fn derivation_batch_of_descriptor_without_wildcard_has_one_script() {
+        let state = Arc::new(route_test_state());
+        let desc = be::Descriptor::from_str(
+            "elwpkh(02e18f242c8b0b589bfffeac30e1baa80a60933a649c7fb0f1103e78fbf58aa0ed)",
+            Network::LiquidTestnet,
+        )
+        .unwrap();
+        let (scripts, _) = derive_script_hashes_batch(&state, &desc, 0, GAP_LIMIT)
+            .await
+            .unwrap();
+        assert_eq!(scripts.len(), 1);
     }
 
     /// Records `max_used_index` for every path of `desc`, as a previous scan would.

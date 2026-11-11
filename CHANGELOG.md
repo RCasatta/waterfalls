@@ -48,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serve stale metrics to scrapers.
 - Block indexing no longer computes every transaction id twice: the txids computed while
   indexing a block are reused to drop its transactions from the mempool view.
+- Script derivation runs on tokio's blocking thread pool instead of the async workers, at most
+  one derivation per core at a time, so requests deriving many scripts don't delay the other
+  requests.
 
 ### Deprecated
 

@@ -23,7 +23,7 @@ use crate::{
 use age::x25519::Identity;
 use bitcoin::{key::Secp256k1, secp256k1::All, PrivateKey};
 use elements::BlockHash;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 
 use super::{sign::p2pkh, Error};
 
@@ -57,6 +57,9 @@ pub struct State {
 
     pub derivation_cache: Mutex<DerivationCache>,
 
+    /// One permit per core, held while deriving scripts on the blocking thread pool.
+    pub derivation_permits: Arc<Semaphore>,
+
     pub cached_fee_estimates: RwLock<(HashMap<u16, f64>, Option<Instant>)>,
 
     descriptor_metrics: Mutex<DescriptorMetrics>,
@@ -85,6 +88,9 @@ impl State {
             cache_control_seconds: config.cache_control_seconds,
             server_timing: config.server_timing,
             derivation_cache: Mutex::new(DerivationCache::new(config.derivation_cache_capacity)),
+            derivation_permits: Arc::new(Semaphore::new(
+                std::thread::available_parallelism().map_or(1, |cores| cores.get()),
+            )),
             cached_fee_estimates: RwLock::new((HashMap::new(), None)),
             descriptor_metrics: Mutex::new(DescriptorMetrics::new()),
             descriptor_max_used_index: Mutex::new(HashMap::new()),
