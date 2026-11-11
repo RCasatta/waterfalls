@@ -32,7 +32,7 @@ use tokio::time::Interval;
 use super::{
     encryption,
     sign::MsgSigAddress,
-    subscription::{SubscriptionEvent, SubscriptionId, SubscriptionReceiver},
+    subscription::{SubscriptionError, SubscriptionEvent, SubscriptionId, SubscriptionReceiver},
     Network,
 };
 
@@ -1125,9 +1125,33 @@ async fn subscribe_descriptor(
     state: &Arc<State>,
     descriptor: be::Descriptor,
 ) -> Result<(SubscriptionId, SubscriptionReceiver), Error> {
-    let mut scripts = Vec::new();
-    let mut descriptors = HashMap::new();
     let single_descriptors = descriptor.into_single_descriptors()?;
+
+    // The script limit is checked before scanning and deriving, so that a refused request
+    // doesn't cost that work. Scripts are counted before deduplication: an upper bound, which
+    // also refuses a descriptor whose paths derive the same scripts once their total exceeds
+    // the limit, even if the scripts left after deduplication would fit.
+    let max_scripts = state.max_scripts_per_subscription().await;
+    let too_many_scripts = || Error::String(format!("{:?}", SubscriptionError::TooManyScripts));
+    // Scripts watched by a path watching `watch_count` indexes: one without wildcard has a
+    // single script, one with a wildcard watches at least `GAP_LIMIT`.
+    let path_scripts = |desc: &be::Descriptor, watch_count: u32| {
+        if desc.has_wildcard() {
+            watch_count as usize
+        } else {
+            1
+        }
+    };
+    // The paths not counted yet are bounded below by their minimum, known without scanning.
+    let mut uncounted_min = single_descriptors
+        .iter()
+        .map(|desc| path_scripts(desc, GAP_LIMIT))
+        .fold(0usize, usize::saturating_add);
+    if uncounted_min > max_scripts {
+        return Err(too_many_scripts());
+    }
+    let mut total_scripts = 0usize;
+    let mut watch_counts = Vec::with_capacity(single_descriptors.len());
     for desc in single_descriptors.iter() {
         let single_descriptor_id = string_hash(&desc.normalized_id_string());
         let max_used_index = match state.descriptor_max_used_index(single_descriptor_id).await {
@@ -1141,6 +1165,18 @@ async fn subscribe_descriptor(
             }
         };
         let watch_count = subscription_watch_count(max_used_index)?;
+        total_scripts = total_scripts.saturating_add(path_scripts(desc, watch_count));
+        uncounted_min = uncounted_min.saturating_sub(path_scripts(desc, GAP_LIMIT));
+        // Refuse before scanning the next paths.
+        if total_scripts.saturating_add(uncounted_min) > max_scripts {
+            return Err(too_many_scripts());
+        }
+        watch_counts.push((single_descriptor_id, watch_count));
+    }
+
+    let mut scripts = Vec::with_capacity(total_scripts);
+    let mut descriptors = HashMap::new();
+    for (desc, (single_descriptor_id, watch_count)) in single_descriptors.iter().zip(watch_counts) {
         scripts.extend(
             derive_script_hashes_batch(state, desc, 0, watch_count)
                 .await?

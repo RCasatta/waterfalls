@@ -82,6 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A transaction confirmed by a new block no longer disappears from responses for up to
   about a second, between leaving the node mempool and its block being indexed. Wallets
   syncing in that window dropped it, and their balance briefly jumped.
+- `/v1/subscribe` checks `--max-scripts-per-subscription` before doing the work for the
+  request, reducing the resources a refused request uses.
 
 ### Removed
 

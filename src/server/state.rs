@@ -250,6 +250,13 @@ impl State {
             .subscribe(scripts, descriptors)
     }
 
+    pub(crate) async fn max_scripts_per_subscription(&self) -> usize {
+        self.subscriptions
+            .lock()
+            .await
+            .max_scripts_per_subscription()
+    }
+
     pub(crate) async fn subscription_expansion_range(
         &self,
         descriptor_id: u64,
