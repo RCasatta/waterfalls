@@ -461,6 +461,11 @@ with `400 InvalidDescriptor` a descriptor:
 - with more keys than `--max-descriptor-keys` (default 20), counting every occurrence of a key
 - with a hardened derivation step or wildcard after the xpub
 
+A descriptor request deriving more indexes than `--max-derivations-per-request`, over all the
+paths of the descriptor, fails with `400 TooManyDerivations`. The default, 2000, fits a full
+page of 1000 indexes of each of the 2 default paths. Indexes the server has derived recently
+are cached and not counted.
+
 ## Error Responses
 
 The API returns appropriate HTTP status codes:
@@ -479,6 +484,8 @@ Common error conditions:
 - `AddressCannotBeBlinded`: Blinded/confidential address provided
 - `AddressPageRequiresSingleAddress`: `page > 0` was used with more than one address
 - `UtxoOnlyHistoryTooLarge`: `utxo_only=true` was requested for a script whose history exceeds the truncation threshold
+- `InvalidDescriptor`: Malformed descriptor, or one over the [descriptor limits](#descriptor-limits)
+- `TooManyDerivations`: The descriptor request needs to derive more indexes than the server allows, see [descriptor limits](#descriptor-limits)
 - `InvalidTxid`: Malformed transaction ID
 - `InvalidBlockHash`: Malformed block hash
 - `CannotFindTx`: Transaction not found

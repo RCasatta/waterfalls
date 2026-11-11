@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`MAX_DESCRIPTOR_KEYS`, default 20) bound the descriptors accepted by the descriptor
   endpoints: the number of paths a descriptor expands to (2 with `<0;1>`), and the number of
   keys it contains.
+- `--max-derivations-per-request` (`MAX_DERIVATIONS_PER_REQUEST`) bounds the derivation
+  indexes a descriptor request can derive, over all its paths. Indexes already in the
+  derivation cache are not counted, and the cost of an index is bounded by
+  `--max-descriptor-keys`. The default is `--max-descriptor-paths` times the 1000 indexes
+  scanned per path in a page, 2000 with the default paths, so that a full page fits.
 
 ### Changed
 
@@ -36,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** descriptors expanding to more than 2 paths (e.g. `<0;1;2>`) or with more than
   20 keys are rejected with HTTP 400 by default. Raise `--max-descriptor-paths` or
   `--max-descriptor-keys` to accept them.
+- **Breaking:** descriptor requests needing to derive more indexes than
+  `--max-derivations-per-request` (2000 by default) fail with HTTP 400 (`TooManyDerivations`).
+  Raise it to allow them. Subscriptions are not expanded by a request that has used up its
+  derivations, a later request expands them.
 - Waterfalls responses no longer mix data from before and after a block indexed or reorged
   while the request is served: the tip, the history and its block hashes now always come
   from the same indexed blocks. The request is retried internally; if blocks keep changing
