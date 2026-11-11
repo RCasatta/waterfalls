@@ -36,7 +36,7 @@ use crate::{
 #[derive(Debug)]
 pub struct DBStore {
     db: DB,
-    salt: u64,
+    script_hasher: ScriptHasher,
 
     /// Whether we are in Initial Block Download mode.
     /// During initial block download we skip reorg data writes, since reorgs are
@@ -77,7 +77,7 @@ const COLUMN_FAMILIES: &[&str] = &[UTXO_CF, HISTORY_CF, OTHER_CF, HASHES_CF, REO
 
 // height key for indexed blocks
 // const INDEXED_KEY: &[u8] = b"I";
-// height key for salting
+// salt of the FxHash script hash, see `ScriptHasher::SaltedFx`
 const SALT_KEY: &[u8] = b"S";
 
 const VEC_TX_SEEN_MAX_SIZE: usize = 50; // 32 bytes (txid) + 9 bytes (height) + 9 bytes (v) (most of the time height/v is much less)
@@ -209,10 +209,11 @@ impl DBStore {
         )
         .with_context(|| format!("failed to open DB: {}", path.display()))?;
         log::info!("DB opened at path: {}", path.display());
-        let salt = get_or_init_salt(&db)?;
+        let script_hasher = get_or_init_script_hasher(&db)
+            .with_context(|| format!("failed to open DB: {}", path.display()))?;
         let store = DBStore {
             db,
-            salt,
+            script_hasher,
             ibd: AtomicBool::new(true),
             reorg_data_keep_heights,
         };
@@ -231,11 +232,6 @@ impl DBStore {
         self.db.cf_handle(HASHES_CF).expect("missing HASHES_CF")
     }
 
-    fn hasher(&self) -> FxHasher {
-        let mut hasher = FxHasher::default();
-        hasher.write_u64(self.salt);
-        hasher
-    }
     /// Add block hash and timestamp to an existing batch (does not write to DB).
     fn set_hash_ts_batch(&self, batch: &mut rocksdb::WriteBatch, meta: &BlockMeta) {
         let mut buffer = Vec::with_capacity(36);
@@ -577,9 +573,7 @@ fn estimate_history_size(add: &BTreeMap<u64, Vec<TxSeen>>) -> usize {
 
 impl Store for DBStore {
     fn hash(&self, script: &[u8]) -> ScriptHash {
-        let mut hasher = self.hasher();
-        hasher.write(script);
-        hasher.finish()
+        self.script_hasher.hash(script)
     }
 
     fn iter_hash_ts(&self) -> Box<dyn Iterator<Item = BlockMeta> + '_> {
@@ -790,16 +784,24 @@ pub(super) fn vec_tx_seen_from_be_bytes(s: &[u8]) -> Result<Vec<TxSeen>> {
     Ok(result)
 }
 
-fn get_or_init_salt(db: &DB) -> Result<u64> {
+/// Reads the script hasher of the database, or creates one with a random salt for a new one.
+///
+/// The script hash is the key of the history and is stored in the UTXO set, so it cannot change
+/// without reindexing: the database keeps the one it was created with.
+fn get_or_init_script_hasher(db: &DB) -> Result<ScriptHasher> {
     let cf = db.cf_handle(OTHER_CF).expect("missing OTHER_CF");
-    let res = db.get_cf(&cf, SALT_KEY)?;
-    match res {
-        Some(e) => Ok(u64::from_be_bytes(e.try_into().unwrap())),
+    match db.get_cf(&cf, SALT_KEY)? {
+        Some(salt) => {
+            let salt: [u8; 8] = salt
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("invalid script hash salt length"))?;
+            Ok(ScriptHasher::SaltedFx(u64::from_be_bytes(salt)))
+        }
         None => {
-            let mut bytes = [0u8; 8];
-            thread_rng().fill(&mut bytes);
-            db.put_cf(&cf, SALT_KEY, bytes)?;
-            get_or_init_salt(db)
+            let mut salt = [0u8; 8];
+            thread_rng().fill(&mut salt);
+            db.put_cf(&cf, SALT_KEY, salt)?;
+            Ok(ScriptHasher::SaltedFx(u64::from_be_bytes(salt)))
         }
     }
 }
@@ -821,6 +823,26 @@ fn concat_merge(
     Some(result)
 }
 
+/// How a database hashes scripts, chosen when it is created.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScriptHasher {
+    /// FxHash seeded with a random 64-bit salt
+    SaltedFx(u64),
+}
+
+impl ScriptHasher {
+    fn hash(&self, script: &[u8]) -> ScriptHash {
+        match self {
+            ScriptHasher::SaltedFx(salt) => {
+                let mut hasher = FxHasher::default();
+                hasher.write_u64(*salt);
+                hasher.write(script);
+                hasher.finish()
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use elements::{hashes::Hash, BlockHash, Txid};
@@ -832,15 +854,15 @@ mod test {
 
     use crate::store::{
         db::{
-            estimate_history_size, get_or_init_salt, serialize_outpoint, vec_tx_seen_from_be_bytes,
-            vec_tx_seen_to_be_bytes, TxSeen,
+            estimate_history_size, get_or_init_script_hasher, serialize_outpoint,
+            vec_tx_seen_from_be_bytes, vec_tx_seen_to_be_bytes, TxSeen,
         },
         BlockMeta, Store,
     };
     use crate::OutPoint;
     use crate::V;
 
-    use super::{DBStore, REORG_CF};
+    use super::{DBStore, ScriptHasher, REORG_CF};
 
     #[test]
     fn test_db_hash_compatibility() {
@@ -850,7 +872,7 @@ mod test {
         // creating explicitly to set the salt to a fixed value
         let db = DBStore {
             db: DB::open(&opts, tempdir.path()).unwrap(),
-            salt: 0,
+            script_hasher: ScriptHasher::SaltedFx(0),
             ibd: AtomicBool::new(true),
             reorg_data_keep_heights: 6,
         };
@@ -863,10 +885,9 @@ mod test {
         let tempdir = tempfile::TempDir::new().unwrap();
         let db = DBStore::open(tempdir.path(), 64, true, 6).unwrap();
 
-        let salt = get_or_init_salt(&db.db).unwrap();
-        assert_ne!(salt, 0);
-        let salt2 = get_or_init_salt(&db.db).unwrap();
-        assert_eq!(salt, salt2);
+        let hasher = get_or_init_script_hasher(&db.db).unwrap();
+        assert!(matches!(hasher, ScriptHasher::SaltedFx(salt) if salt != 0));
+        assert_eq!(get_or_init_script_hasher(&db.db).unwrap(), hasher);
 
         let o = OutPoint::null();
         let o1 = {
