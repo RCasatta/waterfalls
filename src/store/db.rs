@@ -913,7 +913,17 @@ fn concat_merge(
 enum ScriptHasher {
     /// FxHash seeded with a random 64-bit salt, in databases created by previous releases
     SaltedFx(u64),
-    /// SipHash-2-4 keyed with a random 128-bit key
+    /// SipHash-2-4 keyed with a random 128-bit key, in databases of format version 2
+    ///
+    /// The script hash is part of the database format: changing it needs a new format version
+    /// and a reindex. SipHash-2-4 is keyed, so script hashes can't be computed without the key
+    /// of the database, and comes with `bitcoin_hashes`, already a dependency. It costs about
+    /// 15-35 ns per script of 22 to 71 bytes, against 3-6 ns for the salted FxHash: negligible,
+    /// since a request hashes few scripts and indexing hashes one per output, both next to RocksDB
+    /// reads and writes. SipHash-1-3 would save about 6-15 ns per script but needs another
+    /// dependency, and std's `DefaultHasher` can't be used: its algorithm may change between
+    /// Rust releases. Measurements:
+    /// <https://github.com/RCasatta/waterfalls/pull/112#issuecomment-6818389198>
     KeyedSip { k0: u64, k1: u64 },
 }
 
