@@ -32,7 +32,7 @@ use tokio::time::Interval;
 use super::{
     encryption,
     sign::MsgSigAddress,
-    subscription::{SubscriptionEvent, SubscriptionId, SubscriptionReceiver},
+    subscription::{SubscriptionError, SubscriptionEvent, SubscriptionId, SubscriptionReceiver},
     Network,
 };
 
@@ -1125,9 +1125,33 @@ async fn subscribe_descriptor(
     state: &Arc<State>,
     descriptor: be::Descriptor,
 ) -> Result<(SubscriptionId, SubscriptionReceiver), Error> {
-    let mut scripts = Vec::new();
-    let mut descriptors = HashMap::new();
     let single_descriptors = descriptor.into_single_descriptors()?;
+
+    // The script limit is checked before scanning and deriving, so that a refused request
+    // doesn't cost that work. Scripts are counted before deduplication: an upper bound, which
+    // also refuses a descriptor whose paths derive the same scripts once their total exceeds
+    // the limit, even if the scripts left after deduplication would fit.
+    let max_scripts = state.max_scripts_per_subscription().await;
+    let too_many_scripts = || Error::String(format!("{:?}", SubscriptionError::TooManyScripts));
+    // Scripts watched by a path watching `watch_count` indexes: one without wildcard has a
+    // single script, one with a wildcard watches at least `GAP_LIMIT`.
+    let path_scripts = |desc: &be::Descriptor, watch_count: u32| {
+        if desc.has_wildcard() {
+            watch_count as usize
+        } else {
+            1
+        }
+    };
+    // The paths not counted yet are bounded below by their minimum, known without scanning.
+    let mut uncounted_min = single_descriptors
+        .iter()
+        .map(|desc| path_scripts(desc, GAP_LIMIT))
+        .fold(0usize, usize::saturating_add);
+    if uncounted_min > max_scripts {
+        return Err(too_many_scripts());
+    }
+    let mut total_scripts = 0usize;
+    let mut watch_counts = Vec::with_capacity(single_descriptors.len());
     for desc in single_descriptors.iter() {
         let single_descriptor_id = string_hash(&desc.normalized_id_string());
         let max_used_index = match state.descriptor_max_used_index(single_descriptor_id).await {
@@ -1141,6 +1165,18 @@ async fn subscribe_descriptor(
             }
         };
         let watch_count = subscription_watch_count(max_used_index)?;
+        total_scripts = total_scripts.saturating_add(path_scripts(desc, watch_count));
+        uncounted_min = uncounted_min.saturating_sub(path_scripts(desc, GAP_LIMIT));
+        // Refuse before scanning the next paths.
+        if total_scripts.saturating_add(uncounted_min) > max_scripts {
+            return Err(too_many_scripts());
+        }
+        watch_counts.push((single_descriptor_id, watch_count));
+    }
+
+    let mut scripts = Vec::with_capacity(total_scripts);
+    let mut descriptors = HashMap::new();
+    for (desc, (single_descriptor_id, watch_count)) in single_descriptors.iter().zip(watch_counts) {
         scripts.extend(
             derive_script_hashes_batch(state, desc, 0, watch_count)
                 .await?
@@ -2210,7 +2246,95 @@ mod tests {
         assert!(history.iter().all(|tx| tx.block_hash.is_some()));
     }
 
+    /// Records `max_used_index` for every path of `desc`, as a previous scan would.
+    async fn record_max_used_index(state: &State, desc: &be::Descriptor, max_used_index: u32) {
+        for single in desc.clone().into_single_descriptors().unwrap() {
+            let id = string_hash(&single.normalized_id_string());
+            state
+                .record_descriptor_scan_max_used_index(id, Some(max_used_index))
+                .await;
+        }
+    }
+
+    /// Whether index 0 of any path of `desc` is in the derivation cache.
+    async fn first_index_derived(state: &State, desc: &be::Descriptor) -> bool {
+        let mut cache = state.derivation_cache.lock().await;
+        desc.clone()
+            .into_single_descriptors()
+            .unwrap()
+            .iter()
+            .any(|single| {
+                cache
+                    .get(DerivationCache::hash(&single.to_string(), 0))
+                    .is_some()
+            })
+    }
+
+    #[tokio::test]
+    async fn subscribe_refused_before_deriving() {
+        let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
+
+        // 2 paths of 30 + 21 scripts are over the limit of 100, and fit the cache of the test
+        // state: deriving them before refusing would leave them there.
+        let state = Arc::new(route_test_state());
+        record_max_used_index(&state, &desc, 30).await;
+        let err = subscribe_descriptor(&state, desc.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(err, Error::String("TooManyScripts".to_string()));
+        assert!(!first_index_derived(&state, &desc).await);
+
+        // Refused as quickly with a much higher index.
+        let state = Arc::new(route_test_state());
+        record_max_used_index(&state, &desc, 10_000_000).await;
+        let err = subscribe_descriptor(&state, desc.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(err, Error::String("TooManyScripts".to_string()));
+        assert!(!first_index_derived(&state, &desc).await);
+    }
+
+    #[tokio::test]
+    async fn subscribe_refused_before_scanning() {
+        let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
+
+        // 2 paths watch at least 2 * GAP_LIMIT scripts, over this limit whatever the history.
+        let state = Arc::new(route_test_state_with_max_scripts(
+            2 * GAP_LIMIT as usize - 1,
+        ));
+        let err = subscribe_descriptor(&state, desc.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(err, Error::String("TooManyScripts".to_string()));
+
+        // Scanning would have recorded the highest used index of each path.
+        for single in desc.clone().into_single_descriptors().unwrap() {
+            let id = string_hash(&single.normalized_id_string());
+            assert_eq!(state.descriptor_max_used_index(id).await, None);
+        }
+        assert!(!first_index_derived(&state, &desc).await);
+    }
+
+    #[tokio::test]
+    async fn subscribe_script_limit_counts_every_path() {
+        // The test state allows 100 scripts, `<0;1>` watches max_used_index + 21 per path.
+        let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
+
+        let state = Arc::new(route_test_state());
+        record_max_used_index(&state, &desc, 29).await;
+        assert!(subscribe_descriptor(&state, desc.clone()).await.is_ok());
+
+        let state = Arc::new(route_test_state());
+        record_max_used_index(&state, &desc, 30).await;
+        let err = subscribe_descriptor(&state, desc).await.unwrap_err();
+        assert_eq!(err, Error::String("TooManyScripts".to_string()));
+    }
+
     fn route_test_state() -> State {
+        route_test_state_with_max_scripts(100)
+    }
+
+    fn route_test_state_with_max_scripts(max_scripts_per_subscription: usize) -> State {
         State::new(
             crate::store::AnyStore::Mem(crate::store::memory::MemoryStore::new()),
             Identity::generate(),
@@ -2223,7 +2347,7 @@ mod tests {
                 derivation_cache_capacity: 1000,
                 subscription_limits: crate::server::SubscriptionLimits {
                     max_active_subscriptions: 100,
-                    max_scripts_per_subscription: 100,
+                    max_scripts_per_subscription,
                 },
             },
         )
