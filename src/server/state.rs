@@ -23,7 +23,7 @@ use crate::{
 use age::x25519::Identity;
 use bitcoin::{key::Secp256k1, secp256k1::All, PrivateKey};
 use elements::BlockHash;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 
 use super::{sign::p2pkh, Error};
 
@@ -50,12 +50,17 @@ pub struct State {
 
     pub max_addresses: usize,
     pub max_txs_seen: usize,
+    pub descriptor_limits: crate::be::DescriptorLimits,
+    pub max_derivations_per_request: usize,
 
     pub cache_control_seconds: u32,
 
     pub server_timing: bool,
 
     pub derivation_cache: Mutex<DerivationCache>,
+
+    /// One permit per core, held while deriving scripts on the blocking thread pool.
+    pub derivation_permits: Arc<Semaphore>,
 
     pub cached_fee_estimates: RwLock<(HashMap<u16, f64>, Option<Instant>)>,
 
@@ -82,9 +87,14 @@ impl State {
             secp: bitcoin::key::Secp256k1::new(),
             max_addresses: config.max_addresses,
             max_txs_seen: config.max_txs_seen,
+            descriptor_limits: config.descriptor_limits,
+            max_derivations_per_request: config.max_derivations_per_request,
             cache_control_seconds: config.cache_control_seconds,
             server_timing: config.server_timing,
             derivation_cache: Mutex::new(DerivationCache::new(config.derivation_cache_capacity)),
+            derivation_permits: Arc::new(Semaphore::new(
+                std::thread::available_parallelism().map_or(1, |cores| cores.get()),
+            )),
             cached_fee_estimates: RwLock::new((HashMap::new(), None)),
             descriptor_metrics: Mutex::new(DescriptorMetrics::new()),
             descriptor_max_used_index: Mutex::new(HashMap::new()),
@@ -250,6 +260,13 @@ impl State {
             .subscribe(scripts, descriptors)
     }
 
+    pub(crate) async fn max_scripts_per_subscription(&self) -> usize {
+        self.subscriptions
+            .lock()
+            .await
+            .max_scripts_per_subscription()
+    }
+
     pub(crate) async fn subscription_expansion_range(
         &self,
         descriptor_id: u64,
@@ -373,6 +390,8 @@ pub struct SubscriptionLimits {
 pub struct StateConfig {
     pub max_addresses: usize,
     pub max_txs_seen: usize,
+    pub descriptor_limits: crate::be::DescriptorLimits,
+    pub max_derivations_per_request: usize,
     pub cache_control_seconds: u32,
     pub server_timing: bool,
     pub derivation_cache_capacity: usize,

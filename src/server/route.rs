@@ -32,7 +32,7 @@ use tokio::time::Interval;
 use super::{
     encryption,
     sign::MsgSigAddress,
-    subscription::{SubscriptionEvent, SubscriptionId, SubscriptionReceiver},
+    subscription::{SubscriptionError, SubscriptionEvent, SubscriptionId, SubscriptionReceiver},
     Network,
 };
 
@@ -50,7 +50,8 @@ pub fn is_likely_age_encrypted(s: &str) -> bool {
 
 const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 50;
-const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
+/// Derivation indexes scanned per path in a page of a descriptor request
+pub(crate) const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
 const MAX_ADDRESS_LENGTH: usize = 100; // max characters for an address (excessive to be conservative)
 const MAX_TX_BODY_SIZE: usize = 1024 * 1024; // 1MB limit for transaction broadcast body
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30); // timeout for reading request body
@@ -101,6 +102,7 @@ pub async fn route(
                 is_testnet_or_regtest,
                 state.max_addresses,
                 network,
+                &state.descriptor_limits,
             )?;
             handle_waterfalls_req(state, inputs, WithTip::No, false, network).await
         }
@@ -111,6 +113,7 @@ pub async fn route(
                 is_testnet_or_regtest,
                 state.max_addresses,
                 network,
+                &state.descriptor_limits,
             )?;
             handle_waterfalls_req(state, inputs, WithTip::Hash, false, network).await
         }
@@ -124,6 +127,7 @@ pub async fn route(
                 is_testnet_or_regtest,
                 state.max_addresses,
                 network,
+                &state.descriptor_limits,
             )?;
             handle_waterfalls_req(state, inputs, WithTip::No, true, network).await
         }
@@ -134,6 +138,7 @@ pub async fn route(
                 is_testnet_or_regtest,
                 state.max_addresses,
                 network,
+                &state.descriptor_limits,
             )?;
             handle_waterfalls_req(state, inputs, WithTip::Hash, true, network).await
         }
@@ -147,6 +152,7 @@ pub async fn route(
                 is_testnet_or_regtest,
                 state.max_addresses,
                 network,
+                &state.descriptor_limits,
             )?;
             handle_waterfalls_req(state, inputs, WithTip::All, false, network).await
         }
@@ -157,17 +163,28 @@ pub async fn route(
                 is_testnet_or_regtest,
                 state.max_addresses,
                 network,
+                &state.descriptor_limits,
             )?;
             handle_waterfalls_req(state, inputs, WithTip::All, true, network).await
         }
         (&Method::GET, "/v1/last_used_index", Some(query)) => {
-            let descriptor =
-                parse_descriptor_query(query, &state.key, is_testnet_or_regtest, network)?;
+            let descriptor = parse_descriptor_query(
+                query,
+                &state.key,
+                is_testnet_or_regtest,
+                network,
+                &state.descriptor_limits,
+            )?;
             handle_last_used_index(state, descriptor).await
         }
         (&Method::GET, "/v1/subscribe", Some(query)) => {
-            let descriptor =
-                parse_descriptor_query(query, &state.key, is_testnet_or_regtest, network)?;
+            let descriptor = parse_descriptor_query(
+                query,
+                &state.key,
+                is_testnet_or_regtest,
+                network,
+                &state.descriptor_limits,
+            )?;
             handle_subscribe_req(state, descriptor).await
         }
         (&Method::GET, "/v1/time_since_last_block", None) => {
@@ -391,6 +408,7 @@ pub(crate) fn parse_query(
     is_testnet_or_regtest: bool,
     max_addresses: usize,
     network: Network,
+    descriptor_limits: &be::DescriptorLimits,
 ) -> Result<WaterfallRequest, Error> {
     let mut page = 0u16;
     let mut to_index = 0u32;
@@ -418,7 +436,8 @@ pub(crate) fn parse_query(
                 desc_str
             };
 
-            let descriptor = be::Descriptor::from_str(&desc_str, network)?;
+            let descriptor =
+                be::Descriptor::from_str_with_limits(&desc_str, network, descriptor_limits)?;
 
             if is_testnet_or_regtest == descriptor.is_mainnet() {
                 return Err(Error::WrongNetwork);
@@ -465,6 +484,7 @@ pub(crate) fn parse_descriptor_query(
     key: &Identity,
     is_testnet_or_regtest: bool,
     network: Network,
+    descriptor_limits: &be::DescriptorLimits,
 ) -> Result<be::Descriptor, Error> {
     let mut descriptor = None;
     for (key, value) in form_urlencoded::parse(query.as_bytes()) {
@@ -481,7 +501,7 @@ pub(crate) fn parse_descriptor_query(
         desc_str
     };
 
-    let descriptor = be::Descriptor::from_str(&desc_str, network)?;
+    let descriptor = be::Descriptor::from_str_with_limits(&desc_str, network, descriptor_limits)?;
 
     if !descriptor.has_wildcard() {
         return Err(Error::DescriptorMustHaveWildcard);
@@ -592,7 +612,8 @@ fn error_status(error: &Error) -> StatusCode {
         | Error::TooManyAddresses
         | Error::DescriptorMustHaveWildcard
         | Error::AddressPageRequiresSingleAddress
-        | Error::UtxoOnlyHistoryTooLarge => StatusCode::BAD_REQUEST,
+        | Error::UtxoOnlyHistoryTooLarge
+        | Error::TooManyDerivations => StatusCode::BAD_REQUEST,
         Error::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         Error::BodyReadTimeout => StatusCode::REQUEST_TIMEOUT,
         Error::BlockchainChanged => StatusCode::SERVICE_UNAVAILABLE,
@@ -798,6 +819,7 @@ async fn scan_waterfalls(
     network: Network,
 ) -> Result<WaterfallsScan, Error> {
     let mut derivations_duration = Duration::from_secs(0);
+    let mut budget = DerivationBudget::new(state.max_derivations_per_request);
     let mut map = BTreeMap::new();
     let mut has_more = Vec::new();
     let utxo_only_req;
@@ -817,8 +839,14 @@ async fn scan_waterfalls(
                 let mut result = Vec::with_capacity(GAP_LIMIT as usize); // At least
                 for batch in 0..MAX_BATCH {
                     let batch_start = batch * GAP_LIMIT + page as u32 * MAX_ADDRESSES;
-                    let (scripts, batch_derivations_duration) =
-                        derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await?;
+                    let (scripts, batch_derivations_duration) = derive_script_hashes_batch(
+                        state,
+                        desc,
+                        batch_start,
+                        GAP_LIMIT,
+                        &mut budget,
+                    )
+                    .await?;
                     derivations_duration += batch_derivations_duration;
 
                     let find_result = find_scripts(state, &mut result, scripts, 0, true).await?;
@@ -852,7 +880,7 @@ async fn scan_waterfalls(
                     }
                 }
                 if !is_single_address {
-                    expand_subscriptions(state, desc, single_descriptor_id).await?;
+                    expand_subscriptions(state, desc, single_descriptor_id, &mut budget).await?;
                 }
                 if utxo_only {
                     filter_utxo_only(state, &mut result).await?;
@@ -1004,6 +1032,7 @@ async fn handle_last_used_index(
 
     let mut external_last_used: Option<u32> = None;
     let mut internal_last_used: Option<u32> = None;
+    let mut budget = DerivationBudget::new(state.max_derivations_per_request);
 
     for desc in descriptor.into_single_descriptors()?.iter() {
         // Determine if this is external (0/*) or internal (1/*) chain
@@ -1016,7 +1045,8 @@ async fn handle_last_used_index(
         for batch in 0..MAX_BATCH {
             let batch_start = batch * GAP_LIMIT;
             let (scripts, _) =
-                derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await?;
+                derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT, &mut budget)
+                    .await?;
 
             // Check which scripts have history (either confirmed or mempool), the mempool is
             // read before the db, see `find_scripts`.
@@ -1125,15 +1155,41 @@ async fn subscribe_descriptor(
     state: &Arc<State>,
     descriptor: be::Descriptor,
 ) -> Result<(SubscriptionId, SubscriptionReceiver), Error> {
-    let mut scripts = Vec::new();
-    let mut descriptors = HashMap::new();
     let single_descriptors = descriptor.into_single_descriptors()?;
+    let mut budget = DerivationBudget::new(state.max_derivations_per_request);
+
+    // The script limit is checked before scanning and deriving, so that a refused request
+    // doesn't cost that work. Scripts are counted before deduplication: an upper bound, which
+    // also refuses a descriptor whose paths derive the same scripts once their total exceeds
+    // the limit, even if the scripts left after deduplication would fit.
+    let max_scripts = state.max_scripts_per_subscription().await;
+    let too_many_scripts = || Error::String(format!("{:?}", SubscriptionError::TooManyScripts));
+    // Scripts watched by a path watching `watch_count` indexes: one without wildcard has a
+    // single script, one with a wildcard watches at least `GAP_LIMIT`.
+    let path_scripts = |desc: &be::Descriptor, watch_count: u32| {
+        if desc.has_wildcard() {
+            watch_count as usize
+        } else {
+            1
+        }
+    };
+    // The paths not counted yet are bounded below by their minimum, known without scanning.
+    let mut uncounted_min = single_descriptors
+        .iter()
+        .map(|desc| path_scripts(desc, GAP_LIMIT))
+        .fold(0usize, usize::saturating_add);
+    if uncounted_min > max_scripts {
+        return Err(too_many_scripts());
+    }
+    let mut total_scripts = 0usize;
+    let mut watch_counts = Vec::with_capacity(single_descriptors.len());
     for desc in single_descriptors.iter() {
         let single_descriptor_id = string_hash(&desc.normalized_id_string());
         let max_used_index = match state.descriptor_max_used_index(single_descriptor_id).await {
             Some(max_used_index) => max_used_index,
             None => {
-                let max_used_index = scan_descriptor_max_used_index(state, desc).await?;
+                let max_used_index =
+                    scan_descriptor_max_used_index(state, desc, &mut budget).await?;
                 state
                     .record_descriptor_scan_max_used_index(single_descriptor_id, max_used_index)
                     .await;
@@ -1141,8 +1197,20 @@ async fn subscribe_descriptor(
             }
         };
         let watch_count = subscription_watch_count(max_used_index)?;
+        total_scripts = total_scripts.saturating_add(path_scripts(desc, watch_count));
+        uncounted_min = uncounted_min.saturating_sub(path_scripts(desc, GAP_LIMIT));
+        // Refuse before scanning the next paths.
+        if total_scripts.saturating_add(uncounted_min) > max_scripts {
+            return Err(too_many_scripts());
+        }
+        watch_counts.push((single_descriptor_id, watch_count));
+    }
+
+    let mut scripts = Vec::with_capacity(total_scripts);
+    let mut descriptors = HashMap::new();
+    for (desc, (single_descriptor_id, watch_count)) in single_descriptors.iter().zip(watch_counts) {
         scripts.extend(
-            derive_script_hashes_batch(state, desc, 0, watch_count)
+            derive_script_hashes_batch(state, desc, 0, watch_count, &mut budget)
                 .await?
                 .0,
         );
@@ -1160,7 +1228,8 @@ async fn subscribe_descriptor(
     // the subscription was registered, in which case the scan's expansion missed this subscription.
     // Scans record the index before expanding, so re-checking after registering closes the gap.
     for desc in single_descriptors.iter().filter(|desc| desc.has_wildcard()) {
-        expand_subscriptions(state, desc, string_hash(&desc.normalized_id_string())).await?;
+        let single_descriptor_id = string_hash(&desc.normalized_id_string());
+        expand_subscriptions(state, desc, single_descriptor_id, &mut budget).await?;
     }
 
     Ok(subscription)
@@ -1168,10 +1237,14 @@ async fn subscribe_descriptor(
 
 /// Expands active subscriptions on `desc` so that they keep watching `GAP_LIMIT` indexes past the
 /// highest used index known for the descriptor, which scans may have increased since subscribing.
+///
+/// The expansion is a side effect of the request: when the derivations it needs exceed what is
+/// left of the request `budget` it is skipped, a later request expands the subscriptions.
 async fn expand_subscriptions(
     state: &Arc<State>,
     desc: &be::Descriptor,
     single_descriptor_id: u64,
+    budget: &mut DerivationBudget,
 ) -> Result<(), Error> {
     let Some(max_used_index) = state.descriptor_max_used_index(single_descriptor_id).await else {
         return Ok(());
@@ -1185,7 +1258,14 @@ async fn expand_subscriptions(
     else {
         return Ok(());
     };
-    let (scripts, _) = derive_script_hashes_batch(state, desc, start, end - start).await?;
+    let scripts = match derive_script_hashes_batch(state, desc, start, end - start, budget).await {
+        Ok((scripts, _)) => scripts,
+        Err(Error::TooManyDerivations) => {
+            log::debug!("subscription expansion skipped, derivation budget exhausted");
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
     state
         .expand_subscriptions(single_descriptor_id, start, &scripts)
         .await;
@@ -1195,12 +1275,14 @@ async fn expand_subscriptions(
 async fn scan_descriptor_max_used_index(
     state: &Arc<State>,
     desc: &be::Descriptor,
+    budget: &mut DerivationBudget,
 ) -> Result<Option<u32>, Error> {
     let mut max_used_index = None;
 
     for batch in 0..MAX_BATCH {
         let batch_start = batch * GAP_LIMIT;
-        let (scripts, _) = derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT).await?;
+        let (scripts, _) =
+            derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT, budget).await?;
 
         let mut result = Vec::with_capacity(GAP_LIMIT as usize);
         let find_result = find_scripts(state, &mut result, scripts, 0, true).await?;
@@ -1467,59 +1549,93 @@ struct FindScriptsResult {
     max_used_offset: Option<u32>,
 }
 
-fn calculate_script_pubkey_with_timing(
-    desc: &be::Descriptor,
-    index: u32,
-) -> Result<(Vec<u8>, std::time::Duration), Error> {
-    let start = Instant::now();
-    let script_pubkey = desc
-        .script_pubkey_at_derivation_index(index)
-        .inspect_err(|e| log::error!("script derivation failed: {e}"))?;
-    let duration = start.elapsed();
-    Ok((script_pubkey, duration))
-}
-
 /// Derive script hashes for a batch of indices from a descriptor.
 ///
 /// Returns a tuple of (script_hashes, derivation_duration).
-/// The derivation_duration is the total time spent computing script pubkeys
-/// (not including cache hits).
+/// The derivation_duration is the time spent deriving the indexes missing from the cache.
+///
+/// Derivation is CPU bound and costs one key derivation per key of the descriptor and index:
+/// it runs on tokio's blocking thread pool, so that heavy requests don't stall the other
+/// tasks scheduled on the async workers. [`State::derivation_permits`] bounds the derivations
+/// running at once to the number of cores, so they don't compete for the CPU with the async
+/// workers either. The derived scripts are cached by the blocking task itself, so they are kept
+/// even if the request is cancelled while waiting for it.
+///
+/// The indexes missing from the cache are taken from `budget`, failing with
+/// [`Error::TooManyDerivations`] before deriving anything if it is not enough. Their cost in
+/// key derivations is bounded by `--max-descriptor-keys`.
 async fn derive_script_hashes_batch(
     state: &Arc<State>,
     desc: &be::Descriptor,
     start_index: u32,
     count: u32,
+    budget: &mut DerivationBudget,
 ) -> Result<(Vec<u64>, Duration), Error> {
     let desc_str = desc.to_string();
-    let is_single_address = !desc.has_wildcard();
+    // a descriptor without wildcard has a single script
+    let count = if desc.has_wildcard() {
+        count
+    } else {
+        count.min(1)
+    };
+    let keys: Vec<_> = (start_index..start_index + count)
+        .map(|index| (index, DerivationCache::hash(&desc_str, index)))
+        .collect();
 
-    let mut scripts = Vec::with_capacity(count as usize);
-    let mut derivations_duration = Duration::from_secs(0);
-
-    for index in start_index..start_index + count {
-        let der_ind_hash = DerivationCache::hash(&desc_str, index);
-        // The lock is released while deriving, so one large request does not block the others.
-        let cached = state.derivation_cache.lock().await.get(der_ind_hash);
-        let script_hash = match cached {
-            Some(script_hash) => script_hash,
-            None => {
-                let (script_pubkey, duration) = calculate_script_pubkey_with_timing(desc, index)?;
-                derivations_duration += duration;
-                let script_hash = state.store.hash(&script_pubkey);
-                state
-                    .derivation_cache
-                    .lock()
-                    .await
-                    .add(der_ind_hash, script_hash);
-                script_hash
-            }
-        };
-
-        scripts.push(script_hash);
-        if is_single_address {
-            break;
-        }
+    let cached: Vec<_> = {
+        let mut cache = state.derivation_cache.lock().await;
+        keys.iter().map(|(_, key)| cache.get(*key)).collect()
+    };
+    let missing: Vec<_> = keys
+        .iter()
+        .zip(cached.iter())
+        .filter(|(_, cached)| cached.is_none())
+        .map(|(index_key, _)| *index_key)
+        .collect();
+    if missing.is_empty() {
+        return Ok((cached.into_iter().flatten().collect(), Duration::ZERO));
     }
+    budget.spend(missing.len())?;
+
+    // The semaphore is never closed, so acquiring doesn't fail.
+    let permit = Arc::clone(&state.derivation_permits)
+        .acquire_owned()
+        .await
+        .map_err(|e| Error::String(format!("derivation permits closed: {e}")))?;
+    // The cache lock is released while deriving, so one large request does not block the others.
+    let (derived, derivations_duration) = {
+        let state = Arc::clone(state);
+        let desc = desc.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let start = Instant::now();
+            let derived = missing
+                .iter()
+                .map(|(index, _)| {
+                    desc.script_pubkey_at_derivation_index(*index)
+                        .map(|script_pubkey| state.store.hash(&script_pubkey))
+                        .inspect_err(|e| log::error!("script derivation failed: {e}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut cache = state.derivation_cache.blocking_lock();
+            for ((_, key), script_hash) in missing.iter().zip(derived.iter()) {
+                cache.add(*key, *script_hash);
+            }
+            Ok::<_, Error>((derived, start.elapsed()))
+        })
+        .await
+        .map_err(|e| {
+            log::error!("derivation task failed: {e}");
+            Error::String(format!("derivation task failed: {e}"))
+        })??
+    };
+
+    let mut derived = derived.into_iter();
+    let scripts = cached
+        .into_iter()
+        .map(|cached| cached.or_else(|| derived.next()))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| Error::String("missing derived script".to_string()))?;
 
     Ok((scripts, derivations_duration))
 }
@@ -1620,16 +1736,95 @@ fn get_build_info() -> BuildInfo {
     }
 }
 
+/// Derivation indexes a request can still derive, see `--max-derivations-per-request`.
+pub(crate) struct DerivationBudget {
+    remaining: usize,
+}
+
+impl DerivationBudget {
+    pub(crate) fn new(max: usize) -> Self {
+        Self { remaining: max }
+    }
+
+    /// Takes `indexes` from the budget, or fails leaving it untouched.
+    fn spend(&mut self, indexes: usize) -> Result<(), Error> {
+        match self.remaining.checked_sub(indexes) {
+            Some(remaining) => {
+                self.remaining = remaining;
+                Ok(())
+            }
+            None => Err(Error::TooManyDerivations),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::server::subscription::Subscriptions;
+
+    /// [`super::parse_query`] with the default descriptor limits
+    fn parse_query(
+        query: &str,
+        key: &Identity,
+        is_testnet_or_regtest: bool,
+        max_addresses: usize,
+        network: Network,
+    ) -> Result<WaterfallRequest, Error> {
+        super::parse_query(
+            query,
+            key,
+            is_testnet_or_regtest,
+            max_addresses,
+            network,
+            &Default::default(),
+        )
+    }
 
     const MAINNET_DESC: &str = "elwpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#20ufqv7z";
     const TESTNET_DESC: &str = "elwpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)#v7pu3vak";
     const BITCOIN_MAINNET_DESC: &str = "wpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#20ufqv7z";
     const BITCOIN_TESTNET_DESC: &str = "wpkh(tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*)#v7pu3vak";
     const CONFIDENTIAL_TESTNET_DESC: &str = "ct(slip77(1bda6cd71a1e206e3eb793e5a4d98a46c3fa473c9ab7bdef9bb9c814764d6614),elwpkh([cb4ba44a/84'/1'/0']tpubDDrybtUajFcgXC85rvwPsh1oU7Azx4kJ9BAiRzMbByqK7UnVXY3gDRJPwEDfaQwguNUZFzrhavJGgEhbsfuebyxUSZQnjLezWVm2Vdqb7UM/<0;1>/*))#za9ktavp";
+
+    #[test]
+    fn query_parsing_applies_configured_descriptor_limits() {
+        let key = age::x25519::Identity::generate();
+        let three_paths = TESTNET_DESC
+            .split('#')
+            .next()
+            .unwrap()
+            .replace("<0;1>", "<0;1;2>");
+        let query = encode_query(&three_paths, None);
+        let network = Network::LiquidTestnet;
+
+        let default = be::DescriptorLimits::default();
+        let three = be::DescriptorLimits {
+            max_paths: 3,
+            ..default
+        };
+        let one_key = be::DescriptorLimits {
+            max_keys: 1,
+            ..three
+        };
+
+        let parse = |limits| super::parse_query(&query, &key, true, 100, network, limits);
+        assert!(matches!(parse(&default), Err(Error::InvalidDescriptor(_))));
+        assert!(parse(&three).is_ok());
+        assert!(parse(&one_key).is_ok());
+        let zero_keys = be::DescriptorLimits {
+            max_keys: 0,
+            ..three
+        };
+        assert!(matches!(
+            parse(&zero_keys),
+            Err(Error::InvalidDescriptor(_))
+        ));
+
+        let parse = |limits| super::parse_descriptor_query(&query, &key, true, network, limits);
+        assert!(matches!(parse(&default), Err(Error::InvalidDescriptor(_))));
+        assert!(parse(&three).is_ok());
+    }
 
     #[test]
     fn test_parse_query() {
@@ -2210,7 +2405,214 @@ mod tests {
         assert!(history.iter().all(|tx| tx.block_hash.is_some()));
     }
 
+    #[tokio::test]
+    async fn derivation_batch_mixes_cached_and_derived_indexes() {
+        let state = Arc::new(route_test_state());
+        let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
+        let single = desc.into_single_descriptors().unwrap().remove(0);
+        let expected: Vec<_> = (0..10)
+            .map(|i| {
+                let script_pubkey = single.script_pubkey_at_derivation_index(i).unwrap();
+                state.store.hash(&script_pubkey)
+            })
+            .collect();
+
+        // Indexes 3 and 4 are cached, the others are derived.
+        let (scripts, _) = derive_script_hashes_batch(&state, &single, 3, 2, &mut budget())
+            .await
+            .unwrap();
+        assert_eq!(scripts, expected[3..5]);
+        let (scripts, _) = derive_script_hashes_batch(&state, &single, 0, 10, &mut budget())
+            .await
+            .unwrap();
+        assert_eq!(scripts, expected);
+
+        // Every index is now cached.
+        let (scripts, duration) = derive_script_hashes_batch(&state, &single, 0, 10, &mut budget())
+            .await
+            .unwrap();
+        assert_eq!(scripts, expected);
+        assert_eq!(duration, Duration::ZERO);
+    }
+
+    /// A budget never exhausted
+    fn budget() -> DerivationBudget {
+        DerivationBudget::new(usize::MAX)
+    }
+
+    #[tokio::test]
+    async fn derivation_budget_counts_indexes_not_cached() {
+        let state = Arc::new(route_test_state());
+        let xpub = "tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M";
+        let two_keys = format!("elwsh(multi(1,{xpub}/0/*,{xpub}/1/*))");
+        let desc = be::Descriptor::from_str(&two_keys, Network::LiquidTestnet).unwrap();
+
+        // 20 indexes, whatever the number of keys of the descriptor
+        let mut budget = DerivationBudget::new(20);
+        derive_script_hashes_batch(&state, &desc, 0, 20, &mut budget)
+            .await
+            .unwrap();
+        assert_eq!(budget.remaining, 0);
+
+        // Cached indexes are free.
+        derive_script_hashes_batch(&state, &desc, 0, 20, &mut budget)
+            .await
+            .unwrap();
+
+        // One index more is refused, before deriving it.
+        let err = derive_script_hashes_batch(&state, &desc, 0, 21, &mut budget)
+            .await
+            .unwrap_err();
+        assert_eq!(err, Error::TooManyDerivations);
+        let key = DerivationCache::hash(&desc.to_string(), 20);
+        assert_eq!(state.derivation_cache.lock().await.get(key), None);
+    }
+
+    #[tokio::test]
+    async fn waterfalls_scan_bounded_by_derivation_budget() {
+        let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
+        let request = |to_index| {
+            WaterfallRequest::Descriptor(DescriptorRequest {
+                descriptor: desc.clone(),
+                page: 0,
+                to_index,
+                utxo_only: false,
+            })
+        };
+        let scan = |state, to_index| async move {
+            scan_waterfalls(
+                &state,
+                &request(to_index),
+                WithTip::No,
+                Network::LiquidTestnet,
+            )
+            .await
+            .map(|_| ())
+        };
+
+        let state_with_budget = |max_derivations_per_request| {
+            let mut state = route_test_state();
+            state.max_derivations_per_request = max_derivations_per_request;
+            Arc::new(state)
+        };
+
+        // Without history the scan stops after the first 20 indexes of each path.
+        let state = state_with_budget(40);
+        assert_eq!(scan(Arc::clone(&state), 0).await, Ok(()));
+        // They are cached now, the same scan is free.
+        assert_eq!(scan(state, 0).await, Ok(()));
+
+        // Scanning up to index 100 of both paths derives 200 indexes.
+        assert_eq!(
+            scan(state_with_budget(199), 100).await,
+            Err(Error::TooManyDerivations)
+        );
+        assert_eq!(scan(state_with_budget(200), 100).await, Ok(()));
+    }
+
+    #[tokio::test]
+    async fn derivation_batch_of_descriptor_without_wildcard_has_one_script() {
+        let state = Arc::new(route_test_state());
+        let desc = be::Descriptor::from_str(
+            "elwpkh(02e18f242c8b0b589bfffeac30e1baa80a60933a649c7fb0f1103e78fbf58aa0ed)",
+            Network::LiquidTestnet,
+        )
+        .unwrap();
+        let (scripts, _) = derive_script_hashes_batch(&state, &desc, 0, GAP_LIMIT, &mut budget())
+            .await
+            .unwrap();
+        assert_eq!(scripts.len(), 1);
+    }
+
+    /// Records `max_used_index` for every path of `desc`, as a previous scan would.
+    async fn record_max_used_index(state: &State, desc: &be::Descriptor, max_used_index: u32) {
+        for single in desc.clone().into_single_descriptors().unwrap() {
+            let id = string_hash(&single.normalized_id_string());
+            state
+                .record_descriptor_scan_max_used_index(id, Some(max_used_index))
+                .await;
+        }
+    }
+
+    /// Whether index 0 of any path of `desc` is in the derivation cache.
+    async fn first_index_derived(state: &State, desc: &be::Descriptor) -> bool {
+        let mut cache = state.derivation_cache.lock().await;
+        desc.clone()
+            .into_single_descriptors()
+            .unwrap()
+            .iter()
+            .any(|single| {
+                cache
+                    .get(DerivationCache::hash(&single.to_string(), 0))
+                    .is_some()
+            })
+    }
+
+    #[tokio::test]
+    async fn subscribe_refused_before_deriving() {
+        let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
+
+        // 2 paths of 30 + 21 scripts are over the limit of 100, and fit the cache of the test
+        // state: deriving them before refusing would leave them there.
+        let state = Arc::new(route_test_state());
+        record_max_used_index(&state, &desc, 30).await;
+        let err = subscribe_descriptor(&state, desc.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(err, Error::String("TooManyScripts".to_string()));
+        assert!(!first_index_derived(&state, &desc).await);
+
+        // Refused as quickly with a much higher index.
+        let state = Arc::new(route_test_state());
+        record_max_used_index(&state, &desc, 10_000_000).await;
+        let err = subscribe_descriptor(&state, desc.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(err, Error::String("TooManyScripts".to_string()));
+        assert!(!first_index_derived(&state, &desc).await);
+    }
+
+    #[tokio::test]
+    async fn subscribe_refused_before_scanning() {
+        let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
+
+        // 2 paths watch at least 2 * GAP_LIMIT scripts, over this limit whatever the history.
+        let state = Arc::new(route_test_state_with_max_scripts(
+            2 * GAP_LIMIT as usize - 1,
+        ));
+        let err = subscribe_descriptor(&state, desc.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(err, Error::String("TooManyScripts".to_string()));
+
+        // Scanning would have recorded the highest used index of each path.
+        for single in desc.clone().into_single_descriptors().unwrap() {
+            let id = string_hash(&single.normalized_id_string());
+            assert_eq!(state.descriptor_max_used_index(id).await, None);
+        }
+        assert!(!first_index_derived(&state, &desc).await);
+    }
+
+    #[tokio::test]
+    async fn subscribe_script_limit_counts_every_path() {
+        // The test state allows 100 scripts, `<0;1>` watches max_used_index + 21 per path.
+        let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
+
+        let state = Arc::new(route_test_state());
+        record_max_used_index(&state, &desc, 29).await;
+        assert!(subscribe_descriptor(&state, desc.clone()).await.is_ok());
+
+        let state = Arc::new(route_test_state());
+        record_max_used_index(&state, &desc, 30).await;
+        let err = subscribe_descriptor(&state, desc).await.unwrap_err();
+        assert_eq!(err, Error::String("TooManyScripts".to_string()));
+    }
+
     fn route_test_state() -> State {
+        route_test_state_with_max_scripts(100)
+    }
+
+    fn route_test_state_with_max_scripts(max_scripts_per_subscription: usize) -> State {
         State::new(
             crate::store::AnyStore::Mem(crate::store::memory::MemoryStore::new()),
             Identity::generate(),
@@ -2218,12 +2620,14 @@ mod tests {
             crate::server::StateConfig {
                 max_addresses: 100,
                 max_txs_seen: 100,
+                descriptor_limits: Default::default(),
+                max_derivations_per_request: 1_000,
                 cache_control_seconds: 5,
                 server_timing: false,
                 derivation_cache_capacity: 1000,
                 subscription_limits: crate::server::SubscriptionLimits {
                     max_active_subscriptions: 100,
-                    max_scripts_per_subscription: 100,
+                    max_scripts_per_subscription,
                 },
             },
         )

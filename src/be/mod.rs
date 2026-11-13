@@ -11,9 +11,12 @@ mod txid;
 pub use address::Address;
 pub use block::Block;
 pub use block_header::BlockHeader;
-pub use descriptor::{bitcoin_descriptor, Descriptor};
 #[cfg(feature = "fuzz")]
-pub(crate) use descriptor::{MAX_DESCRIPTOR_LENGTH, MAX_SINGLE_DESCRIPTORS};
+pub(crate) use descriptor::MAX_DESCRIPTOR_LENGTH;
+pub use descriptor::{
+    bitcoin_descriptor, Descriptor, DescriptorLimits, DEFAULT_MAX_DESCRIPTOR_KEYS,
+    DEFAULT_MAX_DESCRIPTOR_PATHS,
+};
 pub use outpoint::OutPoint;
 pub use transaction::{Input, InputRef, MempoolTx, Output, OutputRef, Transaction, TransactionRef};
 pub use txid::Txid;

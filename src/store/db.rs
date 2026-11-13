@@ -822,9 +822,16 @@ fn read_format_version(db: &DB) -> Result<u32> {
     let Some(cf) = db.cf_handle(META_CF) else {
         return Ok(1);
     };
-    let version = db
-        .get_cf(&cf, FORMAT_VERSION_KEY)?
-        .ok_or_else(|| anyhow::anyhow!("missing format version"))?;
+    let Some(version) = db.get_cf(&cf, FORMAT_VERSION_KEY)? else {
+        // META_CF is created on its own, before the version and the key are written: a first
+        // start interrupted in between leaves it empty, in a database without the key either,
+        // which is initialized again as a new one.
+        let other_cf = db.cf_handle(OTHER_CF).expect("missing OTHER_CF");
+        if db.get_cf(&other_cf, SALT_KEY)?.is_none() {
+            return Ok(1);
+        }
+        anyhow::bail!("missing format version");
+    };
     let version: [u8; 4] = version
         .try_into()
         .map_err(|_| anyhow::anyhow!("invalid format version length"))?;
@@ -874,7 +881,10 @@ fn get_or_init_script_hasher(
         (1, None) => {
             let mut key = [0u8; 16];
             thread_rng().fill(&mut key);
-            db.create_cf(META_CF, &Options::default())?;
+            // Already there if a previous first start was interrupted, see read_format_version.
+            if db.cf_handle(META_CF).is_none() {
+                db.create_cf(META_CF, &Options::default())?;
+            }
             let meta_cf = db.cf_handle(META_CF).expect("just created");
             // The version and the key are written together: a database has both or neither.
             let mut batch = rocksdb::WriteBatch::default();
@@ -1017,6 +1027,43 @@ mod test {
 
         write_format_version(tempdir.path(), 1);
         DBStore::open(tempdir.path(), 64, false, 6, true).unwrap();
+    }
+
+    #[test]
+    fn interrupted_first_start_initialized_again() {
+        // A first start stopped after creating META_CF, before writing the version and the key.
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let mut opts = rocksdb::Options::default();
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+        let cfs = COLUMN_FAMILIES.iter().copied().chain([META_CF]);
+        drop(DB::open_cf(&opts, tempdir.path(), cfs).unwrap());
+
+        let db = DBStore::open(tempdir.path(), 64, false, 6, false).unwrap();
+        assert!(matches!(db.script_hasher, ScriptHasher::KeyedSip { .. }));
+        assert_eq!(read_format_version(&db.db).unwrap(), FORMAT_VERSION);
+        let hasher = db.script_hasher;
+        drop(db);
+        let db = DBStore::open(tempdir.path(), 64, false, 6, false).unwrap();
+        assert_eq!(db.script_hasher, hasher);
+        drop(db);
+
+        // With the key but without the version the database is not a new one, and is refused.
+        let db = DB::open_cf(
+            &opts,
+            tempdir.path(),
+            COLUMN_FAMILIES.iter().chain(&[META_CF]),
+        )
+        .unwrap();
+        let cf = db.cf_handle(META_CF).unwrap();
+        db.delete_cf(&cf, FORMAT_VERSION_KEY).unwrap();
+        drop(cf);
+        drop(db);
+        let err = DBStore::open(tempdir.path(), 64, false, 6, false).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("missing format version"),
+            "{err:#}"
+        );
     }
 
     #[test]

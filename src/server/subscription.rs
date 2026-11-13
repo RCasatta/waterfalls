@@ -167,6 +167,10 @@ impl Subscriptions {
         }
     }
 
+    pub(crate) fn max_scripts_per_subscription(&self) -> usize {
+        self.max_scripts_per_subscription
+    }
+
     /// `descriptors` maps each wildcard single descriptor id to the number of derivation indexes
     /// watched starting from 0; they are used to later expand the subscription with [`Self::expand`].
     pub(crate) fn subscribe(

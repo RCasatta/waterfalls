@@ -30,9 +30,10 @@ fuzz_target!(|data: &[u8]| {
 
     if let Ok(request) = parse_query(query, key(), MAX_ADDRESSES, network) {
         if let Some(descriptor) = request_descriptor(&request) {
+            assert!(key_count(&descriptor) <= MAX_DESCRIPTOR_KEYS);
             let singles =
                 into_single_descriptors(descriptor.clone()).expect("a parsed descriptor expands");
-            assert!(singles.len() <= MAX_SINGLE_DESCRIPTORS);
+            assert!(singles.len() <= MAX_DESCRIPTOR_PATHS);
         }
         if let Some(addresses) = request_addresses(&request) {
             assert!(!addresses.is_empty());
@@ -45,7 +46,8 @@ fuzz_target!(|data: &[u8]| {
 
     if let Ok(descriptor) = parse_descriptor_query(query, key(), network) {
         assert!(has_wildcard(&descriptor));
+        assert!(key_count(&descriptor) <= MAX_DESCRIPTOR_KEYS);
         let singles = into_single_descriptors(descriptor).expect("a parsed descriptor expands");
-        assert!(singles.len() <= MAX_SINGLE_DESCRIPTORS);
+        assert!(singles.len() <= MAX_DESCRIPTOR_PATHS);
     }
 });

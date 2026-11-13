@@ -10,6 +10,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::be::{DescriptorLimits, DEFAULT_MAX_DESCRIPTOR_KEYS, DEFAULT_MAX_DESCRIPTOR_PATHS};
 use crate::fetch::{BackendValidationError, Client};
 use crate::inc_connection_error_counter;
 use crate::server::preload::headers;
@@ -134,6 +135,25 @@ pub struct Arguments {
     #[arg(env, long)]
     pub max_txs_seen: Option<usize>,
 
+    /// Maximum number of paths a descriptor can expand to, for example 2 with `<0;1>`.
+    /// Every path is scanned separately. Default is 2.
+    #[arg(env, long)]
+    pub max_descriptor_paths: Option<usize>,
+
+    /// Maximum number of keys in a descriptor, every key is derived for every index scanned.
+    /// Default is 20.
+    #[arg(env, long)]
+    pub max_descriptor_keys: Option<usize>,
+
+    /// Maximum number of derivation indexes a request can derive, over all the paths of the
+    /// descriptor. Indexes already in the derivation cache are not counted. Deriving an index
+    /// derives each key of the descriptor, the cost of an index is bounded by
+    /// `--max-descriptor-keys`.
+    /// Default is `--max-descriptor-paths` times the 1000 indexes scanned per path in a page,
+    /// so that a full page fits: 2000 with the default paths.
+    #[arg(env, long)]
+    pub max_derivations_per_request: Option<usize>,
+
     /// If true, add CORS headers to responses
     #[arg(env, long)]
     pub add_cors: bool,
@@ -223,6 +243,12 @@ impl std::fmt::Debug for Arguments {
             .field("zmq_endpoint", &self.zmq_endpoint)
             .field("max_addresses", &self.max_addresses)
             .field("max_txs_seen", &self.max_txs_seen)
+            .field("max_descriptor_paths", &self.max_descriptor_paths)
+            .field("max_descriptor_keys", &self.max_descriptor_keys)
+            .field(
+                "max_derivations_per_request",
+                &self.max_derivations_per_request,
+            )
             .field("add_cors", &self.add_cors)
             .field("server_timing", &self.server_timing)
             .field("derivation_cache_capacity", &self.derivation_cache_capacity)
@@ -258,6 +284,26 @@ impl std::fmt::Debug for Arguments {
 }
 
 impl Arguments {
+    fn descriptor_limits(&self) -> DescriptorLimits {
+        DescriptorLimits {
+            max_paths: self
+                .max_descriptor_paths
+                .unwrap_or(DEFAULT_MAX_DESCRIPTOR_PATHS),
+            max_keys: self
+                .max_descriptor_keys
+                .unwrap_or(DEFAULT_MAX_DESCRIPTOR_KEYS),
+        }
+    }
+
+    /// See [`Arguments::max_derivations_per_request`], the default follows the path limit.
+    fn max_derivations_per_request(&self) -> usize {
+        self.max_derivations_per_request.unwrap_or_else(|| {
+            self.descriptor_limits()
+                .max_paths
+                .saturating_mul(route::MAX_ADDRESSES as usize)
+        })
+    }
+
     pub fn is_valid(&self) -> Result<(), Error> {
         if self.rpc_user_password_file.is_none() && self.rpc_user_password.is_none() {
             Err(Error::String(
@@ -274,6 +320,18 @@ impl Arguments {
         } else if self.max_txs_seen == Some(0) {
             Err(Error::String(
                 "Max txs seen must be greater than 0".to_string(),
+            ))
+        } else if self.max_descriptor_paths == Some(0) {
+            Err(Error::String(
+                "Max descriptor paths must be greater than 0".to_string(),
+            ))
+        } else if self.max_descriptor_keys == Some(0) {
+            Err(Error::String(
+                "Max descriptor keys must be greater than 0".to_string(),
+            ))
+        } else if self.max_derivations_per_request == Some(0) {
+            Err(Error::String(
+                "Max derivations per request must be greater than 0".to_string(),
             ))
         } else if self.request_timeout_seconds == 0 {
             Err(Error::String(
@@ -386,6 +444,65 @@ mod argument_tests {
             ..valid
         };
         assert!(args.is_valid().is_err());
+    }
+
+    #[test]
+    fn descriptor_limits_must_be_non_zero() {
+        let valid = Arguments {
+            rpc_user_password: Some("user:pass".to_string()),
+            request_timeout_seconds: 1,
+            max_descriptor_paths: Some(1),
+            max_descriptor_keys: Some(1),
+            ..Default::default()
+        };
+        assert!(valid.is_valid().is_ok());
+
+        let args = Arguments {
+            max_descriptor_paths: Some(0),
+            ..valid.clone()
+        };
+        assert!(args.is_valid().is_err());
+
+        let args = Arguments {
+            max_descriptor_keys: Some(0),
+            ..valid
+        };
+        assert!(args.is_valid().is_err());
+    }
+
+    #[test]
+    fn max_derivations_per_request_must_be_non_zero() {
+        let valid = Arguments {
+            rpc_user_password: Some("user:pass".to_string()),
+            request_timeout_seconds: 1,
+            max_derivations_per_request: Some(1),
+            ..Default::default()
+        };
+        assert!(valid.is_valid().is_ok());
+
+        let args = Arguments {
+            max_derivations_per_request: Some(0),
+            ..valid
+        };
+        assert!(args.is_valid().is_err());
+    }
+
+    #[test]
+    fn max_derivations_per_request_follows_path_limit() {
+        // A full page of 1000 indexes of a single key descriptor on every path.
+        assert_eq!(Arguments::default().max_derivations_per_request(), 2_000);
+
+        let three_paths = Arguments {
+            max_descriptor_paths: Some(3),
+            ..Default::default()
+        };
+        assert_eq!(three_paths.max_derivations_per_request(), 3_000);
+
+        let explicit = Arguments {
+            max_derivations_per_request: Some(500),
+            ..three_paths
+        };
+        assert_eq!(explicit.max_derivations_per_request(), 500);
     }
 }
 
@@ -503,6 +620,8 @@ pub enum Error {
     AddressPageRequiresSingleAddress,
     DescriptorMustHaveWildcard,
     UtxoOnlyHistoryTooLarge,
+    /// The request needs to derive more indexes than `--max-derivations-per-request`.
+    TooManyDerivations,
     BodyTooLarge,
     BodyReadTimeout,
     CannotEstimateFee,
@@ -605,6 +724,8 @@ pub async fn inner_main(
         StateConfig {
             max_addresses: args.max_addresses,
             max_txs_seen: args.max_txs_seen.unwrap_or(DEFAULT_MAX_TXS_SEEN),
+            descriptor_limits: args.descriptor_limits(),
+            max_derivations_per_request: args.max_derivations_per_request(),
             cache_control_seconds: args.cache_control_seconds,
             server_timing: args.server_timing,
             derivation_cache_capacity: args.derivation_cache_capacity,

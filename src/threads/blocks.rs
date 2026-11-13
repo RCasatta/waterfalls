@@ -622,6 +622,8 @@ mod reorg_tests {
             StateConfig {
                 max_addresses: 100,
                 max_txs_seen: 100,
+                descriptor_limits: Default::default(),
+                max_derivations_per_request: 1_000,
                 cache_control_seconds: 5,
                 server_timing: false,
                 derivation_cache_capacity: 1000,

@@ -28,8 +28,10 @@ fuzz_target!(|data: &[u8]| {
     let _ = descriptor.is_mainnet();
     let _ = descriptor.to_string();
 
+    assert!(key_count(&descriptor) <= MAX_DESCRIPTOR_KEYS);
+
     let singles = into_single_descriptors(descriptor).expect("a parsed descriptor expands");
-    assert!(singles.len() <= MAX_SINGLE_DESCRIPTORS);
+    assert!(singles.len() <= MAX_DESCRIPTOR_PATHS);
     for single in singles.iter() {
         let _ = normalized_id_string(single);
         let _ = script_pubkey_at_derivation_index(single, index);
