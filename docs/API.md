@@ -383,6 +383,8 @@ GET /fee-estimates
 ```
 Returns fee estimates for various confirmation targets in sat/vB (satoshis per virtual byte). The endpoint queries the connected node's RPC (`estimatesmartfee`).
 
+The estimates are cached for 30 seconds. If the node cannot be queried to refresh them, the last estimates are returned with a 5 seconds `Cache-Control`; `500 CannotEstimateFee` is returned only when there are none yet.
+
 **Response Format (JSON):**
  
 The following is a non-exhaustive example, more keys are present:

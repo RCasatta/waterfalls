@@ -55,6 +55,7 @@ const MAX_ADDRESS_LENGTH: usize = 100; // max characters for an address (excessi
 const MAX_TX_BODY_SIZE: usize = 1024 * 1024; // 1MB limit for transaction broadcast body
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30); // timeout for reading request body
 const FEE_ESTIMATES_TTL: u32 = 30; // cache fee estimates for 30 seconds
+const FEE_ESTIMATES_RETRY: u32 = 5; // after a failed refresh serve the stale ones for 5 seconds
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const SSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 const SSE_KEEPALIVE: &[u8] = b": keepalive\n\n";
@@ -404,25 +405,35 @@ pub async fn route(
 
                     // The write lock makes a burst of misses one node request: the others wait
                     // for it and find the refreshed cache.
-                    let fee_estimates = {
+                    let (fee_estimates, max_age) = {
                         let mut cached = state.cached_fee_estimates.write().await;
                         match *cached {
                             (ref cache, Some(cache_time))
                                 if cache_time.elapsed()
                                     < Duration::from_secs(FEE_ESTIMATES_TTL as u64) =>
                             {
-                                cache.clone()
+                                (cache.clone(), FEE_ESTIMATES_TTL)
                             }
-                            _ => {
-                                let fee_estimates = client
-                                    .acquire()
-                                    .await?
-                                    .fee_estimates()
-                                    .await
-                                    .map_err(|_| Error::CannotEstimateFee)?;
-                                *cached = (fee_estimates.clone(), Some(Instant::now()));
-                                fee_estimates
-                            }
+                            _ => match client.acquire().await?.fee_estimates().await {
+                                Ok(fee_estimates) => {
+                                    *cached = (fee_estimates.clone(), Some(Instant::now()));
+                                    (fee_estimates, FEE_ESTIMATES_TTL)
+                                }
+                                // Stale estimates are better than none. Try again in a few
+                                // seconds, the requests meanwhile don't each wait for the node.
+                                Err(e) if cached.1.is_some() => {
+                                    log::warn!(
+                                        "cannot refresh fee estimates, serving stale ones: {e:?}"
+                                    );
+                                    let retry_in = Duration::from_secs(FEE_ESTIMATES_RETRY as u64);
+                                    let expires_in = Duration::from_secs(FEE_ESTIMATES_TTL as u64);
+                                    cached.1 = Instant::now()
+                                        .checked_sub(expires_in - retry_in)
+                                        .or_else(|| Some(Instant::now()));
+                                    (cached.0.clone(), FEE_ESTIMATES_RETRY)
+                                }
+                                Err(_) => return Err(Error::CannotEstimateFee),
+                            },
                         }
                     };
 
@@ -432,7 +443,7 @@ pub async fn route(
                         result.into_bytes(),
                         StatusCode::OK,
                         Some("application/json"),
-                        Some(FEE_ESTIMATES_TTL),
+                        Some(max_age),
                         None,
                     )
                 }
