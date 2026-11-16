@@ -70,23 +70,27 @@ type Resp = Response<RespBody>;
 
 /// The client of the node used by the HTTP handlers. At most `max_requests` requests are made
 /// to the node at the same time, the others wait for a permit: the node queues a limited number
-/// of RPC requests, shared with block indexing and mempool sync.
+/// of RPC requests, shared with block indexing and mempool sync. A request holds its permit at
+/// most `deadline`, see [`NodePermit::within`].
 pub struct NodeClient {
     client: Client,
     permits: tokio::sync::Semaphore,
+    deadline: Duration,
 }
 
 /// The client, borrowed while holding a permit
 pub struct NodePermit<'a> {
     client: &'a Client,
+    deadline: Duration,
     _permit: tokio::sync::SemaphorePermit<'a>,
 }
 
 impl NodeClient {
-    pub fn new(client: Client, max_requests: usize) -> Self {
+    pub fn new(client: Client, max_requests: usize, deadline: Duration) -> Self {
         NodeClient {
             client,
             permits: tokio::sync::Semaphore::new(max_requests),
+            deadline,
         }
     }
 
@@ -99,8 +103,24 @@ impl NodeClient {
             .map_err(|e| Error::String(format!("node permits closed: {e}")))?;
         Ok(NodePermit {
             client: &self.client,
+            deadline: self.deadline,
             _permit,
         })
+    }
+}
+
+impl NodePermit<'_> {
+    /// Gives up on a request to the node after the deadline, with [`Error::NodeUnavailable`],
+    /// so that the permit is released. `Client::tx` and `Client::block_header` retry for as
+    /// long as the node answers 503, which is what the background tasks need, but it would
+    /// hold the permit of a handler forever.
+    async fn within<T>(
+        &self,
+        request: impl std::future::Future<Output = anyhow::Result<T>>,
+    ) -> Result<anyhow::Result<T>, Error> {
+        tokio::time::timeout(self.deadline, request)
+            .await
+            .map_err(|_| Error::NodeUnavailable)
     }
 }
 
@@ -320,7 +340,8 @@ pub async fn route(
 
                 (Some(""), Some("tx"), Some(v), Some("raw"), None) => {
                     let txid = crate::be::Txid::from_str(v).map_err(|_| Error::InvalidTxid)?;
-                    let tx = match client.acquire().await?.tx(txid, network.into()).await {
+                    let permit = client.acquire().await?;
+                    let tx = match permit.within(permit.tx(txid, network.into())).await? {
                         Ok(tx) => tx,
                         Err(e) => {
                             log::warn!(
@@ -334,11 +355,10 @@ pub async fn route(
                 }
                 (Some(""), Some("block"), Some(v), Some("header"), None) => {
                     let block_hash = BlockHash::from_str(v).map_err(|_| Error::InvalidBlockHash)?;
-                    let header = client
-                        .acquire()
+                    let permit = client.acquire().await?;
+                    let header = permit
+                        .within(permit.block_header(block_hash, network.into()))
                         .await?
-                        .block_header(block_hash, network.into())
-                        .await
                         .map_err(|_| Error::CannotFindBlockHeader)?;
                     let result = header.serialize_hex();
                     any_resp(
@@ -650,7 +670,7 @@ fn parse_broadcast_body(body: &[u8], network: Network) -> Result<be::Transaction
 fn error_resp(status: StatusCode, error: &Error) -> Resp {
     let mut response = Response::new(full_body(error.to_string().into_bytes()));
     *response.status_mut() = status;
-    if matches!(error, Error::BlockchainChanged) {
+    if matches!(error, Error::BlockchainChanged | Error::NodeUnavailable) {
         response.headers_mut().insert(
             header::RETRY_AFTER,
             header::HeaderValue::from(BLOCKCHAIN_CHANGED_RETRY_AFTER_SECONDS),
@@ -680,7 +700,7 @@ fn error_status(error: &Error) -> StatusCode {
         | Error::TooManyDerivations => StatusCode::BAD_REQUEST,
         Error::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         Error::BodyReadTimeout => StatusCode::REQUEST_TIMEOUT,
-        Error::BlockchainChanged => StatusCode::SERVICE_UNAVAILABLE,
+        Error::BlockchainChanged | Error::NodeUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -2805,7 +2825,11 @@ mod tests {
             request_timeout_seconds: 30,
             ..Default::default()
         };
-        let client = Arc::new(NodeClient::new(Client::new(&args).unwrap(), max_requests));
+        let client = Arc::new(NodeClient::new(
+            Client::new(&args).unwrap(),
+            max_requests,
+            Duration::from_secs(30),
+        ));
         let state = Arc::new(route_test_state());
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

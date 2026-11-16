@@ -492,6 +492,7 @@ Common error conditions:
 - `InvalidBlockHash`: Malformed block hash
 - `CannotFindTx`: Transaction not found
 - `CannotFindBlockHeader`: Block header not found
+- `NodeUnavailable` (503): `/tx/{txid}/raw` or `/block/{hash}/header` got no answer from the node in time, for example while it answers 503 busy or starting; retry later, with `Retry-After: 1`
 
 ## Client Usage Examples
 
