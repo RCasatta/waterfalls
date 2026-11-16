@@ -2904,11 +2904,45 @@ mod tests {
         assert_eq!(node.started(), 1);
     }
 
+    #[tokio::test]
+    async fn refused_subscriptions_have_their_status() {
+        let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
+
+        // The maximum of active subscriptions is reached: the server may serve it later
+        let state = Arc::new(route_test_state_with_subscription_limits(1, 100));
+        let _first = subscribe_descriptor(&state, desc.clone()).await.unwrap();
+        let err = subscribe_descriptor(&state, desc.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            Error::Subscription(SubscriptionError::TooManySubscriptions)
+        );
+        assert_eq!(error_status(&err), StatusCode::SERVICE_UNAVAILABLE);
+
+        // Too many scripts for the subscription: a limit of the request
+        let state = Arc::new(route_test_state_with_subscription_limits(100, 10));
+        let err = subscribe_descriptor(&state, desc).await.unwrap_err();
+        assert_eq!(err, Error::Subscription(SubscriptionError::TooManyScripts));
+        assert_eq!(error_status(&err), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error_status(&Error::Subscription(SubscriptionError::Empty)),
+            StatusCode::BAD_REQUEST
+        );
+    }
+
     fn route_test_state() -> State {
         route_test_state_with_max_scripts(100)
     }
 
     fn route_test_state_with_max_scripts(max_scripts_per_subscription: usize) -> State {
+        route_test_state_with_subscription_limits(100, max_scripts_per_subscription)
+    }
+
+    fn route_test_state_with_subscription_limits(
+        max_active_subscriptions: usize,
+        max_scripts_per_subscription: usize,
+    ) -> State {
         State::new(
             crate::store::AnyStore::Mem(crate::store::memory::MemoryStore::new()),
             Identity::generate(),
@@ -2922,7 +2956,7 @@ mod tests {
                 server_timing: false,
                 derivation_cache_capacity: 1000,
                 subscription_limits: crate::server::SubscriptionLimits {
-                    max_active_subscriptions: 100,
+                    max_active_subscriptions,
                     max_scripts_per_subscription,
                 },
             },
