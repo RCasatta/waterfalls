@@ -382,17 +382,29 @@ pub async fn route(
                         }
                     }
 
-                    let fee_estimates = client
-                        .acquire()
-                        .await?
-                        .fee_estimates()
-                        .await
-                        .map_err(|_| Error::CannotEstimateFee)?;
-
-                    {
+                    // The write lock makes a burst of misses one node request: the others wait
+                    // for it and find the refreshed cache.
+                    let fee_estimates = {
                         let mut cached = state.cached_fee_estimates.write().await;
-                        *cached = (fee_estimates.clone(), Some(Instant::now()));
-                    }
+                        match *cached {
+                            (ref cache, Some(cache_time))
+                                if cache_time.elapsed()
+                                    < Duration::from_secs(FEE_ESTIMATES_TTL as u64) =>
+                            {
+                                cache.clone()
+                            }
+                            _ => {
+                                let fee_estimates = client
+                                    .acquire()
+                                    .await?
+                                    .fee_estimates()
+                                    .await
+                                    .map_err(|_| Error::CannotEstimateFee)?;
+                                *cached = (fee_estimates.clone(), Some(Instant::now()));
+                                fee_estimates
+                            }
+                        }
+                    };
 
                     let result = serde_json::to_string(&fee_estimates)
                         .map_err(|e| Error::String(e.to_string()))?;
