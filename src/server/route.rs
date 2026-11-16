@@ -2603,6 +2603,91 @@ mod tests {
         assert_eq!(err, Error::String("TooManyScripts".to_string()));
     }
 
+    /// Spawn a node answering the fee estimate RPC with an empty batch, once two requests are
+    /// in flight at the same time. A request left alone for 500ms is answered with a 500.
+    async fn spawn_rendezvous_node() -> std::net::SocketAddr {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let barrier = barrier.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 1024];
+                    let mut req = Vec::new();
+                    while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match socket.read(&mut buf).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => req.extend_from_slice(&buf[..n]),
+                        }
+                    }
+                    let together = tokio::time::timeout(Duration::from_millis(500), barrier.wait())
+                        .await
+                        .is_ok();
+                    let (status, body) = if together {
+                        ("200 OK", "[]")
+                    } else {
+                        ("500 Internal Server Error", "")
+                    };
+                    let response = format!(
+                        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                });
+            }
+        });
+        addr
+    }
+
+    /// Two slow requests to the node must be in flight together, one must not wait for the
+    /// other to finish.
+    #[tokio::test]
+    async fn node_requests_of_handlers_are_concurrent() {
+        use std::io::Write;
+
+        let node_addr = spawn_rendezvous_node().await;
+        let mut rpc_user_password_file = tempfile::NamedTempFile::new().unwrap();
+        write!(rpc_user_password_file, "user:pass").unwrap();
+        let args = crate::server::Arguments {
+            network: Network::Bitcoin,
+            node_url: Some(format!("http://{node_addr}")),
+            rpc_user_password_file: Some(rpc_user_password_file.path().to_path_buf()),
+            request_timeout_seconds: 30,
+            ..Default::default()
+        };
+        let client = Arc::new(Client::new(&args).unwrap());
+        let state = Arc::new(route_test_state());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let (state, client) = (state.clone(), client.clone());
+                tokio::spawn(async move {
+                    let service = hyper::service::service_fn(move |req| {
+                        let (state, client) = (state.clone(), client.clone());
+                        async move {
+                            infallible_route(&state, &client, req, Network::Bitcoin, false, false)
+                                .await
+                        }
+                    });
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(hyper_util::rt::TokioIo::new(stream), service)
+                        .await;
+                });
+            }
+        });
+
+        let url = format!("http://{server_addr}/fee-estimates");
+        let http = reqwest::Client::new();
+        let (a, b) = tokio::join!(http.get(&url).send(), http.get(&url).send());
+        assert_eq!(a.unwrap().status(), 200);
+        assert_eq!(b.unwrap().status(), 200);
+    }
+
     fn route_test_state() -> State {
         route_test_state_with_max_scripts(100)
     }
