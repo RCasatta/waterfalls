@@ -2878,6 +2878,25 @@ mod tests {
         );
     }
 
+    /// A burst of requests finding the fee estimates expired makes a single request to the node.
+    #[tokio::test]
+    async fn concurrent_fee_estimates_misses_make_one_node_request() {
+        let node = spawn_fake_node("[]".to_string(), false).await;
+        let server_addr = spawn_route_server(&node, 8).await;
+
+        let url = format!("http://{server_addr}/fee-estimates");
+        let http = reqwest::Client::new();
+        let (a, b, c) = tokio::join!(
+            http.get(&url).send(),
+            http.get(&url).send(),
+            http.get(&url).send()
+        );
+        for response in [a, b, c] {
+            assert_eq!(response.unwrap().status(), 200);
+        }
+        assert_eq!(node.started(), 1);
+    }
+
     fn route_test_state() -> State {
         route_test_state_with_max_scripts(100)
     }
