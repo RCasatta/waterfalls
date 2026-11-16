@@ -82,6 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HTTP 422 instead of panicking the connection task.
 - Script derivation no longer holds the shared derivation cache lock, so a request deriving
   many scripts does not block the other requests needing the cache.
+- Requests to the node made by the HTTP handlers (`POST /tx`, `/tx/<txid>/raw`,
+  `/block/<hash>/header` and `/fee-estimates`) no longer wait for each other: a slow
+  broadcast or a lookup retrying while the node is busy used to block them all.
 - Descriptors longer than 8192 bytes are rejected with HTTP 400 before any scan, bounding the
   work a single request can cause.
 - Descriptors nested deeper than 64 levels, counting parentheses and miniscript wrappers

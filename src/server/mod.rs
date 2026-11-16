@@ -882,7 +882,7 @@ pub async fn inner_main(
         "Client for server tasks created, chain info: {:?}",
         client.chain_info().await
     );
-    let client = Arc::new(Mutex::new(client));
+    let client = Arc::new(client);
     loop {
         tokio::select! {
             Ok((stream, peer_addr)) = listener.accept() => {

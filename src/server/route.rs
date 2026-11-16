@@ -26,7 +26,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::Mutex;
 use tokio::time::Interval;
 
 use super::{
@@ -76,7 +75,7 @@ type Resp = Response<RespBody>;
 // https://waterfalls.liquidwebwallet.org/liquidtestnet/api/block-height/1424507
 pub async fn route(
     state: &Arc<State>,
-    client: &Arc<Mutex<Client>>,
+    client: &Arc<Client>,
     req: Request<Incoming>,
     network: Network,
     expose_metrics: bool,
@@ -253,7 +252,7 @@ pub async fn route(
                 std::str::from_utf8(&whole_body).map_err(|e| Error::String(e.to_string()))?;
             let tx = be::Transaction::from_str(tx_hex, network.into())
                 .map_err(|e| Error::String(e.to_string()))?;
-            let result = client.lock().await.broadcast(&tx).await;
+            let result = client.broadcast(&tx).await;
             match result {
                 Ok(txid) => str_resp(txid.to_string(), StatusCode::OK),
                 Err(e) => {
@@ -280,7 +279,7 @@ pub async fn route(
 
                 (Some(""), Some("tx"), Some(v), Some("raw"), None) => {
                     let txid = crate::be::Txid::from_str(v).map_err(|_| Error::InvalidTxid)?;
-                    let tx = match client.lock().await.tx(txid, network.into()).await {
+                    let tx = match client.tx(txid, network.into()).await {
                         Ok(tx) => tx,
                         Err(e) => {
                             log::warn!(
@@ -295,8 +294,6 @@ pub async fn route(
                 (Some(""), Some("block"), Some(v), Some("header"), None) => {
                     let block_hash = BlockHash::from_str(v).map_err(|_| Error::InvalidBlockHash)?;
                     let header = client
-                        .lock()
-                        .await
                         .block_header(block_hash, network.into())
                         .await
                         .map_err(|_| Error::CannotFindBlockHeader)?;
@@ -343,8 +340,6 @@ pub async fn route(
                     }
 
                     let fee_estimates = client
-                        .lock()
-                        .await
                         .fee_estimates()
                         .await
                         .map_err(|_| Error::CannotEstimateFee)?;
@@ -1644,7 +1639,7 @@ async fn derive_script_hashes_batch(
 /// However, the signature must return Result anyway to be used in the service_fn
 pub async fn infallible_route(
     state: &Arc<State>,
-    client: &Arc<Mutex<Client>>,
+    client: &Arc<Client>,
     req: Request<Incoming>,
     network: Network,
     add_cors: bool,
