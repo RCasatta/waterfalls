@@ -249,10 +249,7 @@ pub async fn route(
             .map_err(|_| Error::BodyReadTimeout)?
             .map_err(|_| Error::BodyTooLarge)?
             .to_bytes();
-            let tx_hex =
-                std::str::from_utf8(&whole_body).map_err(|e| Error::String(e.to_string()))?;
-            let tx = be::Transaction::from_str(tx_hex, network.into())
-                .map_err(|e| Error::String(e.to_string()))?;
+            let tx = parse_broadcast_body(&whole_body, network)?;
             let result = client.lock().await.broadcast(&tx).await;
             match result {
                 Ok(txid) => str_resp(txid.to_string(), StatusCode::OK),
@@ -581,6 +578,18 @@ fn full_body(bytes: Vec<u8>) -> RespBody {
     Full::new(Bytes::from(bytes))
         .map_err(|never| match never {})
         .boxed()
+}
+
+/// Parses the body of `POST /tx`, a transaction in hex.
+fn parse_broadcast_body(body: &[u8], network: Network) -> Result<be::Transaction, Error> {
+    let tx_hex = std::str::from_utf8(body).map_err(|e| {
+        log::debug!("broadcast body is not utf8: {e}");
+        Error::InvalidTx
+    })?;
+    be::Transaction::from_str(tx_hex, network.into()).map_err(|e| {
+        log::debug!("cannot parse broadcast body: {e}");
+        Error::InvalidTx
+    })
 }
 
 fn error_resp(status: StatusCode, error: &Error) -> Resp {
@@ -1888,7 +1897,7 @@ mod tests {
 
         // Test Invalid Address
         let result = parse_query("addresses=ciao", &key, false, 100, Network::Liquid).unwrap_err();
-        assert!(matches!(result, Error::String(_)));
+        assert!(matches!(result, Error::InvalidAddress(_)));
 
         // Test Valid mainnet Address
         let mainnet_address = "ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh";

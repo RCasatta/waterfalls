@@ -76,6 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A malformed address (in `addresses` or `/address/<address>/txs`) and a malformed transaction
+  in the `POST /tx` body now return HTTP 400 with `InvalidAddress` or `InvalidTx`, instead of
+  HTTP 500. An address of another network returns 400 `WrongNetwork`, also on Bitcoin.
 - Rolling back a block now atomically removes its stored hash and timestamp, so restarting
   before a replacement block is indexed cannot restore the rolled-back block as the tip.
 - An age-encrypted descriptor whose header is valid but whose payload is corrupted now returns

@@ -424,7 +424,7 @@ Broadcasts a raw transaction to the network.
 
 **Response:**
 - Success (200): Transaction ID
-- Error (400): Error message
+- Error (400): `InvalidTx` if the body is not a valid transaction, otherwise the error of the node
 
 ## Monitoring
 
@@ -486,6 +486,8 @@ Common error conditions:
 - `UtxoOnlyHistoryTooLarge`: `utxo_only=true` was requested for a script whose history exceeds the truncation threshold
 - `InvalidDescriptor`: Malformed descriptor, or one over the [descriptor limits](#descriptor-limits)
 - `TooManyDerivations`: The descriptor request needs to derive more indexes than the server allows, see [descriptor limits](#descriptor-limits)
+- `InvalidAddress`: Malformed address
+- `InvalidTx`: Malformed transaction in the `POST /tx` body (not valid UTF-8 or hex, or not a transaction)
 - `InvalidTxid`: Malformed transaction ID
 - `InvalidBlockHash`: Malformed block hash
 - `CannotFindTx`: Transaction not found

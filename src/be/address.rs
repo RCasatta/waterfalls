@@ -113,15 +113,17 @@ impl std::fmt::Display for Address {
 }
 
 fn bitcoin_address(s: &str, network: bitcoin::Network) -> Result<Address, Error> {
-    let addr = bitcoin::Address::from_str(s).map_err(|e| Error::String(format!("{e:?}")))?;
+    let addr =
+        bitcoin::Address::from_str(s).map_err(|e| Error::InvalidAddress(format!("{e:?}")))?;
     let addr = addr
         .require_network(network)
-        .map_err(|e| Error::String(format!("{e:?}")))?;
+        .map_err(|_| Error::WrongNetwork)?;
     Ok(Address::Bitcoin(addr))
 }
 
 fn liquid_address(s: &str, params: &'static AddressParams) -> Result<Address, Error> {
-    let addr = elements::Address::from_str(s).map_err(|e| Error::String(format!("{e:?}")))?;
+    let addr =
+        elements::Address::from_str(s).map_err(|e| Error::InvalidAddress(format!("{e:?}")))?;
     if addr.params != params {
         return Err(Error::WrongNetwork);
     }
@@ -280,7 +282,7 @@ mod tests {
         // Using a simple test that verifies the network type rather than a specific address
         // since elements regtest addresses can be generated dynamically
         let result = Address::from_str("invalid", Network::ElementsRegtest);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidAddress(_))));
     }
 
     #[test]
@@ -290,11 +292,11 @@ mod tests {
             "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
             Network::BitcoinTestnet,
         );
-        assert!(matches!(result, Err(Error::String(_))));
+        assert_eq!(result, Err(Error::WrongNetwork));
 
         // Bitcoin testnet address on mainnet network should fail
         let result = Address::from_str("mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn", Network::Bitcoin);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert_eq!(result, Err(Error::WrongNetwork));
 
         // Liquid mainnet address on testnet network should fail
         let result = Address::from_str(
@@ -315,18 +317,18 @@ mod tests {
     fn test_invalid_addresses() {
         // Completely invalid address
         let result = Address::from_str("invalid_address", Network::Bitcoin);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidAddress(_))));
 
         let result = Address::from_str("invalid_address", Network::Liquid);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidAddress(_))));
 
         // Empty string
         let result = Address::from_str("", Network::Bitcoin);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidAddress(_))));
 
         // Too short
         let result = Address::from_str("abc", Network::Bitcoin);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidAddress(_))));
     }
 
     #[test]
@@ -344,14 +346,14 @@ mod tests {
     fn test_mixed_network_types() {
         // Bitcoin address on liquid network should fail
         let result = Address::from_str("1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2", Network::Liquid);
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidAddress(_))));
 
         // Liquid address on bitcoin network should fail
         let result = Address::from_str(
             "ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh",
             Network::Bitcoin,
         );
-        assert!(matches!(result, Err(Error::String(_))));
+        assert!(matches!(result, Err(Error::InvalidAddress(_))));
     }
 
     #[test]
