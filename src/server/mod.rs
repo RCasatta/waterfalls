@@ -41,6 +41,8 @@ pub use mempool::Mempool;
 pub use state::{State, StateConfig, SubscriptionLimits};
 pub(crate) use subscription::SubscriptionEvent;
 
+/// See [`Arguments::max_node_requests`]
+const DEFAULT_MAX_NODE_REQUESTS: usize = 8;
 const DEFAULT_MAX_TXS_SEEN: usize = 100;
 const DEFAULT_MAX_ACTIVE_SUBSCRIPTIONS: usize = 5_000;
 const DEFAULT_MAX_SCRIPTS_PER_SUBSCRIPTION: usize = 2_000;
@@ -203,6 +205,13 @@ pub struct Arguments {
     #[arg(env, long)]
     pub node_disable_conn_pool: bool,
 
+    /// Maximum number of requests the HTTP handlers (`POST /tx`, `/tx/<txid>/raw`,
+    /// `/block/<hash>/header`, `/fee-estimates`) make to the node at the same time, the others wait.
+    /// Default is 8: bitcoind queues 16 RPC requests by default (`-rpcworkqueue`), shared with
+    /// block indexing and mempool sync.
+    #[arg(env, long)]
+    pub max_node_requests: Option<usize>,
+
     /// Timeout in seconds for reading incoming HTTP request headers (protects against slowloris attacks)
     #[arg(env, long, default_value = "10")]
     pub header_read_timeout_seconds: u64,
@@ -264,6 +273,7 @@ impl std::fmt::Debug for Arguments {
             .field("cache_control_seconds", &self.cache_control_seconds)
             .field("request_timeout_seconds", &self.request_timeout_seconds)
             .field("node_disable_conn_pool", &self.node_disable_conn_pool)
+            .field("max_node_requests", &self.max_node_requests)
             .field(
                 "header_read_timeout_seconds",
                 &self.header_read_timeout_seconds,
@@ -304,6 +314,11 @@ impl Arguments {
         })
     }
 
+    /// See [`Arguments::max_node_requests`].
+    fn max_node_requests(&self) -> usize {
+        self.max_node_requests.unwrap_or(DEFAULT_MAX_NODE_REQUESTS)
+    }
+
     pub fn is_valid(&self) -> Result<(), Error> {
         if self.rpc_user_password_file.is_none() && self.rpc_user_password.is_none() {
             Err(Error::String(
@@ -332,6 +347,10 @@ impl Arguments {
         } else if self.max_derivations_per_request == Some(0) {
             Err(Error::String(
                 "Max derivations per request must be greater than 0".to_string(),
+            ))
+        } else if self.max_node_requests == Some(0) {
+            Err(Error::String(
+                "Max node requests must be greater than 0".to_string(),
             ))
         } else if self.request_timeout_seconds == 0 {
             Err(Error::String(
@@ -483,6 +502,30 @@ mod argument_tests {
         let args = Arguments {
             max_derivations_per_request: Some(0),
             ..valid
+        };
+        assert!(args.is_valid().is_err());
+    }
+
+    #[test]
+    fn max_node_requests_must_be_non_zero() {
+        let valid = Arguments {
+            rpc_user_password: Some("user:pass".to_string()),
+            request_timeout_seconds: 1,
+            ..Default::default()
+        };
+        assert!(valid.is_valid().is_ok());
+        assert_eq!(valid.max_node_requests(), 8);
+
+        let args = Arguments {
+            max_node_requests: Some(1),
+            ..valid.clone()
+        };
+        assert!(args.is_valid().is_ok());
+        assert_eq!(args.max_node_requests(), 1);
+
+        let args = Arguments {
+            max_node_requests: Some(0),
+            ..args
         };
         assert!(args.is_valid().is_err());
     }
@@ -882,7 +925,7 @@ pub async fn inner_main(
         "Client for server tasks created, chain info: {:?}",
         client.chain_info().await
     );
-    let client = Arc::new(client);
+    let client = Arc::new(route::NodeClient::new(client, args.max_node_requests()));
     loop {
         tokio::select! {
             Ok((stream, peer_addr)) = listener.accept() => {

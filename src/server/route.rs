@@ -68,6 +68,50 @@ const BLOCKCHAIN_CHANGED_RETRY_AFTER_SECONDS: u32 = 1;
 type RespBody = BoxBody<Bytes, Infallible>;
 type Resp = Response<RespBody>;
 
+/// The client of the node used by the HTTP handlers. At most `max_requests` requests are made
+/// to the node at the same time, the others wait for a permit: the node queues a limited number
+/// of RPC requests, shared with block indexing and mempool sync.
+pub struct NodeClient {
+    client: Client,
+    permits: tokio::sync::Semaphore,
+}
+
+/// The client, borrowed while holding a permit
+pub struct NodePermit<'a> {
+    client: &'a Client,
+    _permit: tokio::sync::SemaphorePermit<'a>,
+}
+
+impl NodeClient {
+    pub fn new(client: Client, max_requests: usize) -> Self {
+        NodeClient {
+            client,
+            permits: tokio::sync::Semaphore::new(max_requests),
+        }
+    }
+
+    /// Waits for a permit, released when the returned value is dropped.
+    async fn acquire(&self) -> Result<NodePermit<'_>, Error> {
+        let _permit = self
+            .permits
+            .acquire()
+            .await
+            .map_err(|e| Error::String(format!("node permits closed: {e}")))?;
+        Ok(NodePermit {
+            client: &self.client,
+            _permit,
+        })
+    }
+}
+
+impl std::ops::Deref for NodePermit<'_> {
+    type Target = Client;
+
+    fn deref(&self) -> &Client {
+        self.client
+    }
+}
+
 // needed endpoint to make this self-contained for testing, in prod they should probably be never hit cause proxied by nginx
 // https://waterfalls.liquidwebwallet.org/liquidtestnet/api/blocks/tip/hash
 // https://waterfalls.liquidwebwallet.org/liquidtestnet/api/block/bddf520b05c7552dca87289a035043a5c434133b3d1bb07b255fb1a30592b2d4/header
@@ -75,7 +119,7 @@ type Resp = Response<RespBody>;
 // https://waterfalls.liquidwebwallet.org/liquidtestnet/api/block-height/1424507
 pub async fn route(
     state: &Arc<State>,
-    client: &Arc<Client>,
+    client: &Arc<NodeClient>,
     req: Request<Incoming>,
     network: Network,
     expose_metrics: bool,
@@ -252,7 +296,7 @@ pub async fn route(
                 std::str::from_utf8(&whole_body).map_err(|e| Error::String(e.to_string()))?;
             let tx = be::Transaction::from_str(tx_hex, network.into())
                 .map_err(|e| Error::String(e.to_string()))?;
-            let result = client.broadcast(&tx).await;
+            let result = client.acquire().await?.broadcast(&tx).await;
             match result {
                 Ok(txid) => str_resp(txid.to_string(), StatusCode::OK),
                 Err(e) => {
@@ -279,7 +323,7 @@ pub async fn route(
 
                 (Some(""), Some("tx"), Some(v), Some("raw"), None) => {
                     let txid = crate::be::Txid::from_str(v).map_err(|_| Error::InvalidTxid)?;
-                    let tx = match client.tx(txid, network.into()).await {
+                    let tx = match client.acquire().await?.tx(txid, network.into()).await {
                         Ok(tx) => tx,
                         Err(e) => {
                             log::warn!(
@@ -294,6 +338,8 @@ pub async fn route(
                 (Some(""), Some("block"), Some(v), Some("header"), None) => {
                     let block_hash = BlockHash::from_str(v).map_err(|_| Error::InvalidBlockHash)?;
                     let header = client
+                        .acquire()
+                        .await?
                         .block_header(block_hash, network.into())
                         .await
                         .map_err(|_| Error::CannotFindBlockHeader)?;
@@ -339,15 +385,29 @@ pub async fn route(
                         }
                     }
 
-                    let fee_estimates = client
-                        .fee_estimates()
-                        .await
-                        .map_err(|_| Error::CannotEstimateFee)?;
-
-                    {
+                    // The write lock makes a burst of misses one node request: the others wait
+                    // for it and find the refreshed cache.
+                    let fee_estimates = {
                         let mut cached = state.cached_fee_estimates.write().await;
-                        *cached = (fee_estimates.clone(), Some(Instant::now()));
-                    }
+                        match *cached {
+                            (ref cache, Some(cache_time))
+                                if cache_time.elapsed()
+                                    < Duration::from_secs(FEE_ESTIMATES_TTL as u64) =>
+                            {
+                                cache.clone()
+                            }
+                            _ => {
+                                let fee_estimates = client
+                                    .acquire()
+                                    .await?
+                                    .fee_estimates()
+                                    .await
+                                    .map_err(|_| Error::CannotEstimateFee)?;
+                                *cached = (fee_estimates.clone(), Some(Instant::now()));
+                                fee_estimates
+                            }
+                        }
+                    };
 
                     let result = serde_json::to_string(&fee_estimates)
                         .map_err(|e| Error::String(e.to_string()))?;
@@ -1639,7 +1699,7 @@ async fn derive_script_hashes_batch(
 /// However, the signature must return Result anyway to be used in the service_fn
 pub async fn infallible_route(
     state: &Arc<State>,
-    client: &Arc<Client>,
+    client: &Arc<NodeClient>,
     req: Request<Incoming>,
     network: Network,
     add_cors: bool,
@@ -2601,91 +2661,6 @@ mod tests {
         record_max_used_index(&state, &desc, 30).await;
         let err = subscribe_descriptor(&state, desc).await.unwrap_err();
         assert_eq!(err, Error::String("TooManyScripts".to_string()));
-    }
-
-    /// Spawn a node answering the fee estimate RPC with an empty batch, once two requests are
-    /// in flight at the same time. A request left alone for 500ms is answered with a 500.
-    async fn spawn_rendezvous_node() -> std::net::SocketAddr {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let barrier = Arc::new(tokio::sync::Barrier::new(2));
-        tokio::spawn(async move {
-            while let Ok((mut socket, _)) = listener.accept().await {
-                let barrier = barrier.clone();
-                tokio::spawn(async move {
-                    let mut buf = [0u8; 1024];
-                    let mut req = Vec::new();
-                    while !req.windows(4).any(|w| w == b"\r\n\r\n") {
-                        match socket.read(&mut buf).await {
-                            Ok(0) | Err(_) => return,
-                            Ok(n) => req.extend_from_slice(&buf[..n]),
-                        }
-                    }
-                    let together = tokio::time::timeout(Duration::from_millis(500), barrier.wait())
-                        .await
-                        .is_ok();
-                    let (status, body) = if together {
-                        ("200 OK", "[]")
-                    } else {
-                        ("500 Internal Server Error", "")
-                    };
-                    let response = format!(
-                        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                        body.len()
-                    );
-                    let _ = socket.write_all(response.as_bytes()).await;
-                });
-            }
-        });
-        addr
-    }
-
-    /// Two slow requests to the node must be in flight together, one must not wait for the
-    /// other to finish.
-    #[tokio::test]
-    async fn node_requests_of_handlers_are_concurrent() {
-        use std::io::Write;
-
-        let node_addr = spawn_rendezvous_node().await;
-        let mut rpc_user_password_file = tempfile::NamedTempFile::new().unwrap();
-        write!(rpc_user_password_file, "user:pass").unwrap();
-        let args = crate::server::Arguments {
-            network: Network::Bitcoin,
-            node_url: Some(format!("http://{node_addr}")),
-            rpc_user_password_file: Some(rpc_user_password_file.path().to_path_buf()),
-            request_timeout_seconds: 30,
-            ..Default::default()
-        };
-        let client = Arc::new(Client::new(&args).unwrap());
-        let state = Arc::new(route_test_state());
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let server_addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            while let Ok((stream, _)) = listener.accept().await {
-                let (state, client) = (state.clone(), client.clone());
-                tokio::spawn(async move {
-                    let service = hyper::service::service_fn(move |req| {
-                        let (state, client) = (state.clone(), client.clone());
-                        async move {
-                            infallible_route(&state, &client, req, Network::Bitcoin, false, false)
-                                .await
-                        }
-                    });
-                    let _ = hyper::server::conn::http1::Builder::new()
-                        .serve_connection(hyper_util::rt::TokioIo::new(stream), service)
-                        .await;
-                });
-            }
-        });
-
-        let url = format!("http://{server_addr}/fee-estimates");
-        let http = reqwest::Client::new();
-        let (a, b) = tokio::join!(http.get(&url).send(), http.get(&url).send());
-        assert_eq!(a.unwrap().status(), 200);
-        assert_eq!(b.unwrap().status(), 200);
     }
 
     fn route_test_state() -> State {

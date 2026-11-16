@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`MAX_DESCRIPTOR_KEYS`, default 20) bound the descriptors accepted by the descriptor
   endpoints: the number of paths a descriptor expands to (2 with `<0;1>`), and the number of
   keys it contains.
+- `--max-node-requests` (`MAX_NODE_REQUESTS`, default 8) bounds the requests the HTTP handlers
+  make to the node at the same time, the others wait. bitcoind queues 16 RPC requests by
+  default (`-rpcworkqueue`), shared with block indexing and mempool sync.
 - `--max-derivations-per-request` (`MAX_DERIVATIONS_PER_REQUEST`) bounds the derivation
   indexes a descriptor request can derive, over all its paths. Indexes already in the
   derivation cache are not counted, and the cost of an index is bounded by
@@ -83,8 +86,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Script derivation no longer holds the shared derivation cache lock, so a request deriving
   many scripts does not block the other requests needing the cache.
 - Requests to the node made by the HTTP handlers (`POST /tx`, `/tx/<txid>/raw`,
-  `/block/<hash>/header` and `/fee-estimates`) no longer wait for each other: a slow
-  broadcast or a lookup retrying while the node is busy used to block them all.
+  `/block/<hash>/header` and `/fee-estimates`) no longer wait for each other, a slow broadcast
+  or a lookup retrying while the node is busy used to block them all. Their concurrency is
+  bounded by `--max-node-requests`, and concurrent `/fee-estimates` cache misses make a single
+  request to the node.
 - Descriptors longer than 8192 bytes are rejected with HTTP 400 before any scan, bounding the
   work a single request can cause.
 - Descriptors nested deeper than 64 levels, counting parentheses and miniscript wrappers
