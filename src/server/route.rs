@@ -2622,7 +2622,7 @@ mod tests {
         let key = age::x25519::Identity::generate();
         let status = |err: Error| error_status(&err);
 
-        // A malformed address, a bitcoin one on liquid, and one of another network
+        // A malformed address on liquid and on bitcoin, and one of another network
         let err = parse_query("addresses=ciao", &key, false, 100, Network::Liquid).unwrap_err();
         assert_eq!(status(err), StatusCode::BAD_REQUEST);
         let err = parse_query("addresses=ciao", &key, false, 100, Network::Bitcoin).unwrap_err();
