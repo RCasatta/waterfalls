@@ -2617,6 +2617,36 @@ mod tests {
         assert_eq!(err, Error::String("TooManyScripts".to_string()));
     }
 
+    #[test]
+    fn bad_input_is_a_bad_request() {
+        let key = age::x25519::Identity::generate();
+        let status = |err: Error| error_status(&err);
+
+        // A malformed address, a bitcoin one on liquid, and one of another network
+        let err = parse_query("addresses=ciao", &key, false, 100, Network::Liquid).unwrap_err();
+        assert_eq!(status(err), StatusCode::BAD_REQUEST);
+        let err = parse_query("addresses=ciao", &key, false, 100, Network::Bitcoin).unwrap_err();
+        assert_eq!(status(err), StatusCode::BAD_REQUEST);
+        let mainnet = "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2";
+        let err = parse_query(
+            &format!("addresses={mainnet}"),
+            &key,
+            true,
+            100,
+            Network::BitcoinTestnet,
+        )
+        .unwrap_err();
+        assert_eq!(err, Error::WrongNetwork);
+        assert_eq!(status(err), StatusCode::BAD_REQUEST);
+
+        // A body of POST /tx that is not utf8, not hex, or hex but not a transaction
+        for body in [&[0xff, 0xfe][..], b"not hex", b"00", b""] {
+            let err = parse_broadcast_body(body, Network::Bitcoin).unwrap_err();
+            assert_eq!(err, Error::InvalidTx, "body {body:?}");
+            assert_eq!(status(err), StatusCode::BAD_REQUEST);
+        }
+    }
+
     fn route_test_state() -> State {
         route_test_state_with_max_scripts(100)
     }
