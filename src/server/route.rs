@@ -2729,9 +2729,15 @@ mod tests {
         started: Arc<std::sync::atomic::AtomicUsize>,
         max_in_flight: Arc<std::sync::atomic::AtomicUsize>,
         hold: Option<Arc<tokio::sync::Semaphore>>,
+        status: Arc<std::sync::atomic::AtomicU16>,
     }
 
     impl FakeNode {
+        fn set_status(&self, status: u16) {
+            self.status
+                .store(status, std::sync::atomic::Ordering::SeqCst);
+        }
+
         fn started(&self) -> usize {
             self.started.load(std::sync::atomic::Ordering::SeqCst)
         }
@@ -2748,11 +2754,12 @@ mod tests {
     }
 
     async fn spawn_fake_node(body: String, hold: bool) -> FakeNode {
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
+        let status = Arc::new(AtomicU16::new(200));
         let started = Arc::new(AtomicUsize::new(0));
         let in_flight = Arc::new(AtomicUsize::new(0));
         let max_in_flight = Arc::new(AtomicUsize::new(0));
@@ -2762,15 +2769,17 @@ mod tests {
             started: started.clone(),
             max_in_flight: max_in_flight.clone(),
             hold: hold.clone(),
+            status: status.clone(),
         };
         tokio::spawn(async move {
             while let Ok((mut socket, _)) = listener.accept().await {
-                let (started, in_flight, max_in_flight, hold, body) = (
+                let (started, in_flight, max_in_flight, hold, body, status) = (
                     started.clone(),
                     in_flight.clone(),
                     max_in_flight.clone(),
                     hold.clone(),
                     body.clone(),
+                    status.clone(),
                 );
                 tokio::spawn(async move {
                     // read the headers and the body
@@ -2801,7 +2810,8 @@ mod tests {
                     }
                     in_flight.fetch_sub(1, Ordering::SeqCst);
                     let response = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        "HTTP/1.1 {} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        status.load(Ordering::SeqCst),
                         body.len()
                     );
                     let _ = socket.write_all(response.as_bytes()).await;
@@ -2813,7 +2823,11 @@ mod tests {
 
     /// Serve `infallible_route` on loopback with a client of the node allowing `max_requests`
     /// concurrent requests, returns the address.
-    async fn spawn_route_server(node: &FakeNode, max_requests: usize) -> std::net::SocketAddr {
+    async fn spawn_route_server(
+        node: &FakeNode,
+        max_requests: usize,
+        deadline: Duration,
+    ) -> (std::net::SocketAddr, Arc<State>) {
         use std::io::Write;
 
         let mut rpc_user_password_file = tempfile::NamedTempFile::new().unwrap();
@@ -2828,9 +2842,10 @@ mod tests {
         let client = Arc::new(NodeClient::new(
             Client::new(&args).unwrap(),
             max_requests,
-            Duration::from_secs(30),
+            deadline,
         ));
         let state = Arc::new(route_test_state());
+        let served_state = state.clone();
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let server_addr = listener.local_addr().unwrap();
@@ -2851,7 +2866,7 @@ mod tests {
                 });
             }
         });
-        server_addr
+        (server_addr, served_state)
     }
 
     /// Only `--max-node-requests` requests are made to the node at the same time, the others
@@ -2872,7 +2887,7 @@ mod tests {
             tx.compute_txid()
         );
         let node = spawn_fake_node(body, true).await;
-        let server_addr = spawn_route_server(&node, 2).await;
+        let (server_addr, _) = spawn_route_server(&node, 2, Duration::from_secs(30)).await;
 
         let tx_hex = bitcoin::consensus::encode::serialize_hex(&tx);
         let url = format!("http://{server_addr}/tx");
@@ -2906,7 +2921,7 @@ mod tests {
     #[tokio::test]
     async fn concurrent_fee_estimates_misses_make_one_node_request() {
         let node = spawn_fake_node("[]".to_string(), false).await;
-        let server_addr = spawn_route_server(&node, 8).await;
+        let (server_addr, _) = spawn_route_server(&node, 8, Duration::from_secs(30)).await;
 
         let url = format!("http://{server_addr}/fee-estimates");
         let http = reqwest::Client::new();
@@ -2919,6 +2934,32 @@ mod tests {
             assert_eq!(response.unwrap().status(), 200);
         }
         assert_eq!(node.started(), 1);
+    }
+
+    /// A node answering 503 for ever does not hold the permits of the handlers: the requests
+    /// give up after the deadline with a 503, even when they have to wait for a permit.
+    #[tokio::test]
+    async fn node_unavailable_releases_the_permit() {
+        let node = spawn_fake_node(String::new(), false).await;
+        node.set_status(503);
+        let (server_addr, _) = spawn_route_server(&node, 1, Duration::from_millis(150)).await;
+
+        let txid = "00".repeat(32);
+        let urls = [
+            format!("http://{server_addr}/tx/{txid}/raw"),
+            format!("http://{server_addr}/block/{txid}/header"),
+        ];
+        let http = &reqwest::Client::new();
+        let requests = urls.iter().map(|url| async move {
+            tokio::time::timeout(Duration::from_secs(5), http.get(url).send())
+                .await
+                .expect("the request is still waiting for the node")
+                .unwrap()
+        });
+        for response in futures_util::future::join_all(requests).await {
+            assert_eq!(response.status(), 503);
+            assert_eq!(response.headers()["retry-after"], "1");
+        }
     }
 
     fn route_test_state() -> State {
