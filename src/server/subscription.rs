@@ -87,9 +87,12 @@ impl SubscriptionReceiver {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum SubscriptionError {
+pub enum SubscriptionError {
+    /// The subscription watches no script
     Empty,
+    /// The subscription would watch more scripts than `--max-scripts-per-subscription`
     TooManyScripts,
+    /// `--max-active-subscriptions` subscriptions are already active
     TooManySubscriptions,
 }
 

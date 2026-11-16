@@ -677,7 +677,14 @@ fn error_status(error: &Error) -> StatusCode {
         | Error::DescriptorMustHaveWildcard
         | Error::AddressPageRequiresSingleAddress
         | Error::UtxoOnlyHistoryTooLarge
-        | Error::TooManyDerivations => StatusCode::BAD_REQUEST,
+        | Error::TooManyDerivations
+        | Error::Subscription(SubscriptionError::Empty | SubscriptionError::TooManyScripts) => {
+            StatusCode::BAD_REQUEST
+        }
+        // The limit is on all the active subscriptions, not on the client: it may free up
+        Error::Subscription(SubscriptionError::TooManySubscriptions) => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
         Error::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         Error::BodyReadTimeout => StatusCode::REQUEST_TIMEOUT,
         Error::BlockchainChanged => StatusCode::SERVICE_UNAVAILABLE,
@@ -1227,7 +1234,7 @@ async fn subscribe_descriptor(
     // also refuses a descriptor whose paths derive the same scripts once their total exceeds
     // the limit, even if the scripts left after deduplication would fit.
     let max_scripts = state.max_scripts_per_subscription().await;
-    let too_many_scripts = || Error::String(format!("{:?}", SubscriptionError::TooManyScripts));
+    let too_many_scripts = || Error::Subscription(SubscriptionError::TooManyScripts);
     // Scripts watched by a path watching `watch_count` indexes: one without wildcard has a
     // single script, one with a wildcard watches at least `GAP_LIMIT`.
     let path_scripts = |desc: &be::Descriptor, watch_count: u32| {
@@ -1286,7 +1293,7 @@ async fn subscribe_descriptor(
     let subscription = state
         .subscribe_scripts(scripts, descriptors)
         .await
-        .map_err(|e| Error::String(format!("{e:?}")))?;
+        .map_err(Error::Subscription)?;
 
     // A concurrent scan may have raised the highest used index after it was read above but before
     // the subscription was registered, in which case the scan's expansion missed this subscription.
@@ -2623,7 +2630,7 @@ mod tests {
         let err = subscribe_descriptor(&state, desc.clone())
             .await
             .unwrap_err();
-        assert_eq!(err, Error::String("TooManyScripts".to_string()));
+        assert_eq!(err, Error::Subscription(SubscriptionError::TooManyScripts));
         assert!(!first_index_derived(&state, &desc).await);
 
         // Refused as quickly with a much higher index.
@@ -2632,7 +2639,7 @@ mod tests {
         let err = subscribe_descriptor(&state, desc.clone())
             .await
             .unwrap_err();
-        assert_eq!(err, Error::String("TooManyScripts".to_string()));
+        assert_eq!(err, Error::Subscription(SubscriptionError::TooManyScripts));
         assert!(!first_index_derived(&state, &desc).await);
     }
 
@@ -2647,7 +2654,7 @@ mod tests {
         let err = subscribe_descriptor(&state, desc.clone())
             .await
             .unwrap_err();
-        assert_eq!(err, Error::String("TooManyScripts".to_string()));
+        assert_eq!(err, Error::Subscription(SubscriptionError::TooManyScripts));
 
         // Scanning would have recorded the highest used index of each path.
         for single in desc.clone().into_single_descriptors().unwrap() {
@@ -2669,7 +2676,7 @@ mod tests {
         let state = Arc::new(route_test_state());
         record_max_used_index(&state, &desc, 30).await;
         let err = subscribe_descriptor(&state, desc).await.unwrap_err();
-        assert_eq!(err, Error::String("TooManyScripts".to_string()));
+        assert_eq!(err, Error::Subscription(SubscriptionError::TooManyScripts));
     }
 
     #[test]

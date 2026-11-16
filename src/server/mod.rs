@@ -665,6 +665,7 @@ pub enum Error {
     UtxoOnlyHistoryTooLarge,
     /// The request needs to derive more indexes than `--max-derivations-per-request`.
     TooManyDerivations,
+    Subscription(subscription::SubscriptionError),
     BodyTooLarge,
     BodyReadTimeout,
     CannotEstimateFee,
