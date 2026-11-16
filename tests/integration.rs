@@ -514,9 +514,12 @@ async fn launch_memory(family: Family) -> waterfalls::test_env::TestEnv {
 }
 
 #[cfg(all(feature = "test_env", not(feature = "db")))]
-async fn launch_memory() -> waterfalls::test_env::TestEnv<'static> {
-    let exe = std::env::var("ELEMENTSD_EXEC").unwrap();
-    waterfalls::test_env::launch(exe).await
+async fn launch_memory(family: Family) -> waterfalls::test_env::TestEnv {
+    let exe = match family {
+        Family::Bitcoin => std::env::var("BITCOIND_EXEC").unwrap(),
+        Family::Elements => std::env::var("ELEMENTSD_EXEC").unwrap(),
+    };
+    waterfalls::test_env::launch(exe, family).await
 }
 
 #[cfg(feature = "test_env")]
@@ -1675,7 +1678,7 @@ async fn test_bitcoin_reorg_after_restart() {
     test_env.shutdown().await;
 }
 
-#[cfg(all(feature = "test_env", feature = "db"))]
+#[cfg(feature = "test_env")]
 #[tokio::test]
 async fn test_bitcoin_two_block_reorg_memory() {
     let _ = env_logger::try_init();
