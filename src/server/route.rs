@@ -2663,6 +2663,201 @@ mod tests {
         assert_eq!(err, Error::String("TooManyScripts".to_string()));
     }
 
+    /// A fake node answering every request with `body`, once `hold` is given a permit, or after
+    /// 100ms without `hold`. It counts the requests it started and how many are in flight.
+    struct FakeNode {
+        addr: std::net::SocketAddr,
+        started: Arc<std::sync::atomic::AtomicUsize>,
+        max_in_flight: Arc<std::sync::atomic::AtomicUsize>,
+        hold: Option<Arc<tokio::sync::Semaphore>>,
+    }
+
+    impl FakeNode {
+        fn started(&self) -> usize {
+            self.started.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        async fn wait_started(&self, n: usize) {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while self.started() < n {
+                    tokio::time::sleep(Duration::from_millis(2)).await;
+                }
+            })
+            .await
+            .expect("the node did not receive the requests");
+        }
+    }
+
+    async fn spawn_fake_node(body: String, hold: bool) -> FakeNode {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let started = Arc::new(AtomicUsize::new(0));
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let max_in_flight = Arc::new(AtomicUsize::new(0));
+        let hold = hold.then(|| Arc::new(tokio::sync::Semaphore::new(0)));
+        let node = FakeNode {
+            addr,
+            started: started.clone(),
+            max_in_flight: max_in_flight.clone(),
+            hold: hold.clone(),
+        };
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let (started, in_flight, max_in_flight, hold, body) = (
+                    started.clone(),
+                    in_flight.clone(),
+                    max_in_flight.clone(),
+                    hold.clone(),
+                    body.clone(),
+                );
+                tokio::spawn(async move {
+                    // read the headers and the body
+                    let mut req = Vec::new();
+                    let mut buf = [0u8; 1024];
+                    loop {
+                        let text = String::from_utf8_lossy(&req).to_lowercase();
+                        if let Some((head, rest)) = text.split_once("\r\n\r\n") {
+                            let len = head
+                                .lines()
+                                .find_map(|l| l.strip_prefix("content-length: "))
+                                .map_or(0, |l| l.trim().parse::<usize>().unwrap());
+                            if rest.len() >= len {
+                                break;
+                            }
+                        }
+                        match socket.read(&mut buf).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => req.extend_from_slice(&buf[..n]),
+                        }
+                    }
+                    started.fetch_add(1, Ordering::SeqCst);
+                    let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_in_flight.fetch_max(now, Ordering::SeqCst);
+                    match hold {
+                        Some(hold) => hold.acquire().await.unwrap().forget(),
+                        None => tokio::time::sleep(Duration::from_millis(100)).await,
+                    }
+                    in_flight.fetch_sub(1, Ordering::SeqCst);
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                });
+            }
+        });
+        node
+    }
+
+    /// Serve `infallible_route` on loopback with a client of the node allowing `max_requests`
+    /// concurrent requests, returns the address.
+    async fn spawn_route_server(node: &FakeNode, max_requests: usize) -> std::net::SocketAddr {
+        use std::io::Write;
+
+        let mut rpc_user_password_file = tempfile::NamedTempFile::new().unwrap();
+        write!(rpc_user_password_file, "user:pass").unwrap();
+        let args = crate::server::Arguments {
+            network: Network::Bitcoin,
+            node_url: Some(format!("http://{}", node.addr)),
+            rpc_user_password_file: Some(rpc_user_password_file.path().to_path_buf()),
+            request_timeout_seconds: 30,
+            ..Default::default()
+        };
+        let client = Arc::new(NodeClient::new(Client::new(&args).unwrap(), max_requests));
+        let state = Arc::new(route_test_state());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let (state, client) = (state.clone(), client.clone());
+                tokio::spawn(async move {
+                    let service = hyper::service::service_fn(move |req| {
+                        let (state, client) = (state.clone(), client.clone());
+                        async move {
+                            infallible_route(&state, &client, req, Network::Bitcoin, false, false)
+                                .await
+                        }
+                    });
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(hyper_util::rt::TokioIo::new(stream), service)
+                        .await;
+                });
+            }
+        });
+        server_addr
+    }
+
+    /// Only `--max-node-requests` requests are made to the node at the same time, the others
+    /// wait for one to finish, and none is blocked by a slow one.
+    #[tokio::test]
+    async fn node_requests_of_handlers_are_bounded() {
+        let tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![bitcoin::TxIn::default()],
+            output: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::ZERO,
+                script_pubkey: bitcoin::ScriptBuf::new(),
+            }],
+        };
+        let body = format!(
+            r#"{{"result":"{}","error":null,"id":"x"}}"#,
+            tx.compute_txid()
+        );
+        let node = spawn_fake_node(body, true).await;
+        let server_addr = spawn_route_server(&node, 2).await;
+
+        let tx_hex = bitcoin::consensus::encode::serialize_hex(&tx);
+        let url = format!("http://{server_addr}/tx");
+        let http = reqwest::Client::new();
+        let requests: Vec<_> = (0..3)
+            .map(|_| {
+                let (http, url, tx_hex) = (http.clone(), url.clone(), tx_hex.clone());
+                tokio::spawn(async move { http.post(&url).body(tx_hex).send().await })
+            })
+            .collect();
+
+        // two requests reach the node together, the third waits for a permit
+        node.wait_started(2).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(node.started(), 2);
+
+        // it is sent as soon as one of them finishes
+        node.hold.as_ref().unwrap().add_permits(1);
+        node.wait_started(3).await;
+        node.hold.as_ref().unwrap().add_permits(2);
+        for request in requests {
+            assert_eq!(request.await.unwrap().unwrap().status(), 200);
+        }
+        assert_eq!(
+            node.max_in_flight.load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
+    }
+
+    /// A burst of requests finding the fee estimates expired makes a single request to the node.
+    #[tokio::test]
+    async fn concurrent_fee_estimates_misses_make_one_node_request() {
+        let node = spawn_fake_node("[]".to_string(), false).await;
+        let server_addr = spawn_route_server(&node, 8).await;
+
+        let url = format!("http://{server_addr}/fee-estimates");
+        let http = reqwest::Client::new();
+        let (a, b, c) = tokio::join!(
+            http.get(&url).send(),
+            http.get(&url).send(),
+            http.get(&url).send()
+        );
+        for response in [a, b, c] {
+            assert_eq!(response.unwrap().status(), 200);
+        }
+        assert_eq!(node.started(), 1);
+    }
+
     fn route_test_state() -> State {
         route_test_state_with_max_scripts(100)
     }
