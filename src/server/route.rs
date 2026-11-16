@@ -2973,6 +2973,44 @@ mod tests {
         }
     }
 
+    /// When the node cannot refresh the expired fee estimates, the last ones are served, and
+    /// the node is not asked by every request.
+    #[tokio::test]
+    async fn stale_fee_estimates_are_served_when_the_refresh_fails() {
+        let batch = r#"[{"id":2,"result":{"feerate":0.00001,"blocks":2},"error":null}]"#;
+        let node = spawn_fake_node(batch.to_string(), false).await;
+        let (server_addr, state) = spawn_route_server(&node, 8, Duration::from_secs(30)).await;
+        let url = format!("http://{server_addr}/fee-estimates");
+        let http = reqwest::Client::new();
+
+        // Without estimates there is nothing to serve
+        node.set_status(500);
+        assert_eq!(http.get(&url).send().await.unwrap().status(), 500);
+
+        node.set_status(200);
+        let response = http.get(&url).send().await.unwrap();
+        assert_eq!(response.status(), 200);
+        let fresh = response.text().await.unwrap();
+        assert_eq!(fresh, r#"{"2":1.0}"#);
+        let started = node.started();
+
+        // Expire them, the node fails
+        state.cached_fee_estimates.write().await.1 =
+            Instant::now().checked_sub(Duration::from_secs(60));
+        node.set_status(500);
+        let response = http.get(&url).send().await.unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["cache-control"], "public, max-age=5");
+        assert_eq!(response.text().await.unwrap(), fresh);
+        assert_eq!(node.started(), started + 1);
+
+        // The node is not asked again at once
+        let response = http.get(&url).send().await.unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.text().await.unwrap(), fresh);
+        assert_eq!(node.started(), started + 1);
+    }
+
     fn route_test_state() -> State {
         route_test_state_with_max_scripts(100)
     }
