@@ -962,6 +962,23 @@ mod test {
         handle.await.unwrap();
     }
 
+    /// An error answer is not parsed as a mempool, even when its body is valid JSON.
+    #[tokio::test]
+    async fn mempool_fails_on_error_status() {
+        let (addr, handle) = spawn_node_responses(&[
+            ("503 Service Unavailable", "{}"),
+            ("503 Service Unavailable", "[]"),
+        ])
+        .await;
+        let client = node_client(addr, false);
+
+        for support_verbose in [false, true] {
+            let err = client.mempool(support_verbose).await.unwrap_err();
+            assert!(err.to_string().contains("503 Service Unavailable"), "{err}");
+        }
+        handle.await.unwrap();
+    }
+
     #[tokio::test]
     async fn backend_validation_retries_chain_info_unavailable() {
         let (addr, handle) = spawn_node_responses(&[
