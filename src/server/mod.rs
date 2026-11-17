@@ -197,7 +197,8 @@ pub struct Arguments {
     #[arg(env, long, default_value = "5")]
     pub cache_control_seconds: u32,
 
-    /// Timeout in seconds for connect and for HTTP requests to the node
+    /// Timeout in seconds for connect and for HTTP requests to the node. The HTTP handlers give
+    /// up on a request to the node after this long in total, retries included, answering 503
     #[arg(env, long, default_value = "30")]
     pub request_timeout_seconds: u64,
 
@@ -672,6 +673,9 @@ pub enum Error {
     /// Blocks kept being indexed while the request was served, so a consistent response could
     /// not be built. Transient: the client should retry.
     BlockchainChanged,
+    /// The node did not answer a request of the handler in time, it may answer 503 while it is
+    /// busy or starting. Transient: the client should retry.
+    NodeUnavailable,
 }
 
 impl std::fmt::Display for Error {
@@ -926,7 +930,11 @@ pub async fn inner_main(
         "Client for server tasks created, chain info: {:?}",
         client.chain_info().await
     );
-    let client = Arc::new(route::NodeClient::new(client, args.max_node_requests()));
+    let client = Arc::new(route::NodeClient::new(
+        client,
+        args.max_node_requests(),
+        Duration::from_secs(args.request_timeout_seconds),
+    ));
     loop {
         tokio::select! {
             Ok((stream, peer_addr)) = listener.accept() => {

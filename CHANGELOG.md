@@ -98,6 +98,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bounded by `--max-node-requests`.
 - Concurrent `/fee-estimates` requests finding the cached estimates expired make a single
   request to the node, instead of one each.
+- `/tx/<txid>/raw` and `/block/<hash>/header` give up after `--request-timeout-seconds` when the
+  node keeps answering 503, with HTTP 503 `NodeUnavailable` and `Retry-After: 1`, instead of
+  retrying forever and holding one of the `--max-node-requests` slots.
 - Descriptors longer than 8192 bytes are rejected with HTTP 400 before any scan, bounding the
   work a single request can cause.
 - Descriptors nested deeper than 64 levels, counting parentheses and miniscript wrappers
