@@ -2927,13 +2927,18 @@ mod tests {
             err,
             Error::Subscription(SubscriptionError::TooManySubscriptions)
         );
-        assert_eq!(error_status(&err), StatusCode::SERVICE_UNAVAILABLE);
+        let response = error_resp(error_status(&err), &err);
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[header::RETRY_AFTER], "10");
 
         // Too many scripts for the subscription: a limit of the request
         let state = Arc::new(route_test_state_with_subscription_limits(100, 10));
         let err = subscribe_descriptor(&state, desc).await.unwrap_err();
         assert_eq!(err, Error::Subscription(SubscriptionError::TooManyScripts));
         assert_eq!(error_status(&err), StatusCode::BAD_REQUEST);
+        assert!(!error_resp(error_status(&err), &err)
+            .headers()
+            .contains_key(header::RETRY_AFTER));
         assert_eq!(
             error_status(&Error::Subscription(SubscriptionError::Empty)),
             StatusCode::BAD_REQUEST
