@@ -2978,6 +2978,35 @@ mod tests {
         }
     }
 
+    /// The deadline includes the wait for a permit: with every permit held, a request gives up
+    /// after the deadline with a 503 without reaching the node.
+    #[tokio::test]
+    async fn node_deadline_includes_the_wait_for_a_permit() {
+        let node = spawn_fake_node("[]".to_string(), true).await;
+        let (server_addr, _) = spawn_route_server(&node, 1, Duration::from_millis(150)).await;
+        let http = reqwest::Client::new();
+
+        // /fee-estimates holds the only permit until the node answers
+        let holder = tokio::spawn({
+            let (http, url) = (http.clone(), format!("http://{server_addr}/fee-estimates"));
+            async move { http.get(&url).send().await }
+        });
+        node.wait_started(1).await;
+
+        let txid = "00".repeat(32);
+        let url = format!("http://{server_addr}/tx/{txid}/raw");
+        let response = tokio::time::timeout(Duration::from_secs(5), http.get(&url).send())
+            .await
+            .expect("the request is still waiting for a permit")
+            .unwrap();
+        assert_eq!(response.status(), 503);
+        assert_eq!(response.headers()["retry-after"], "1");
+        assert_eq!(node.started(), 1);
+
+        node.hold.as_ref().unwrap().add_permits(1);
+        assert_eq!(holder.await.unwrap().unwrap().status(), 200);
+    }
+
     /// When the node cannot refresh the expired fee estimates, the last ones are served, and
     /// the node is not asked by every request.
     #[tokio::test]
