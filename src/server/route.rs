@@ -389,15 +389,14 @@ pub async fn route(
                     {
                         let cached = state.cached_fee_estimates.read().await;
                         if let (ref cache, Some(cache_time)) = *cached {
-                            if cache_time.elapsed() < Duration::from_secs(FEE_ESTIMATES_TTL as u64)
-                            {
+                            if let Some(max_age) = fee_estimates_max_age(cache_time) {
                                 let result = serde_json::to_string(cache)
                                     .map_err(|e| Error::String(e.to_string()))?;
                                 return any_resp(
                                     result.into_bytes(),
                                     StatusCode::OK,
                                     Some("application/json"),
-                                    Some(FEE_ESTIMATES_TTL),
+                                    Some(max_age),
                                     None,
                                 );
                             }
@@ -406,16 +405,11 @@ pub async fn route(
 
                     // The write lock makes a burst of misses one node request: the others wait
                     // for it and find the refreshed cache.
-                    let fee_estimates = {
+                    let (fee_estimates, max_age) = {
                         let mut cached = state.cached_fee_estimates.write().await;
-                        match *cached {
-                            (ref cache, Some(cache_time))
-                                if cache_time.elapsed()
-                                    < Duration::from_secs(FEE_ESTIMATES_TTL as u64) =>
-                            {
-                                cache.clone()
-                            }
-                            _ => {
+                        match cached.1.and_then(fee_estimates_max_age) {
+                            Some(max_age) => (cached.0.clone(), max_age),
+                            None => {
                                 let fee_estimates = client
                                     .acquire()
                                     .await?
@@ -423,7 +417,7 @@ pub async fn route(
                                     .await
                                     .map_err(|_| Error::CannotEstimateFee)?;
                                 *cached = (fee_estimates.clone(), Some(Instant::now()));
-                                fee_estimates
+                                (fee_estimates, FEE_ESTIMATES_TTL)
                             }
                         }
                     };
@@ -434,7 +428,7 @@ pub async fn route(
                         result.into_bytes(),
                         StatusCode::OK,
                         Some("application/json"),
-                        Some(FEE_ESTIMATES_TTL),
+                        Some(max_age),
                         None,
                     )
                 }
@@ -601,6 +595,17 @@ fn immutable_resp(bytes: Vec<u8>, content: &str) -> Result<Resp, Error> {
         header::HeaderValue::from_static(IMMUTABLE_CACHE_CONTROL),
     );
     Ok(response)
+}
+
+/// Seconds until the fee estimates cached at `cache_time` are refreshed, rounded up so that it is
+/// at least 1, or `None` if they are expired.
+fn fee_estimates_max_age(cache_time: Instant) -> Option<u32> {
+    let left = Duration::from_secs(FEE_ESTIMATES_TTL as u64).checked_sub(cache_time.elapsed())?;
+    if left.is_zero() {
+        return None;
+    }
+    // at most FEE_ESTIMATES_TTL, the cast doesn't truncate
+    Some(left.as_secs() as u32 + u32::from(left.subsec_nanos() > 0))
 }
 
 fn any_resp(

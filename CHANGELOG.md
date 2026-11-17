@@ -98,6 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bounded by `--max-node-requests`.
 - Concurrent `/fee-estimates` requests finding the cached estimates expired make a single
   request to the node, instead of one each.
+- `/fee-estimates` answers a `Cache-Control` `max-age` of the seconds left until the cached
+  estimates are refreshed, instead of always 30 seconds.
 - `/tx/<txid>/raw` and `/block/<hash>/header` give up after `--request-timeout-seconds` when the
   node keeps answering 503, with HTTP 503 `NodeUnavailable` and `Retry-After: 1`, instead of
   retrying forever and holding one of the `--max-node-requests` slots.
