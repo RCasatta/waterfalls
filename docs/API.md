@@ -488,7 +488,7 @@ Common error conditions:
 - `InvalidDescriptor`: Malformed descriptor, or one over the [descriptor limits](#descriptor-limits)
 - `TooManyDerivations`: The descriptor request needs to derive more indexes than the server allows, see [descriptor limits](#descriptor-limits)
 - `TooManyScripts` (400): The subscription would watch more scripts than the server allows, see the watched range of [Descriptor Subscription](#descriptor-subscription)
-- `TooManySubscriptions` (503): The server already has its maximum number of active subscriptions, retry later
+- `TooManySubscriptions` (503): The server already has its maximum number of active subscriptions, retry later, with `Retry-After: 10`
 - `InvalidAddress`: Malformed address
 - `InvalidTx`: Malformed transaction in the `POST /tx` body (not valid UTF-8 or hex, or not a transaction)
 - `InvalidTxid`: Malformed transaction ID

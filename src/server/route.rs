@@ -64,6 +64,9 @@ const SNAPSHOT_ATTEMPTS: usize = 3;
 const BLOCK_UPDATE_WAIT: Duration = Duration::from_secs(2);
 const BLOCK_UPDATE_POLL: Duration = Duration::from_millis(10);
 const BLOCKCHAIN_CHANGED_RETRY_AFTER_SECONDS: u32 = 1;
+/// Longer than for `BlockchainChanged`: a slot frees up only when a subscription ends, and SSE
+/// clients reconnecting at once would make a storm of refused subscriptions.
+const TOO_MANY_SUBSCRIPTIONS_RETRY_AFTER_SECONDS: u32 = 10;
 
 type RespBody = BoxBody<Bytes, Infallible>;
 type Resp = Response<RespBody>;
@@ -650,11 +653,17 @@ fn parse_broadcast_body(body: &[u8], network: Network) -> Result<be::Transaction
 fn error_resp(status: StatusCode, error: &Error) -> Resp {
     let mut response = Response::new(full_body(error.to_string().into_bytes()));
     *response.status_mut() = status;
-    if matches!(error, Error::BlockchainChanged) {
-        response.headers_mut().insert(
-            header::RETRY_AFTER,
-            header::HeaderValue::from(BLOCKCHAIN_CHANGED_RETRY_AFTER_SECONDS),
-        );
+    let retry_after = match error {
+        Error::BlockchainChanged => Some(BLOCKCHAIN_CHANGED_RETRY_AFTER_SECONDS),
+        Error::Subscription(SubscriptionError::TooManySubscriptions) => {
+            Some(TOO_MANY_SUBSCRIPTIONS_RETRY_AFTER_SECONDS)
+        }
+        _ => None,
+    };
+    if let Some(seconds) = retry_after {
+        response
+            .headers_mut()
+            .insert(header::RETRY_AFTER, header::HeaderValue::from(seconds));
     }
     response
 }

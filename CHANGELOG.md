@@ -81,7 +81,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `/v1/subscribe` refused because the descriptor would watch too many scripts returns HTTP 400
   `Subscription(TooManyScripts)`, and refused because the maximum number of active subscriptions
-  is reached returns HTTP 503 `Subscription(TooManySubscriptions)`, instead of HTTP 500.
+  is reached returns HTTP 503 `Subscription(TooManySubscriptions)` with `Retry-After: 10`, instead
+  of HTTP 500.
 - A malformed address (in `addresses` or `/address/<address>/txs`) and a malformed transaction
   in the `POST /tx` body now return HTTP 400 with `InvalidAddress` or `InvalidTx`, instead of
   HTTP 500. An address of another network returns 400 `WrongNetwork`, also on Bitcoin.
