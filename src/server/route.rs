@@ -3000,6 +3000,13 @@ mod tests {
         assert_eq!(fresh, r#"{"2":1.0}"#);
         let started = node.started();
 
+        // A hit is cached downstream only until the estimates are refreshed
+        state.cached_fee_estimates.write().await.1 =
+            Instant::now().checked_sub(Duration::from_secs(20));
+        let response = http.get(&url).send().await.unwrap();
+        assert_eq!(response.headers()["cache-control"], "public, max-age=10");
+        assert_eq!(node.started(), started);
+
         // Expire them, the node fails
         state.cached_fee_estimates.write().await.1 =
             Instant::now().checked_sub(Duration::from_secs(60));
@@ -3010,9 +3017,10 @@ mod tests {
         assert_eq!(response.text().await.unwrap(), fresh);
         assert_eq!(node.started(), started + 1);
 
-        // The node is not asked again at once
+        // The node is not asked again at once, the stale estimates are still cached shortly
         let response = http.get(&url).send().await.unwrap();
         assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["cache-control"], "public, max-age=5");
         assert_eq!(response.text().await.unwrap(), fresh);
         assert_eq!(node.started(), started + 1);
     }
