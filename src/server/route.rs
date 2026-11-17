@@ -3056,6 +3056,28 @@ mod tests {
         assert_eq!(holder.await.unwrap().unwrap().status(), 200);
     }
 
+    /// A hit is cached downstream only until the fee estimates are refreshed.
+    #[tokio::test]
+    async fn fee_estimates_max_age_until_refresh() {
+        let batch = r#"[{"id":2,"result":{"feerate":0.00001,"blocks":2},"error":null}]"#;
+        let node = spawn_fake_node(batch.to_string(), false).await;
+        let (server_addr, state) = spawn_route_server(&node, 8, Duration::from_secs(30)).await;
+        let url = format!("http://{server_addr}/fee-estimates");
+        let http = reqwest::Client::new();
+
+        let response = http.get(&url).send().await.unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["cache-control"], "public, max-age=30");
+        assert_eq!(node.started(), 1);
+
+        state.cached_fee_estimates.write().await.1 =
+            Instant::now().checked_sub(Duration::from_secs(20));
+        let response = http.get(&url).send().await.unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["cache-control"], "public, max-age=10");
+        assert_eq!(node.started(), 1);
+    }
+
     fn route_test_state() -> State {
         route_test_state_with_max_scripts(100)
     }
