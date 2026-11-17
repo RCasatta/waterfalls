@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `waterfalls_connection_errors_total{kind="incomplete_message"}` counts the connections closed
+  by the client before sending a whole request, now logged at debug instead of error.
 - `--metrics-listen <ip:port>` (`METRICS_LISTEN` environment variable) starts a dedicated
   listener serving only the prometheus `/metrics` endpoint, so it can be bound to a loopback
   or private interface separate from the public one. When set, the public listener no

@@ -962,7 +962,11 @@ pub async fn inner_main(
 
                     if let Err(err) = result {
                         let msg = format!("{err:?}");
-                        if msg.contains("HeaderTimeout") {
+                        if err.is_incomplete_message() {
+                            // The client closed the connection before sending a whole request
+                            inc_connection_error_counter("incomplete_message");
+                            log::debug!("Error serving connection: {msg}");
+                        } else if msg.contains("HeaderTimeout") {
                             inc_connection_error_counter("header_timeout");
                             let mut aggregation = header_timeout_aggregation.lock().await;
                             *aggregation.counts.entry(peer_addr.ip()).or_insert(0) += 1;
