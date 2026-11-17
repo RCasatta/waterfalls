@@ -380,6 +380,10 @@ impl Client {
             .with_context(|| {
                 format!("failure opening {url}, is it correct and rest flag enabled in the node?")
             })?;
+        let status = resp.status();
+        if status != 200 {
+            return Err(Error::UnexpectedStatus(url, status).into());
+        }
         let body_bytes = resp
             .bytes()
             .await
