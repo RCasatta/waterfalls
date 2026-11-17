@@ -1051,8 +1051,14 @@ async fn serve_metrics(
                         .header_read_timeout(header_read_timeout)
                         .serve_connection(io, service)
                         .await;
-                    if let Err(err) = result {
-                        log::warn!("Error serving metrics connection: {err:?}");
+                    match result {
+                        // The header read timeout also closes the keep-alive connections idle
+                        // between scrapes, and scrapers may close a connection mid-request.
+                        Err(err) if err.is_timeout() || err.is_incomplete_message() => {
+                            log::debug!("Metrics connection closed: {err:?}");
+                        }
+                        Err(err) => log::warn!("Error serving metrics connection: {err:?}"),
+                        Ok(()) => {}
                     }
                 });
             },
