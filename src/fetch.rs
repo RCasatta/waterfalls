@@ -380,6 +380,10 @@ impl Client {
             .with_context(|| {
                 format!("failure opening {url}, is it correct and rest flag enabled in the node?")
             })?;
+        let status = resp.status();
+        if status != 200 {
+            return Err(Error::UnexpectedStatus(url, status).into());
+        }
         let body_bytes = resp
             .bytes()
             .await
@@ -955,6 +959,23 @@ mod test {
 
         assert!(err.is_retryable());
         assert!(err.to_string().contains("Loading block index"));
+        handle.await.unwrap();
+    }
+
+    /// An error answer is not parsed as a mempool, even when its body is valid JSON.
+    #[tokio::test]
+    async fn mempool_fails_on_error_status() {
+        let (addr, handle) = spawn_node_responses(&[
+            ("503 Service Unavailable", "{}"),
+            ("503 Service Unavailable", "[]"),
+        ])
+        .await;
+        let client = node_client(addr, false);
+
+        for support_verbose in [false, true] {
+            let err = client.mempool(support_verbose).await.unwrap_err();
+            assert!(err.to_string().contains("503 Service Unavailable"), "{err}");
+        }
         handle.await.unwrap();
     }
 

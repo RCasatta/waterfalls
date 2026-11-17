@@ -123,6 +123,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   syncing in that window dropped it, and their balance briefly jumped.
 - `/v1/subscribe` checks `--max-scripts-per-subscription` before doing the work for the
   request, reducing the resources a refused request uses.
+- The mempool sync treats a non-200 answer of the node's REST mempool as an error, instead of
+  parsing its body, which an error body that is valid JSON turned into an empty mempool.
 
 ### Removed
 
