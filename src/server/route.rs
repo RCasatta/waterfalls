@@ -71,8 +71,8 @@ type Resp = Response<RespBody>;
 
 /// The client of the node used by the HTTP handlers. At most `max_requests` requests are made
 /// to the node at the same time, the others wait for a permit: the node queues a limited number
-/// of RPC requests, shared with block indexing and mempool sync. A request holds its permit at
-/// most `deadline`, see [`NodePermit::within`].
+/// of RPC requests, shared with block indexing and mempool sync. See [`NodeClient::within`] for
+/// the requests bounded by `deadline`.
 pub struct NodeClient {
     client: Client,
     permits: tokio::sync::Semaphore,
@@ -82,7 +82,6 @@ pub struct NodeClient {
 /// The client, borrowed while holding a permit
 pub struct NodePermit<'a> {
     client: &'a Client,
-    deadline: Duration,
     _permit: tokio::sync::SemaphorePermit<'a>,
 }
 
@@ -104,24 +103,26 @@ impl NodeClient {
             .map_err(|e| Error::String(format!("node permits closed: {e}")))?;
         Ok(NodePermit {
             client: &self.client,
-            deadline: self.deadline,
             _permit,
         })
     }
-}
 
-impl NodePermit<'_> {
-    /// Gives up on a request to the node after the deadline, with [`Error::NodeUnavailable`],
-    /// so that the permit is released. `Client::tx` and `Client::block_header` retry for as
-    /// long as the node answers 503, which is what the background tasks need, but it would
-    /// hold the permit of a handler forever.
-    async fn within<T>(
-        &self,
-        request: impl std::future::Future<Output = anyhow::Result<T>>,
-    ) -> Result<anyhow::Result<T>, Error> {
-        tokio::time::timeout(self.deadline, request)
+    /// Waits for a permit and makes `request` to the node, giving up after the deadline, waiting
+    /// for the permit included, with [`Error::NodeUnavailable`]. `Client::tx` and
+    /// `Client::block_header` retry for as long as the node answers 503, which is what the
+    /// background tasks need, but it would hold the permit of a handler forever, and keep the
+    /// requests waiting for one too.
+    async fn within<'a, T, F>(&'a self, request: impl FnOnce(&'a Client) -> F) -> Result<T, Error>
+    where
+        F: std::future::Future<Output = T>,
+    {
+        let permit_and_request = async {
+            let permit = self.acquire().await?;
+            Ok(request(permit.client).await)
+        };
+        tokio::time::timeout(self.deadline, permit_and_request)
             .await
-            .map_err(|_| Error::NodeUnavailable)
+            .unwrap_or(Err(Error::NodeUnavailable))
     }
 }
 
@@ -341,8 +342,7 @@ pub async fn route(
 
                 (Some(""), Some("tx"), Some(v), Some("raw"), None) => {
                     let txid = crate::be::Txid::from_str(v).map_err(|_| Error::InvalidTxid)?;
-                    let permit = client.acquire().await?;
-                    let tx = match permit.within(permit.tx(txid, network.into())).await? {
+                    let tx = match client.within(|node| node.tx(txid, network.into())).await? {
                         Ok(tx) => tx,
                         Err(e) => {
                             log::warn!(
@@ -356,9 +356,8 @@ pub async fn route(
                 }
                 (Some(""), Some("block"), Some(v), Some("header"), None) => {
                     let block_hash = BlockHash::from_str(v).map_err(|_| Error::InvalidBlockHash)?;
-                    let permit = client.acquire().await?;
-                    let header = permit
-                        .within(permit.block_header(block_hash, network.into()))
+                    let header = client
+                        .within(|node| node.block_header(block_hash, network.into()))
                         .await?
                         .map_err(|_| Error::CannotFindBlockHeader)?;
                     let result = header.serialize_hex();
