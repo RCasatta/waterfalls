@@ -567,6 +567,8 @@ mod tests {
             metric_names.contains(&"waterfalls_descriptor_max_used_index_descriptors".to_string())
         );
         assert!(metric_names.contains(&"waterfalls_subscription_notifications_total".to_string()));
+        #[cfg(target_os = "linux")]
+        assert!(metric_names.contains(&"process_resident_memory_bytes".to_string()));
     }
 
     #[test]

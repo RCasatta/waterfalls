@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The prometheus `/metrics` endpoint exposes again the `process_*` metrics (CPU time, resident
+  and virtual memory, open file descriptors, threads, start time) on Linux, used by the
+  Grafana dashboard.
 - `waterfalls_connection_errors_total{kind="incomplete_message"}` counts the connections closed
   by the client before sending a whole request, now logged at debug instead of error.
 - `--metrics-listen <ip:port>` (`METRICS_LISTEN` environment variable) starts a dedicated
