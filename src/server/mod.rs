@@ -168,12 +168,12 @@ pub struct Arguments {
     #[arg(env, long, default_value = "1000000")]
     pub derivation_cache_capacity: usize,
 
-    /// Maximum number of concurrently active SSE subscriptions.
-    #[arg(env, long, default_value = "100")]
+    /// Maximum number of concurrently active SSE subscriptions. Default is 5000.
+    #[arg(env, long)]
     pub max_active_subscriptions: Option<usize>,
 
-    /// Maximum number of scripts watched by a single SSE subscription.
-    #[arg(env, long, default_value = "500")]
+    /// Maximum number of scripts watched by a single SSE subscription. Default is 2000.
+    #[arg(env, long)]
     pub max_scripts_per_subscription: Option<usize>,
 
     /// Interval in minutes to log RocksDB statistics
