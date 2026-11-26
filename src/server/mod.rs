@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use crate::be::{DescriptorLimits, DEFAULT_MAX_DESCRIPTOR_KEYS, DEFAULT_MAX_DESCRIPTOR_PATHS};
 use crate::fetch::{BackendValidationError, Client};
 use crate::inc_connection_error_counter;
+use crate::server::connection::{is_write_stall, StallTimeoutIo};
 use crate::server::preload::headers;
 use crate::store::memory::MemoryStore;
 use crate::store::AnyStore;
@@ -28,6 +29,7 @@ use route::{infallible_metrics_route, infallible_route};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
+mod connection;
 mod derivation_cache;
 pub mod encryption;
 mod mempool;
@@ -44,6 +46,8 @@ pub(crate) use subscription::SubscriptionEvent;
 /// See [`Arguments::max_node_requests`]
 const DEFAULT_MAX_NODE_REQUESTS: usize = 8;
 const DEFAULT_MAX_TXS_SEEN: usize = 100;
+/// See [`Arguments::write_stall_timeout_seconds`]
+const DEFAULT_WRITE_STALL_TIMEOUT_SECONDS: u64 = 30;
 const DEFAULT_MAX_ACTIVE_SUBSCRIPTIONS: usize = 5_000;
 const DEFAULT_MAX_SCRIPTS_PER_SUBSCRIPTION: usize = 2_000;
 const DEFAULT_REORG_DATA_KEEP_HEIGHTS: u32 = 6;
@@ -217,6 +221,13 @@ pub struct Arguments {
     #[arg(env, long, default_value = "10")]
     pub header_read_timeout_seconds: u64,
 
+    /// Timeout in seconds for a write to a client making no progress: the connection is closed,
+    /// freeing the response. Every write making progress resets it, so a slow but steady client
+    /// is not cut off. It applies to every connection of the public listener, subscriptions
+    /// included. Default is 30.
+    #[arg(env, long)]
+    pub write_stall_timeout_seconds: Option<u64>,
+
     /// Delay in milliseconds between mempool sync cycles. Default is 500.
     #[arg(env, long)]
     pub mempool_sleep_between_cycles_ms: Option<u64>,
@@ -280,6 +291,10 @@ impl std::fmt::Debug for Arguments {
                 &self.header_read_timeout_seconds,
             )
             .field(
+                "write_stall_timeout_seconds",
+                &self.write_stall_timeout_seconds,
+            )
+            .field(
                 "mempool_sleep_between_cycles_ms",
                 &self.mempool_sleep_between_cycles_ms,
             );
@@ -320,6 +335,14 @@ impl Arguments {
         self.max_node_requests.unwrap_or(DEFAULT_MAX_NODE_REQUESTS)
     }
 
+    /// See [`Arguments::write_stall_timeout_seconds`].
+    fn write_stall_timeout(&self) -> Duration {
+        Duration::from_secs(
+            self.write_stall_timeout_seconds
+                .unwrap_or(DEFAULT_WRITE_STALL_TIMEOUT_SECONDS),
+        )
+    }
+
     pub fn is_valid(&self) -> Result<(), Error> {
         if self.rpc_user_password_file.is_none() && self.rpc_user_password.is_none() {
             Err(Error::String(
@@ -356,6 +379,10 @@ impl Arguments {
         } else if self.request_timeout_seconds == 0 {
             Err(Error::String(
                 "Request timeout must be greater than 0".to_string(),
+            ))
+        } else if self.write_stall_timeout_seconds == Some(0) {
+            Err(Error::String(
+                "Write stall timeout must be greater than 0".to_string(),
             ))
         } else if self.mempool_sleep_between_cycles_ms == Some(0) {
             Err(Error::String(
@@ -526,6 +553,29 @@ mod argument_tests {
 
         let args = Arguments {
             max_node_requests: Some(0),
+            ..args
+        };
+        assert!(args.is_valid().is_err());
+    }
+
+    #[test]
+    fn write_stall_timeout_must_be_non_zero() {
+        let valid = Arguments {
+            rpc_user_password: Some("user:pass".to_string()),
+            request_timeout_seconds: 1,
+            ..Default::default()
+        };
+        assert_eq!(valid.write_stall_timeout(), Duration::from_secs(30));
+
+        let args = Arguments {
+            write_stall_timeout_seconds: Some(1),
+            ..valid
+        };
+        assert!(args.is_valid().is_ok());
+        assert_eq!(args.write_stall_timeout(), Duration::from_secs(1));
+
+        let args = Arguments {
+            write_stall_timeout_seconds: Some(0),
             ..args
         };
         assert!(args.is_valid().is_err());
@@ -935,10 +985,11 @@ pub async fn inner_main(
         args.max_node_requests(),
         Duration::from_secs(args.request_timeout_seconds),
     ));
+    let write_stall_timeout = args.write_stall_timeout();
     loop {
         tokio::select! {
             Ok((stream, peer_addr)) = listener.accept() => {
-                let io = TokioIo::new(stream);
+                let io = TokioIo::new(StallTimeoutIo::new(stream, write_stall_timeout));
                 let state = state.clone();
                 let client = client.clone();
                 let header_timeout_aggregation = header_timeout_aggregation.clone();
@@ -966,6 +1017,10 @@ pub async fn inner_main(
                             // The client closed the connection before sending a whole request
                             inc_connection_error_counter("incomplete_message");
                             log::debug!("Error serving connection: {msg}");
+                        } else if is_write_stall(&err) {
+                            // The client stopped reading the response
+                            inc_connection_error_counter("write_stall");
+                            log::debug!("Closed connection of {peer_addr}: {msg}");
                         } else if msg.contains("HeaderTimeout") {
                             inc_connection_error_counter("header_timeout");
                             let mut aggregation = header_timeout_aggregation.lock().await;

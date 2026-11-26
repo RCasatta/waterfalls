@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--max-descriptor-keys`. The default is `--max-descriptor-paths` times the 1000 indexes
   scanned per path in a page, 2000 with the default paths, so that a full page fits.
 
+- `--write-stall-timeout-seconds` (`WRITE_STALL_TIMEOUT_SECONDS`, default 30) closes a
+  connection of the public listener when a write to the client makes no progress for that
+  long, freeing the response of a client that stopped reading. Progress resets it, so a slow
+  but steady client is not cut off. Such closures are counted by
+  `waterfalls_connection_errors_total{kind="write_stall"}`.
+
 ### Changed
 
 - Building needs Rust 1.88 (was 1.85), see `rust-toolchain.toml`.
