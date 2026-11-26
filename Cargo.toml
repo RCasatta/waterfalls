@@ -60,11 +60,11 @@ tmq = "0.5.0"
 [dev-dependencies]
 criterion = "0.5.1"
 tempfile = "3.10.1"
-lwk_wollet = { version = "0.10.0", default-features = false, features = [
+lwk_wollet = { version = "0.20.0", default-features = false, features = [
     "esplora",
     "test_wallet",
 ] }
-lwk_common = { version = "0.10.0" }
+lwk_common = { version = "0.20.0" }
 
 [features]
 default = ["db"]
@@ -83,10 +83,6 @@ reorg_crash_test = []
 
 # Exposes internal parsing functions to the fuzz targets in `fuzz/`
 fuzz = []
-
-[patch.crates-io]
-lwk_wollet = { git = "https://github.com/blockstream/lwk", rev = "ba7eaf71e7be497abaf3f3b88003c9e639f145a3" }
-lwk_common = { git = "https://github.com/blockstream/lwk", rev = "ba7eaf71e7be497abaf3f3b88003c9e639f145a3" }
 
 [[bench]]
 name = "benches"

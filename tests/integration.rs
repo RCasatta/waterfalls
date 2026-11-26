@@ -1994,17 +1994,18 @@ async fn test_lwk_wollet() {
     use waterfalls::be;
 
     let _ = env_logger::try_init();
-    let network = lwk_wollet::ElementsNetwork::default_regtest();
+    let network = lwk_wollet::Network::default_regtest();
 
     let test_env = launch_memory(Family::Elements).await;
     let (signer, mut wollet) = lwk_wollet::Wollet::test_wallet().unwrap();
-    let descriptor = wollet.descriptor().to_string();
+    let descriptor = wollet.descriptor().unwrap().to_string();
     let bitcoind_desc = wollet
         .wollet_descriptor()
         .bitcoin_descriptor_without_key_origin()
-        .to_string();
+        .unwrap();
+    // LWK uses another version of `elements`, its types are converted through strings and bytes
     let address = wollet.address(None).unwrap();
-    let address = be::Address::Elements(address.address().clone());
+    let address = be::Address::Elements(address.address().to_string().parse().unwrap());
     let initial_amount = 10_000;
     test_env.send_to(&address, initial_amount);
     test_env.node_generate(1).await;
@@ -2014,11 +2015,7 @@ async fn test_lwk_wollet() {
         .await
         .unwrap();
     let waterfalls_url = test_env.base_url();
-    let mut lwk_client =
-        lwk_wollet::clients::asyncr::EsploraClientBuilder::new(waterfalls_url, network)
-            .waterfalls(true)
-            .build()
-            .unwrap();
+    let mut lwk_client = waterfalls_client(waterfalls_url, network, false);
 
     do_lwk_scan(
         network,
@@ -2026,6 +2023,7 @@ async fn test_lwk_wollet() {
         waterfalls_url,
         Some(initial_amount),
         Some(1),
+        &[true, false],
     )
     .await;
 
@@ -2035,7 +2033,15 @@ async fn test_lwk_wollet() {
     let node_address = test_env.get_new_address(None);
     let mut pset = wollet
         .tx_builder()
-        .add_lbtc_recipient(node_address.elements().unwrap(), sent_amount)
+        .add_lbtc_recipient(
+            &node_address
+                .elements()
+                .unwrap()
+                .to_string()
+                .parse()
+                .unwrap(),
+            sent_amount,
+        )
         .unwrap()
         .finish()
         .unwrap();
@@ -2043,41 +2049,42 @@ async fn test_lwk_wollet() {
 
     let signatures = signer.sign(&mut pset).unwrap();
     assert_eq!(signatures, 1);
-    let tx = be::Transaction::Elements(wollet.finalize(&mut pset).unwrap());
+    let tx = lwk_wollet::elements::encode::serialize(&wollet.finalize(&mut pset).unwrap());
+    let tx = be::Transaction::Elements(elements::encode::deserialize(&tx).unwrap());
     test_env.client().broadcast(&tx).await.unwrap();
     // test_env.node_generate(1).await;
     sleep(Duration::from_secs(2)).await;
 
     wollet_scan(&mut wollet, &mut lwk_client).await;
 
-    let final_balance = initial_amount - sent_amount - details.balance.fee;
+    let fee = details.fees()[network.policy_asset()];
+    let final_balance = initial_amount - sent_amount - fee;
     do_lwk_scan(
-        lwk_wollet::ElementsNetwork::default_regtest(),
+        lwk_wollet::Network::default_regtest(),
         &descriptor,
         test_env.base_url(),
         Some(final_balance),
         Some(2),
+        &[true, false],
     )
     .await;
 
     test_env.node_generate(1).await; // TODO: should work also without this
 
-    let mut lwk_client_utxo_only =
-        lwk_wollet::clients::asyncr::EsploraClientBuilder::new(waterfalls_url, network)
-            .waterfalls(true)
-            .utxo_only(true)
-            .build()
-            .unwrap();
+    let mut lwk_client_utxo_only = waterfalls_client(waterfalls_url, network, true);
 
     // Create another Wollet using utxo_only client and compare results
     let lwk_desc: lwk_wollet::WolletDescriptor = descriptor.parse().unwrap();
-    let mut wollet_utxo_only = lwk_wollet::Wollet::without_persist(network, lwk_desc).unwrap();
+    let mut wollet_utxo_only = lwk_wollet::WolletBuilder::new(network, lwk_desc)
+        .utxo_only(true)
+        .build()
+        .unwrap();
     wollet_scan(&mut wollet_utxo_only, &mut lwk_client_utxo_only).await;
 
     // The balance should match between regular and utxo_only scans
     let balance_utxo_only = wollet_utxo_only.balance().unwrap();
     assert_eq!(
-        balance_utxo_only.get(&network.policy_asset()).unwrap(),
+        balance_utxo_only.get(network.policy_asset()).unwrap(),
         &final_balance,
         "Balance should match between regular and utxo_only scans"
     );
@@ -2128,11 +2135,16 @@ async fn test_lwk_wollet() {
 async fn test_lwk_wollet_mainnet() {
     let _ = env_logger::try_init();
     do_lwk_scan(
-        lwk_wollet::ElementsNetwork::Liquid,
+        lwk_wollet::Network::Liquid,
         "ct(slip77(2411e278affa5c47010eab6d313c1ec66628ec0dd03b6fc98d1a05a0618719e6),elwpkh([a8874235/84'/1776'/0']xpub6DLHCiTPg67KE9ksCjNVpVHTRDHzhCSmoBTKzp2K4FxLQwQvvdNzuqxhK2f9gFVCN6Dori7j2JMLeDoB4VqswG7Et9tjqauAvbDmzF8NEPH/<0;1>/*))#upsg7h8m",
         "https://waterfalls.liquidwebwallet.org/liquid/api/",
         None,
         Some(17),
+        // TODO: scan also with utxo_only once a LWK version newer than 0.20 is released. This
+        // wallet received outputs blinded with another key: LWK 0.20 keeps them in the unspent
+        // set of a utxo_only wallet without being able to unblind them, and `balance()` fails
+        // with "missing unblinded".
+        &[false],
     )
     .await;
 }
@@ -2143,11 +2155,12 @@ async fn test_lwk_wollet_huge_testnet() {
     let _ = env_logger::try_init();
     // full history is 6442 txs
     do_lwk_scan(
-        lwk_wollet::ElementsNetwork::LiquidTestnet,
+        lwk_wollet::Network::TestnetLiquid,
         "ct(slip77(1bda6cd71a1e206e3eb793e5a4d98a46c3fa473c9ab7bdef9bb9c814764d6614),elwpkh([cb4ba44a/84'/1'/0']tpubDDrybtUajFcgXC85rvwPsh1oU7Azx4kJ9BAiRzMbByqK7UnVXY3gDRJPwEDfaQwguNUZFzrhavJGgEhbsfuebyxUSZQnjLezWVm2Vdqb7UM/<0;1>/*))#za9ktavp",
         "https://waterfalls.liquidwebwallet.org/liquidtestnet/api/",
         Some(9361396473),
         None,
+        &[true, false],
     )
     .await;
 }
@@ -2158,79 +2171,81 @@ async fn test_lwk_wollet_small_testnet() {
     let _ = env_logger::try_init();
     // full history is ~65 txs
     do_lwk_scan(
-        lwk_wollet::ElementsNetwork::LiquidTestnet,
+        lwk_wollet::Network::TestnetLiquid,
         "ct(slip77(ac53739ddde9fdf6bba3dbc51e989b09aa8c9cdce7b7d7eddd49cec86ddf71f7),elwpkh([93970d14/84'/1'/0']tpubDC3BrFCCjXq4jAceV8k6UACxDDJCFb1eb7R7BiKYUGZdNagEhNfJoYtUrRdci9JFs1meiGGModvmNm8PrqkrEjJ6mpt6gA1DRNU8vu7GqXH/<0;1>/*))#u0y4axgs",
         "https://waterfalls.liquidwebwallet.org/liquidtestnet/api/",
         None,
         Some(65),
+        &[true, false],
     )
     .await;
 }
 
 async fn do_lwk_scan(
-    network: lwk_wollet::ElementsNetwork,
+    network: lwk_wollet::Network,
     descriptor: &str,
     url: &str,
     expected_satoshi_balance: Option<u64>,
     expected_txs_full: Option<usize>,
+    utxo_only_modes: &[bool],
 ) {
     let mut previous_balance = None;
-    for waterfalls_active in [true, false] {
-        for utxo_only in [true, false] {
-            if !waterfalls_active && utxo_only {
-                continue;
-            }
-            let start = Instant::now();
-            let mut lwk_client =
-                lwk_wollet::clients::asyncr::EsploraClientBuilder::new(url, network)
-                    .waterfalls(waterfalls_active)
-                    .utxo_only(utxo_only)
-                    .concurrency(4)
-                    .build()
-                    .unwrap();
-            let lwk_desc: lwk_wollet::WolletDescriptor = descriptor.parse().unwrap();
-            let mut lwk_wollet = lwk_wollet::Wollet::without_persist(network, lwk_desc).unwrap();
-            wollet_scan(&mut lwk_wollet, &mut lwk_client).await;
-            let duration = start.elapsed();
-            let txs = lwk_wollet.transactions().unwrap().len();
+    for &utxo_only in utxo_only_modes {
+        let start = Instant::now();
+        let mut lwk_client = waterfalls_client(url, network, utxo_only);
+        let lwk_desc: lwk_wollet::WolletDescriptor = descriptor.parse().unwrap();
+        let mut lwk_wollet = lwk_wollet::WolletBuilder::new(network, lwk_desc)
+            .utxo_only(utxo_only)
+            .build()
+            .unwrap();
+        wollet_scan(&mut lwk_wollet, &mut lwk_client).await;
+        let duration = start.elapsed();
+        let txs = lwk_wollet.transactions().unwrap().len();
 
-            let balance = lwk_wollet.balance().unwrap();
-            if let Some(previous_balance) = previous_balance.as_ref() {
-                assert_eq!(
-                    &balance, previous_balance,
-                    "waterfalls_active: {waterfalls_active} utxo_only: {utxo_only}"
-                );
-            } else {
-                previous_balance = Some(balance.clone());
-            }
-            let policy_balance = balance.get(&network.policy_asset()).unwrap();
-            println!(
-                "Scan completed in {duration:?} - waterfalls_active: {waterfalls_active}, utxo_only: {utxo_only} txs: {txs} balance: {policy_balance}"
+        let balance = lwk_wollet.balance().unwrap();
+        if let Some(previous_balance) = previous_balance.as_ref() {
+            assert_eq!(&balance, previous_balance, "utxo_only: {utxo_only}");
+        } else {
+            previous_balance = Some(balance.clone());
+        }
+        let policy_balance = balance.get(network.policy_asset()).unwrap();
+        println!(
+            "Scan completed in {duration:?} - utxo_only: {utxo_only} txs: {txs} balance: {policy_balance}"
+        );
+        if let Some(expected_satoshi_balance) = expected_satoshi_balance {
+            assert_eq!(
+                policy_balance, &expected_satoshi_balance,
+                "utxo_only: {utxo_only}"
             );
-            if let Some(expected_satoshi_balance) = expected_satoshi_balance {
-                assert_eq!(
-                    policy_balance, &expected_satoshi_balance,
-                    "waterfalls_active: {waterfalls_active} utxo_only: {utxo_only}"
+        }
+        if !utxo_only {
+            if let Some(expected_txs) = expected_txs_full {
+                assert!(
+                    txs >= expected_txs,
+                    "txs: {txs} >= expected_txs: {expected_txs}"
                 );
-            }
-            if !utxo_only {
-                if let Some(expected_txs) = expected_txs_full {
-                    assert!(
-                        txs >= expected_txs,
-                        "txs: {txs} >= expected_txs: {expected_txs}"
-                    );
-                }
             }
         }
-
-        // TODO add UTXO scan test once ready
     }
+}
+
+/// A client scanning with the waterfalls endpoint, with up to 4 requests at once
+fn waterfalls_client(
+    url: &str,
+    network: lwk_wollet::Network,
+    utxo_only: bool,
+) -> lwk_wollet::clients::asyncr::WaterfallsClient {
+    lwk_wollet::clients::asyncr::WaterfallsClientBuilder::new(url, network)
+        .utxo_only(utxo_only)
+        .concurrency(4)
+        .build()
+        .unwrap()
 }
 
 /// Scan the wollet until you find something
 async fn wollet_scan(
     wollet: &mut lwk_wollet::Wollet,
-    lwk_client: &mut lwk_wollet::clients::asyncr::EsploraClient,
+    lwk_client: &mut lwk_wollet::clients::asyncr::WaterfallsClient,
 ) {
     for _ in 0..100 {
         if let Some(update) = lwk_client.full_scan(wollet).await.unwrap() {
@@ -2271,8 +2286,12 @@ impl TestResult {
 }
 
 #[cfg(feature = "bench_test")]
-async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> Vec<TestResult> {
-    use lwk_wollet::{clients, ElementsNetwork, Wollet, WolletDescriptor};
+async fn test_esplora_waterfalls_desc(
+    desc: &str,
+    waterfalls_url: &str,
+    esplora_url: &str,
+) -> Vec<TestResult> {
+    use lwk_wollet::{clients, WolletBuilder, WolletDescriptor};
     use std::str::FromStr;
     use waterfalls::{be, server::Network};
 
@@ -2280,9 +2299,9 @@ async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> Vec<TestResult> 
     let parsed =
         be::Descriptor::from_str(unconfidential_descriptor(desc), Network::Liquid).unwrap();
     let network = if parsed.is_mainnet() {
-        ElementsNetwork::Liquid
+        lwk_wollet::Network::Liquid
     } else {
-        ElementsNetwork::LiquidTestnet
+        lwk_wollet::Network::TestnetLiquid
     };
 
     let _ = env_logger::try_init();
@@ -2293,12 +2312,22 @@ async fn test_esplora_waterfalls_desc(desc: &str, url: &str) -> Vec<TestResult> 
     let mut results = vec![];
     for waterfalls in [true, false] {
         let start = Instant::now();
-        let mut wollet = Wollet::without_persist(network, desc.clone()).unwrap();
-        let mut client = clients::asyncr::EsploraClientBuilder::new(url, network)
-            .waterfalls(waterfalls)
-            .concurrency(2)
-            .build()
-            .unwrap();
+        let mut wollet = WolletBuilder::new(network, desc.clone()).build().unwrap();
+        let mut client = if waterfalls {
+            LwkClient::Waterfalls(
+                clients::asyncr::WaterfallsClientBuilder::new(waterfalls_url, network)
+                    .concurrency(2)
+                    .build()
+                    .unwrap(),
+            )
+        } else {
+            LwkClient::Esplora(
+                clients::asyncr::EsploraClientBuilder::new(esplora_url, network)
+                    .concurrency(2)
+                    .build()
+                    .unwrap(),
+            )
+        };
         let update = client.full_scan(&wollet).await.unwrap().unwrap();
         wollet.apply_update(update).unwrap();
         let first_scan = start.elapsed();
@@ -2369,7 +2398,9 @@ fn unconfidential_descriptor(desc: &str) -> &str {
 async fn test_waterfalls_vs_esplora_performance() {
     let mut all_results = vec![];
 
-    let url = "https://waterfalls.liquidwebwallet.org/liquidtestnet/api";
+    let waterfalls_url = "https://waterfalls.liquidwebwallet.org/liquidtestnet/api";
+    // Waterfalls is not an Esplora backend, the plain Esplora scan needs an Esplora server
+    let esplora_url = "https://blockstream.info/liquidtestnet/api";
     let descriptors = [
         "ct(slip77(0371e66dde8ab9f3cb19d2c20c8fa2d7bd1ddc73454e6b7ef15f0c5f624d4a86),elsh(wpkh([75ea4a43/49'/1'/0']tpubDDRMQzj8FGnDXxAhr8zgM22VT7BT2H2cPUdCRDSi3ima15TRUZEkT32zExr1feVReMYvBEm21drG1qKryjHf3cD6iD4j1nkPkbPDuQxCJG4/<0;1>/*)))#utnwh7dr",
          "ct(slip77(ac53739ddde9fdf6bba3dbc51e989b09aa8c9cdce7b7d7eddd49cec86ddf71f7),elwpkh([93970d14/84'/1'/0']tpubDC3BrFCCjXq4jAceV8k6UACxDDJCFb1eb7R7BiKYUGZdNagEhNfJoYtUrRdci9JFs1meiGGModvmNm8PrqkrEjJ6mpt6gA1DRNU8vu7GqXH/<0;1>/*))#u0y4axgs",
@@ -2377,7 +2408,8 @@ async fn test_waterfalls_vs_esplora_performance() {
     ];
 
     for descriptor in descriptors {
-        all_results.extend(test_esplora_waterfalls_desc(descriptor, url).await);
+        all_results
+            .extend(test_esplora_waterfalls_desc(descriptor, waterfalls_url, esplora_url).await);
     }
 
     for result in all_results {
@@ -2419,5 +2451,32 @@ async fn test_waterfalls_descriptor_vs_addresses() {
             resp.txs_seen.get(&descriptor.to_string()).unwrap(),
             resp2.txs_seen.get("addresses").unwrap(),
         );
+    }
+}
+
+/// An LWK client scanning with the waterfalls endpoint or with plain Esplora
+#[cfg(feature = "bench_test")]
+enum LwkClient {
+    Esplora(lwk_wollet::clients::asyncr::EsploraClient),
+    Waterfalls(lwk_wollet::clients::asyncr::WaterfallsClient),
+}
+
+#[cfg(feature = "bench_test")]
+impl LwkClient {
+    async fn full_scan(
+        &mut self,
+        wollet: &lwk_wollet::Wollet,
+    ) -> Result<Option<lwk_wollet::Update>, lwk_wollet::Error> {
+        match self {
+            LwkClient::Esplora(client) => client.full_scan(wollet).await,
+            LwkClient::Waterfalls(client) => client.full_scan(wollet).await,
+        }
+    }
+
+    fn requests(&self) -> usize {
+        match self {
+            LwkClient::Esplora(client) => client.requests(),
+            LwkClient::Waterfalls(client) => client.requests(),
+        }
     }
 }
