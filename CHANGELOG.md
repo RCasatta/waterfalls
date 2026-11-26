@@ -58,6 +58,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sign=true`. Without it, the `X-Content-Signature`, `X-Content-Digest` and
   `X-Server-Address` headers are omitted. Signing hashes the whole response, which is costly
   for large ones, and most clients, like LWK, do not check the signature.
+- **Breaking:** `--max-txs-seen` defaults to 25 (was 100), so that the largest descriptor
+  response is about 10 MB of JSON (2 paths x 1000 scripts x 25 entries). Clients follow
+  `has_more` more often, and `utxo_only` returns `UtxoOnlyHistoryTooLarge` for scripts with
+  more than 25 entries. The worst-case memory of the responses being sent,
+  `--max-connections` x `--max-descriptor-paths` x 1000 x `--max-txs-seen` x ~200 bytes, is
+  logged at startup: about 2 GB with the defaults.
 - **Breaking:** mempool entries count toward `--max-txs-seen`. The history of a script is
   its confirmed entries followed by its mempool entries, paged `--max-txs-seen` at a time:
   a script whose confirmed and mempool entries together exceed it is listed in `has_more`,

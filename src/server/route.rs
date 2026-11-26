@@ -52,6 +52,9 @@ const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 50;
 /// Derivation indexes scanned per path in a page of a descriptor request
 pub(crate) const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
+/// Approximate size of a `TxSeen` entry in a JSON waterfalls response, to estimate the memory
+/// of the responses
+pub(crate) const RESPONSE_ENTRY_BYTES: usize = 200;
 const MAX_ADDRESS_LENGTH: usize = 100; // max characters for an address (excessive to be conservative)
 const MAX_TX_BODY_SIZE: usize = 1024 * 1024; // 1MB limit for transaction broadcast body
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30); // timeout for reading request body
@@ -3131,6 +3134,23 @@ mod tests {
             .map(|tx| tx["status"]["block_height"].as_i64().unwrap())
             .collect();
         assert_eq!(heights, vec![1, 2, -1, -1]);
+    }
+
+    /// `utxo_only` refuses a script whose history, mempool included, exceeds the default
+    /// `--max-txs-seen`.
+    #[tokio::test]
+    async fn utxo_only_counts_mempool_entries() {
+        let max_txs_seen = super::super::DEFAULT_MAX_TXS_SEEN;
+        assert_eq!(max_txs_seen, 25);
+
+        let (state, txids) = state_with_paged_history(max_txs_seen, 20, 5).await;
+        let (utxos, has_more) = scan_paged_address(&state, 0, true).await.unwrap();
+        assert_eq!(utxos, txids);
+        assert!(has_more.is_empty());
+
+        let (state, _) = state_with_paged_history(max_txs_seen, 20, 6).await;
+        let err = scan_paged_address(&state, 0, true).await.unwrap_err();
+        assert_eq!(err, Error::UtxoOnlyHistoryTooLarge);
     }
 
     /// The subscription stream is marked to give back the connection permit, and closes the

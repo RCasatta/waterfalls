@@ -53,7 +53,7 @@ GET /v2/waterfalls.cbor?<query_params>
 **History truncation:**
 
 - To avoid unbounded responses on highly reused addresses, Waterfalls caps the number of `TxSeen` entries returned for a single script pubkey, mempool entries included
-- The server-side cap is configurable with `--max-txs-seen` (or `MAX_TXS_SEEN`) and defaults to `100`
+- The server-side cap is configurable with `--max-txs-seen` (or `MAX_TXS_SEEN`) and defaults to `25`
 - Truncation is applied independently to each script/address result
 - The history of a script is its confirmed entries, oldest first, followed by its mempool entries, in the order the server saw them; a page has at most `--max-txs-seen` entries of it
 - For `addresses=<single_address>`, clients can continue the history by increasing `page`

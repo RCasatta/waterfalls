@@ -45,7 +45,7 @@ pub(crate) use subscription::SubscriptionEvent;
 
 /// See [`Arguments::max_node_requests`]
 const DEFAULT_MAX_NODE_REQUESTS: usize = 8;
-const DEFAULT_MAX_TXS_SEEN: usize = 100;
+const DEFAULT_MAX_TXS_SEEN: usize = 25;
 /// See [`Arguments::write_stall_timeout_seconds`]
 const DEFAULT_WRITE_STALL_TIMEOUT_SECONDS: u64 = 30;
 /// See [`Arguments::max_connections`]
@@ -139,7 +139,8 @@ pub struct Arguments {
     #[arg(env, long, default_value = "100")]
     pub max_addresses: usize,
 
-    /// Maximum number of confirmed TxSeen entries returned for a single script.
+    /// Maximum number of TxSeen entries returned for a single script in a page, mempool entries
+    /// included. Default is 25.
     #[arg(env, long)]
     pub max_txs_seen: Option<usize>,
 
@@ -350,6 +351,21 @@ impl Arguments {
     /// See [`Arguments::max_connections`].
     fn max_connections(&self) -> usize {
         self.max_connections.unwrap_or(DEFAULT_MAX_CONNECTIONS)
+    }
+
+    /// See [`Arguments::max_txs_seen`].
+    fn max_txs_seen(&self) -> usize {
+        self.max_txs_seen.unwrap_or(DEFAULT_MAX_TXS_SEEN)
+    }
+
+    /// The worst-case memory of the responses being sent, in bytes: every connection sending the
+    /// largest descriptor response, every script of every path of its page with a full history.
+    fn responses_memory_bound(&self) -> usize {
+        self.max_connections()
+            .saturating_mul(self.descriptor_limits().max_paths)
+            .saturating_mul(route::MAX_ADDRESSES as usize)
+            .saturating_mul(self.max_txs_seen())
+            .saturating_mul(route::RESPONSE_ENTRY_BYTES)
     }
 
     /// See [`Arguments::write_stall_timeout_seconds`].
@@ -624,6 +640,20 @@ mod argument_tests {
     }
 
     #[test]
+    fn responses_memory_bound_follows_limits() {
+        // 200 connections x 2 paths x 1000 scripts x 25 entries x 200 bytes
+        assert_eq!(Arguments::default().responses_memory_bound(), 2_000_000_000);
+
+        let args = Arguments {
+            max_connections: Some(10),
+            max_descriptor_paths: Some(1),
+            max_txs_seen: Some(100),
+            ..Default::default()
+        };
+        assert_eq!(args.responses_memory_bound(), 200_000_000);
+    }
+
+    #[test]
     fn write_stall_timeout_must_be_non_zero() {
         let valid = Arguments {
             rpc_user_password: Some("user:pass".to_string()),
@@ -883,13 +913,24 @@ pub async fn inner_main(
         .wif_key
         .unwrap_or_else(|| PrivateKey::generate(network_kind));
 
+    log::info!(
+        "worst-case memory of the responses being sent: {} MB ({} connections x {} descriptor \
+         paths x {} scripts x {} entries x {} bytes)",
+        args.responses_memory_bound() / 1_000_000,
+        args.max_connections(),
+        args.descriptor_limits().max_paths,
+        route::MAX_ADDRESSES,
+        args.max_txs_seen(),
+        route::RESPONSE_ENTRY_BYTES,
+    );
+
     let state = Arc::new(State::new(
         store,
         key,
         wif_key,
         StateConfig {
             max_addresses: args.max_addresses,
-            max_txs_seen: args.max_txs_seen.unwrap_or(DEFAULT_MAX_TXS_SEEN),
+            max_txs_seen: args.max_txs_seen(),
             descriptor_limits: args.descriptor_limits(),
             max_derivations_per_request: args.max_derivations_per_request(),
             cache_control_seconds: args.cache_control_seconds,
