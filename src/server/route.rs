@@ -64,9 +64,16 @@ const SNAPSHOT_ATTEMPTS: usize = 3;
 const BLOCK_UPDATE_WAIT: Duration = Duration::from_secs(2);
 const BLOCK_UPDATE_POLL: Duration = Duration::from_millis(10);
 const BLOCKCHAIN_CHANGED_RETRY_AFTER_SECONDS: u32 = 1;
+/// History entries past which a waterfalls request waits for a [`LargeResponsePermit`].
+/// An entry takes about 200 bytes in the JSON response.
+const LARGE_RESPONSE_ENTRIES: usize = 10_000;
 /// Longer than for `BlockchainChanged`: a slot frees up only when a subscription ends, and SSE
 /// clients reconnecting at once would make a storm of refused subscriptions.
 const TOO_MANY_SUBSCRIPTIONS_RETRY_AFTER_SECONDS: u32 = 10;
+/// Max wait for a [`LargeResponsePermit`] before giving up with
+/// [`Error::TooManyLargeResponses`]: the permits may all be held by clients reading slowly.
+const LARGE_RESPONSE_WAIT: Duration = Duration::from_secs(10);
+const TOO_MANY_LARGE_RESPONSES_RETRY_AFTER_SECONDS: u32 = 5;
 
 type RespBody = BoxBody<Bytes, Infallible>;
 type Resp = Response<RespBody>;
@@ -688,6 +695,7 @@ fn error_resp(status: StatusCode, error: &Error) -> Resp {
         Error::Subscription(SubscriptionError::TooManySubscriptions) => {
             Some(TOO_MANY_SUBSCRIPTIONS_RETRY_AFTER_SECONDS)
         }
+        Error::TooManyLargeResponses => Some(TOO_MANY_LARGE_RESPONSES_RETRY_AFTER_SECONDS),
         _ => None,
     };
     if let Some(seconds) = retry_after {
@@ -726,7 +734,9 @@ fn error_status(error: &Error) -> StatusCode {
         }
         Error::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         Error::BodyReadTimeout => StatusCode::REQUEST_TIMEOUT,
-        Error::BlockchainChanged | Error::NodeUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+        Error::BlockchainChanged | Error::NodeUnavailable | Error::TooManyLargeResponses => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -833,6 +843,11 @@ async fn handle_waterfalls_req(
         .with_label_values(&["all"])
         .start_timer();
 
+    let large_permit = LargeResponsePermit::new(
+        Arc::clone(&state.large_response_permits),
+        LARGE_RESPONSE_WAIT,
+    );
+
     let id = match &inputs {
         WaterfallRequest::Descriptor(DescriptorRequest {
             descriptor,
@@ -867,7 +882,10 @@ async fn handle_waterfalls_req(
         tip_hash,
         tip_meta,
         derivations_duration,
-    } = with_block_snapshot(state, || scan_waterfalls(state, &inputs, with_tip, network)).await?;
+    } = with_block_snapshot(state, || {
+        scan_waterfalls(state, &inputs, with_tip, network, &large_permit)
+    })
+    .await?;
 
     let elements: usize = map.values().map(|v| v.len()).sum();
 
@@ -918,7 +936,10 @@ async fn handle_waterfalls_req(
     if state.server_timing && is_descriptor {
         add_server_timing_header(&mut response, start.elapsed())?;
     }
-    Ok(response)
+    Ok(match large_permit.into_inner() {
+        Some(permit) => hold_until_sent(response, permit),
+        None => response,
+    })
 }
 
 /// Reads the history, the tip and the block hashes needed by a waterfalls response.
@@ -926,12 +947,16 @@ async fn handle_waterfalls_req(
 /// It must run inside [`with_block_snapshot`] so that all of them come from the same indexed
 /// blocks. It may then run more than once per request: its side effects (the max used index
 /// of the descriptor and the subscription expansion) are idempotent, so this is harmless.
+///
+/// Once the history found passes [`LARGE_RESPONSE_ENTRIES`], it waits for `large_permit`.
 async fn scan_waterfalls(
     state: &Arc<State>,
     inputs: &WaterfallRequest,
     with_tip: WithTip,
     network: Network,
+    large_permit: &LargeResponsePermit,
 ) -> Result<WaterfallsScan, Error> {
+    let mut entries = 0;
     let mut derivations_duration = Duration::from_secs(0);
     let mut budget = DerivationBudget::new(state.max_derivations_per_request);
     let mut map = BTreeMap::new();
@@ -964,7 +989,9 @@ async fn scan_waterfalls(
                     .await?;
                     derivations_duration += batch_derivations_duration;
 
+                    let scanned = result.len();
                     let find_result = find_scripts(state, &mut result, scripts, 0, true).await?;
+                    entries += result.iter().skip(scanned).map(Vec::len).sum::<usize>();
                     let max_used_index = find_result
                         .max_used_offset
                         .map(|offset| batch_start + offset);
@@ -974,6 +1001,7 @@ async fn scan_waterfalls(
                     if utxo_only && find_result.has_more.iter().any(|has_more| *has_more) {
                         return Err(Error::UtxoOnlyHistoryTooLarge);
                     }
+                    large_permit.acquire_if_large(entries).await?;
                     for (i, has_more_for_script) in find_result.has_more.iter().enumerate() {
                         if *has_more_for_script {
                             let derivation_index = batch_start + i as u32;
@@ -1024,9 +1052,11 @@ async fn scan_waterfalls(
             let append_mempool = page == 0;
             let find_result =
                 find_scripts(state, &mut result, scripts, page, append_mempool).await?;
+            entries += result.iter().map(Vec::len).sum::<usize>();
             if utxo_only && find_result.has_more.iter().any(|has_more| *has_more) {
                 return Err(Error::UtxoOnlyHistoryTooLarge);
             }
+            large_permit.acquire_if_large(entries).await?;
             if utxo_only {
                 filter_utxo_only(state, &mut result).await?;
             }
@@ -1881,6 +1911,103 @@ impl DerivationBudget {
     }
 }
 
+/// A permit of [`State::large_response_permits`], taken by a waterfalls request once its
+/// history passes [`LARGE_RESPONSE_ENTRIES`], so that at most `--max-large-responses` large
+/// histories and their encoded responses are in memory at the same time.
+///
+/// It is taken while scanning, checked after every store read, so a request waiting for it
+/// holds [`LARGE_RESPONSE_ENTRIES`] plus at most one read of entries: a batch of [`GAP_LIMIT`]
+/// scripts on the descriptor path, all the addresses (up to `--max-addresses`) on the address
+/// path, each with up to `--max-txs-seen` confirmed entries plus all its mempool entries. The
+/// store still decodes the whole history of a script before it is cut to `--max-txs-seen`, which
+/// this does not bound. Once taken, the permit is kept across the attempts of
+/// [`with_block_snapshot`], and then by the response body until it is sent, see
+/// [`hold_until_sent`].
+struct LargeResponsePermit {
+    permits: Arc<tokio::sync::Semaphore>,
+    permit: tokio::sync::OnceCell<tokio::sync::OwnedSemaphorePermit>,
+    wait: Duration,
+    /// When the first wait gives up, shared by the attempts of [`with_block_snapshot`]
+    deadline: std::sync::OnceLock<tokio::time::Instant>,
+}
+
+impl LargeResponsePermit {
+    fn new(permits: Arc<tokio::sync::Semaphore>, wait: Duration) -> Self {
+        Self {
+            permits,
+            permit: tokio::sync::OnceCell::new(),
+            wait,
+            deadline: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Waits for the permit if `entries` passes [`LARGE_RESPONSE_ENTRIES`] and it is not held,
+    /// giving up with [`Error::TooManyLargeResponses`] `wait` after the first wait started.
+    async fn acquire_if_large(&self, entries: usize) -> Result<(), Error> {
+        if entries > LARGE_RESPONSE_ENTRIES {
+            self.permit
+                .get_or_try_init(|| async {
+                    let deadline = *self
+                        .deadline
+                        .get_or_init(|| tokio::time::Instant::now() + self.wait);
+                    let acquire = Arc::clone(&self.permits).acquire_owned();
+                    match tokio::time::timeout_at(deadline, acquire).await {
+                        Ok(permit) => permit.map_err(|e| {
+                            Error::String(format!("large response permits closed: {e}"))
+                        }),
+                        Err(_) => {
+                            log::warn!("no large response permit after {:?}", self.wait);
+                            Err(Error::TooManyLargeResponses)
+                        }
+                    }
+                })
+                .await?;
+        }
+        Ok(())
+    }
+
+    fn into_inner(self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        self.permit.into_inner()
+    }
+}
+
+/// Keeps `permit` until the body of `response` is sent or dropped.
+fn hold_until_sent(response: Resp, permit: tokio::sync::OwnedSemaphorePermit) -> Resp {
+    response.map(|inner| {
+        PermitBody {
+            inner,
+            _permit: permit,
+        }
+        .boxed()
+    })
+}
+
+/// A response body holding a permit, released when the body is dropped
+struct PermitBody {
+    inner: RespBody,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+}
+
+impl Body for PermitBody {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<Frame<Bytes>, Infallible>>> {
+        std::pin::Pin::new(&mut self.get_mut().inner).poll_frame(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        self.inner.size_hint()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2545,6 +2672,103 @@ mod tests {
         assert!(history.iter().all(|tx| tx.block_hash.is_some()));
     }
 
+    /// A large response holds its permit until its body is dropped: another large request waits
+    /// for it meanwhile, a small one does not.
+    #[tokio::test]
+    async fn large_response_holds_permit_until_body_dropped() {
+        let mut state = route_test_state();
+        state.max_txs_seen = 2 * LARGE_RESPONSE_ENTRIES;
+        state.large_response_permits = Arc::new(tokio::sync::Semaphore::new(1));
+        let state = Arc::new(state);
+        let address = |s: &str| be::Address::from_str(s, Network::Liquid).unwrap();
+        let large = address("ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh");
+        let small = address("lq1qqgyxa469eaugae2sz3q8qzaqy0v57ecuekzyngfac5nw4z87yqskc5tp2wtueqq6am0x062zewkrl9lr0cqwvw0j9633xqe2e");
+        let txid = |n: usize| crate::be::Txid::from_str(&format!("{n:064x}")).unwrap();
+        #[allow(irrefutable_let_patterns)]
+        let crate::store::AnyStore::Mem(store) = &state.store
+        else {
+            unreachable!("test state uses the memory store")
+        };
+        let history = (0..=LARGE_RESPONSE_ENTRIES)
+            .map(|n| TxSeen::new(txid(n), 1, V::Vout(0)))
+            .collect();
+        {
+            let mut store_history = store.lock_history();
+            store_history.insert(state.store.hash(large.script_pubkey().as_bytes()), history);
+            store_history.insert(
+                state.store.hash(small.script_pubkey().as_bytes()),
+                vec![TxSeen::new(txid(0), 1, V::Vout(0))],
+            );
+        }
+        let request = |address: &be::Address| {
+            let state = Arc::clone(&state);
+            let request = WaterfallRequest::Addresses(AddressesRequest {
+                addresses: vec![address.clone()],
+                page: 0,
+                utxo_only: false,
+                sign: false,
+            });
+            async move {
+                handle_waterfalls_req(&state, request, WithTip::No, false, Network::Liquid)
+                    .await
+                    .unwrap()
+            }
+        };
+
+        let first = request(&large).await;
+        assert_eq!(state.large_response_permits.available_permits(), 0);
+        let body_len = first.body().size_hint().exact().unwrap();
+        assert!(body_len > LARGE_RESPONSE_ENTRIES as u64);
+
+        let small_response = request(&small).await;
+        assert_eq!(small_response.status(), StatusCode::OK);
+
+        let second = tokio::spawn(request(&large));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!second.is_finished());
+
+        let body = first.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body.len() as u64, body_len);
+        let second = second.await.unwrap();
+        assert_eq!(second.status(), StatusCode::OK);
+        drop(second);
+        assert_eq!(state.large_response_permits.available_permits(), 1);
+    }
+
+    /// A large request gives up with a 503 when the permits stay taken, a small one does not
+    /// wait for them.
+    #[tokio::test]
+    async fn large_response_permit_wait_is_bounded() {
+        let permits = Arc::new(tokio::sync::Semaphore::new(1));
+        let _held = Arc::clone(&permits).acquire_owned().await.unwrap();
+        let large_permit = LargeResponsePermit::new(permits, Duration::from_millis(300));
+
+        assert_eq!(
+            large_permit.acquire_if_large(LARGE_RESPONSE_ENTRIES).await,
+            Ok(())
+        );
+        let err = large_permit
+            .acquire_if_large(LARGE_RESPONSE_ENTRIES + 1)
+            .await
+            .unwrap_err();
+        assert_eq!(err, Error::TooManyLargeResponses);
+        // A new attempt of the scan, after a block was indexed, does not wait again
+        let start = Instant::now();
+        assert_eq!(
+            large_permit
+                .acquire_if_large(LARGE_RESPONSE_ENTRIES + 1)
+                .await,
+            Err(Error::TooManyLargeResponses)
+        );
+        assert!(start.elapsed() < Duration::from_millis(150));
+        assert_eq!(error_status(&err), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            error_resp(error_status(&err), &err).headers()[header::RETRY_AFTER],
+            TOO_MANY_LARGE_RESPONSES_RETRY_AFTER_SECONDS.to_string()
+        );
+        assert!(large_permit.into_inner().is_none());
+    }
+
     #[tokio::test]
     async fn derivation_batch_mixes_cached_and_derived_indexes() {
         let state = Arc::new(route_test_state());
@@ -2608,6 +2832,62 @@ mod tests {
         assert_eq!(state.derivation_cache.lock().await.get(key), None);
     }
 
+    /// A `utxo_only` request with a history too large fails at once, instead of waiting for a
+    /// large response permit first.
+    #[tokio::test]
+    async fn utxo_only_too_large_does_not_wait_for_permit() {
+        let entries = LARGE_RESPONSE_ENTRIES + 2;
+        let mut state = route_test_state();
+        state.max_txs_seen = entries - 1;
+        state.large_response_permits = Arc::new(tokio::sync::Semaphore::new(1));
+        let _held = Arc::clone(&state.large_response_permits)
+            .acquire_owned()
+            .await
+            .unwrap();
+        let address = be::Address::from_str(
+            "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+            Network::Bitcoin,
+        )
+        .unwrap();
+        let script_hash = state.store.hash(address.script_pubkey().as_bytes());
+        let txid = |n: usize| crate::be::Txid::from_str(&format!("{n:064x}")).unwrap();
+        #[allow(irrefutable_let_patterns)]
+        let crate::store::AnyStore::Mem(store) = &state.store
+        else {
+            unreachable!("test state uses the memory store")
+        };
+        let history = (0..entries)
+            .map(|n| TxSeen::new(txid(n), 1, V::Vout(0)))
+            .collect();
+        store.lock_history().insert(script_hash, history);
+        let state = Arc::new(state);
+
+        let request = WaterfallRequest::Addresses(AddressesRequest {
+            addresses: vec![address],
+            page: 0,
+            utxo_only: true,
+            sign: false,
+        });
+        // A long wait, so that waiting for the permit would time the test out.
+        let large_permit = LargeResponsePermit::new(
+            Arc::clone(&state.large_response_permits),
+            Duration::from_secs(60),
+        );
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            scan_waterfalls(
+                &state,
+                &request,
+                WithTip::No,
+                Network::Bitcoin,
+                &large_permit,
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.map(|_| ()), Err(Error::UtxoOnlyHistoryTooLarge));
+    }
+
     #[tokio::test]
     async fn waterfalls_scan_bounded_by_derivation_budget() {
         let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
@@ -2620,12 +2900,17 @@ mod tests {
                 sign: false,
             })
         };
-        let scan = |state, to_index| async move {
+        let scan = |state: Arc<State>, to_index| async move {
+            let large_permit = LargeResponsePermit::new(
+                Arc::clone(&state.large_response_permits),
+                LARGE_RESPONSE_WAIT,
+            );
             scan_waterfalls(
                 &state,
                 &request(to_index),
                 WithTip::No,
                 Network::LiquidTestnet,
+                &large_permit,
             )
             .await
             .map(|_| ())
@@ -3136,6 +3421,7 @@ mod tests {
                 max_derivations_per_request: 1_000,
                 cache_control_seconds: 5,
                 server_timing: false,
+                max_large_responses: 4,
                 derivation_cache_capacity: 1000,
                 subscription_limits: crate::server::SubscriptionLimits {
                     max_active_subscriptions,

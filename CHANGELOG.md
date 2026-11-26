@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `--max-large-responses` (`MAX_LARGE_RESPONSES` environment variable, default 4) bounds the
+  waterfalls requests with a large history (more than 10,000 entries) handled at the same
+  time, the others wait. Each takes tens of MB of memory until its response is sent, so
+  many of them at once could exhaust the memory of the server, and they slowed down every
+  other request. Requests with a smaller history never wait. A request that cannot get
+  one within 10 seconds is answered `503` with `Retry-After: 5`.
 - The prometheus `/metrics` endpoint exposes again the `process_*` metrics (CPU time, resident
   and virtual memory, open file descriptors, threads, start time) on Linux, used by the
   Grafana dashboard.
