@@ -752,40 +752,21 @@ async fn handle_single_address(state: &Arc<State>, address: &be::Address) -> Res
     let script_hash = [state.store.hash(script_pubkey.as_bytes())];
     // Read in a block snapshot, so that every confirmed entry has its block hash.
     let result = with_block_snapshot(state, || async move {
-        // The mempool is read before the db, see `find_scripts`.
-        let mut seen_mempool = vec![Vec::new()];
-        state
-            .mempool
-            .lock()
-            .await
-            .append_seen(&script_hash, &mut seen_mempool);
-        let mut seen_blockchain = state
-            .store_blocking(move |db| db.get_history(&script_hash))
-            .await?;
         // TODO add pagination for `/address/:address/txs`; for now we only return the first capped page.
-        truncate_history_page(&mut seen_blockchain, 0, state.max_txs_seen);
-        remove_confirmed_from_mempool(&seen_blockchain, &mut seen_mempool);
-        let mut result: Vec<_> = seen_blockchain
+        let mut seen = Vec::with_capacity(1);
+        find_scripts(state, &mut seen, script_hash.to_vec(), 0).await?;
+        let mut result: Vec<_> = seen
             .into_iter()
-            .next()
-            .unwrap_or_default()
-            .iter()
+            .flatten()
             .map(|e| EsploraTx {
                 txid: e.txid,
                 status: Status {
-                    block_height: Some(e.height as i32),
+                    // the mempool entries have height 0
+                    block_height: Some(if e.height == 0 { -1 } else { e.height as i32 }),
                     block_hash: None,
                 },
             })
             .collect();
-
-        result.extend(seen_mempool.iter().flatten().map(|tx_seen| EsploraTx {
-            txid: tx_seen.txid,
-            status: Status {
-                block_height: Some(-1),
-                block_hash: None,
-            },
-        }));
 
         {
             let blocks_hash_ts = state.blocks_hash_ts.lock().await;
@@ -967,7 +948,7 @@ async fn scan_waterfalls(
                     .await?;
                     derivations_duration += batch_derivations_duration;
 
-                    let find_result = find_scripts(state, &mut result, scripts, 0, true).await?;
+                    let find_result = find_scripts(state, &mut result, scripts, 0).await?;
                     let max_used_index = find_result
                         .max_used_offset
                         .map(|offset| batch_start + offset);
@@ -1024,9 +1005,7 @@ async fn scan_waterfalls(
             } else {
                 0
             };
-            let append_mempool = page == 0;
-            let find_result =
-                find_scripts(state, &mut result, scripts, page, append_mempool).await?;
+            let find_result = find_scripts(state, &mut result, scripts, page).await?;
             if utxo_only && find_result.has_more.iter().any(|has_more| *has_more) {
                 return Err(Error::UtxoOnlyHistoryTooLarge);
             }
@@ -1411,7 +1390,7 @@ async fn scan_descriptor_max_used_index(
             derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT, budget).await?;
 
         let mut result = Vec::with_capacity(GAP_LIMIT as usize);
-        let find_result = find_scripts(state, &mut result, scripts, 0, true).await?;
+        let find_result = find_scripts(state, &mut result, scripts, 0).await?;
         if let Some(max_used_offset) = find_result.max_used_offset {
             max_used_index = Some(batch_start + max_used_offset);
         }
@@ -1578,32 +1557,26 @@ async fn find_scripts(
     result: &mut Vec<Vec<TxSeen>>,
     scripts: Vec<u64>,
     address_history_page: usize,
-    append_mempool: bool,
 ) -> Result<FindScriptsResult, Error> {
     // The mempool is read before the db: the blocks thread removes txs from the mempool after
     // indexing the block confirming them, so a tx missing from this mempool read because it was
     // just confirmed is found in the db read that follows.
     let mut seen_mempool = vec![Vec::new(); scripts.len()];
-    if append_mempool {
-        state
-            .mempool
-            .lock()
-            .await
-            .append_seen(&scripts, &mut seen_mempool);
-    }
-    let mut seen_blockchain = state
+    state
+        .mempool
+        .lock()
+        .await
+        .append_seen(&scripts, &mut seen_mempool);
+    let seen_blockchain = state
         .store_blocking(move |db| db.get_history(&scripts))
         .await?;
-    let has_more = truncate_history_page(
-        &mut seen_blockchain,
+    let (seen, has_more) = history_page(
+        seen_blockchain,
+        seen_mempool,
         address_history_page,
         state.max_txs_seen,
     );
-    remove_confirmed_from_mempool(&seen_blockchain, &mut seen_mempool);
-    for (txs_seen, mempool_txs_seen) in seen_blockchain.iter_mut().zip(seen_mempool) {
-        txs_seen.extend(mempool_txs_seen);
-    }
-    let max_used_offset = seen_blockchain
+    let max_used_offset = seen
         .iter()
         .enumerate()
         .filter_map(|(index, txs_seen)| {
@@ -1614,8 +1587,8 @@ async fn find_scripts(
             }
         })
         .max();
-    let is_last = seen_blockchain.iter().all(|e| e.is_empty());
-    result.extend(seen_blockchain);
+    let is_last = seen.iter().all(|e| e.is_empty());
+    result.extend(seen);
     Ok(FindScriptsResult {
         is_last,
         has_more,
@@ -1623,44 +1596,47 @@ async fn find_scripts(
     })
 }
 
-/// Removes from `seen_mempool` the txs also in `seen_blockchain` for the same script.
+/// The page `page` of the history of each script, and whether the script has entries after it.
 ///
-/// Since the mempool is read before the db, a tx confirmed in between is in both.
+/// The history of a script is its confirmed entries followed by its mempool entries, so that a
+/// page has at most `max_txs_seen` entries, mempool included, and the mempool entries come on
+/// the page where the confirmed history ends.
 ///
-/// Callers pass the history already truncated to the requested page, so a tx confirmed in
-/// between whose entry falls past the page is still reported unconfirmed, in that one response.
-/// This needs a script with more than a page of history and a block indexed between the two
-/// reads, while filtering against the full history would hash it on every such request.
-fn remove_confirmed_from_mempool(
-    seen_blockchain: &[Vec<TxSeen>],
-    seen_mempool: &mut [Vec<TxSeen>],
-) {
-    for (confirmed, mempool) in seen_blockchain.iter().zip(seen_mempool.iter_mut()) {
-        if !mempool.is_empty() && !confirmed.is_empty() {
-            let confirmed: HashSet<_> = confirmed.iter().map(|tx_seen| tx_seen.txid).collect();
-            mempool.retain(|tx_seen| !confirmed.contains(&tx_seen.txid));
-        }
-    }
-}
-
-fn truncate_history_page(
-    result: &mut [Vec<TxSeen>],
+/// Since the mempool is read before the db, a tx confirmed in between is in both: it is removed
+/// from the mempool entries of the script.
+fn history_page(
+    seen_blockchain: Vec<Vec<TxSeen>>,
+    seen_mempool: Vec<Vec<TxSeen>>,
     page: usize,
     max_txs_seen: usize,
-) -> Vec<bool> {
+) -> (Vec<Vec<TxSeen>>, Vec<bool>) {
     let start = page.saturating_mul(max_txs_seen);
     let end = start.saturating_add(max_txs_seen);
-    let mut has_more = Vec::with_capacity(result.len());
+    let mut has_more = Vec::with_capacity(seen_blockchain.len());
+    let mut result = Vec::with_capacity(seen_blockchain.len());
 
-    for txs_seen in result.iter_mut() {
-        has_more.push(txs_seen.len() > end);
-        *txs_seen = txs_seen
-            .get(start..txs_seen.len().min(end))
-            .unwrap_or(&[])
-            .to_vec();
+    for (confirmed, mut mempool) in seen_blockchain.into_iter().zip(seen_mempool) {
+        if !mempool.is_empty() && !confirmed.is_empty() {
+            let mempool_txids: HashSet<_> = mempool.iter().map(|tx_seen| tx_seen.txid).collect();
+            let confirmed_txids: HashSet<_> = confirmed
+                .iter()
+                .map(|tx_seen| tx_seen.txid)
+                .filter(|txid| mempool_txids.contains(txid))
+                .collect();
+            mempool.retain(|tx_seen| !confirmed_txids.contains(&tx_seen.txid));
+        }
+        has_more.push(confirmed.len().saturating_add(mempool.len()) > end);
+        result.push(
+            confirmed
+                .into_iter()
+                .chain(mempool)
+                .skip(start)
+                .take(max_txs_seen)
+                .collect(),
+        );
     }
 
-    has_more
+    (result, has_more)
 }
 
 /// Everything a waterfalls response needs, read from the same indexed blocks
@@ -2297,37 +2273,55 @@ mod tests {
     }
 
     #[test]
-    fn test_truncate_history_page() {
-        let txid = crate::be::Txid::all_zeros();
-        let mut history = vec![
+    fn test_history_page() {
+        let txid = |n: u8| crate::be::Txid::from_str(&format!("{n:064x}")).unwrap();
+        let heights = |page: &[TxSeen]| page.iter().map(|tx| tx.height).collect::<Vec<_>>();
+        let confirmed = vec![
             vec![
-                TxSeen::new(txid, 1, V::Undefined),
-                TxSeen::new(txid, 2, V::Undefined),
-                TxSeen::new(txid, 3, V::Undefined),
+                TxSeen::new(txid(1), 1, V::Undefined),
+                TxSeen::new(txid(2), 2, V::Undefined),
+                TxSeen::new(txid(3), 3, V::Undefined),
             ],
-            vec![TxSeen::new(txid, 10, V::Undefined)],
+            vec![TxSeen::new(txid(10), 10, V::Undefined)],
         ];
 
-        truncate_history_page(&mut history, 0, 2);
-        assert_eq!(
-            history[0].iter().map(|tx| tx.height).collect::<Vec<_>>(),
-            vec![1, 2]
-        );
-        assert_eq!(
-            history[1].iter().map(|tx| tx.height).collect::<Vec<_>>(),
-            vec![10]
-        );
+        let (page, has_more) = history_page(confirmed.clone(), vec![vec![], vec![]], 0, 2);
+        assert_eq!(heights(&page[0]), vec![1, 2]);
+        assert_eq!(heights(&page[1]), vec![10]);
+        assert_eq!(has_more, vec![true, false]);
 
-        let mut history = vec![vec![
-            TxSeen::new(txid, 1, V::Undefined),
-            TxSeen::new(txid, 2, V::Undefined),
-            TxSeen::new(txid, 3, V::Undefined),
-        ]];
-        truncate_history_page(&mut history, 1, 2);
-        assert_eq!(
-            history[0].iter().map(|tx| tx.height).collect::<Vec<_>>(),
-            vec![3]
-        );
+        let (page, has_more) = history_page(confirmed.clone(), vec![vec![], vec![]], 1, 2);
+        assert_eq!(heights(&page[0]), vec![3]);
+        assert!(page[1].is_empty());
+        assert_eq!(has_more, vec![false, false]);
+
+        // The mempool entries follow the confirmed ones and count toward the page size; the
+        // mempool entry of a tx confirmed in between the two reads is dropped
+        let mempool = vec![
+            vec![
+                TxSeen::mempool(txid(4), V::Undefined),
+                TxSeen::mempool(txid(5), V::Undefined),
+            ],
+            vec![
+                TxSeen::mempool(txid(10), V::Undefined),
+                TxSeen::mempool(txid(11), V::Undefined),
+            ],
+        ];
+        let (page, has_more) = history_page(confirmed.clone(), mempool.clone(), 0, 2);
+        assert_eq!(heights(&page[0]), vec![1, 2]);
+        assert_eq!(heights(&page[1]), vec![10, 0]);
+        assert_eq!(page[1][1].txid, txid(11));
+        assert_eq!(has_more, vec![true, false]);
+
+        let (page, has_more) = history_page(confirmed.clone(), mempool.clone(), 1, 2);
+        assert_eq!(heights(&page[0]), vec![3, 0]);
+        assert_eq!(page[0][1].txid, txid(4));
+        assert_eq!(has_more, vec![true, false]);
+
+        let (page, has_more) = history_page(confirmed, mempool, 2, 2);
+        assert_eq!(page[0].len(), 1);
+        assert_eq!(page[0][0].txid, txid(5));
+        assert_eq!(has_more, vec![false, false]);
     }
 
     /// Store access must not run on the async runtime (#53): while a store read is stuck, other
@@ -3049,6 +3043,96 @@ mod tests {
         );
     }
 
+    const PAGED_ADDRESS: &str = "ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh";
+
+    /// A state with `max_txs_seen`, where `PAGED_ADDRESS` received `confirmed` confirmed txs and
+    /// `unconfirmed` mempool txs. Returns the state and the txids, oldest first.
+    async fn state_with_paged_history(
+        max_txs_seen: usize,
+        confirmed: u8,
+        unconfirmed: u8,
+    ) -> (Arc<State>, Vec<crate::be::Txid>) {
+        let state = Arc::new(route_test_state_with_limits(100, 100, max_txs_seen));
+        let address = be::Address::from_str(PAGED_ADDRESS, Network::Liquid).unwrap();
+        let script_hash = state.store.hash(address.script_pubkey().as_bytes());
+        let txid = |n: u8| crate::be::Txid::from_str(&format!("{n:064x}")).unwrap();
+
+        let txids: Vec<_> = (1..=confirmed + unconfirmed).map(txid).collect();
+        let (confirmed_txids, mempool_txids) = txids.split_at(confirmed as usize);
+        for (height, txid) in (1..).zip(confirmed_txids) {
+            let block_hash = BlockHash::from_str(&format!("{height:064x}")).unwrap();
+            let history =
+                BTreeMap::from([(script_hash, vec![TxSeen::new(*txid, height, V::Vout(0))])]);
+            let utxos = BTreeMap::from([(crate::OutPoint::new(*txid, 0), script_hash)]);
+            state
+                .store
+                .update(
+                    &crate::store::BlockMeta::new(height, block_hash, 0),
+                    vec![],
+                    history,
+                    utxos,
+                )
+                .unwrap();
+        }
+        let txs: Vec<_> = mempool_txids
+            .iter()
+            .map(|txid| (*txid, be::MempoolTx::from_parts(vec![], vec![script_hash])))
+            .collect();
+        let txs: Vec<_> = txs.iter().map(|(txid, tx)| (*txid, tx)).collect();
+        state.mempool.lock().await.update(&[], &txs, &[]);
+        (state, txids)
+    }
+
+    /// Scans `PAGED_ADDRESS`, returns its txids and the `has_more` of the response
+    async fn scan_paged_address(
+        state: &Arc<State>,
+        page: u16,
+        utxo_only: bool,
+    ) -> Result<(Vec<crate::be::Txid>, Vec<String>), Error> {
+        let query = format!("addresses={PAGED_ADDRESS}&page={page}&utxo_only={utxo_only}");
+        let inputs = parse_query(
+            &query,
+            &state.key,
+            false,
+            state.max_addresses,
+            Network::Liquid,
+        )?;
+        let scan = scan_waterfalls(state, &inputs, WithTip::No, Network::Liquid).await?;
+        let txids = scan.map["addresses"][0]
+            .iter()
+            .map(|tx_seen| tx_seen.txid)
+            .collect();
+        Ok((txids, scan.has_more))
+    }
+
+    /// The mempool entries of a script count toward `--max-txs-seen`: a script over it with
+    /// them is listed in `has_more`, and the next address page returns the rest.
+    #[tokio::test]
+    async fn mempool_entries_count_toward_history_cap() {
+        let (state, txids) = state_with_paged_history(4, 2, 3).await;
+
+        let (page_0, has_more) = scan_paged_address(&state, 0, false).await.unwrap();
+        assert_eq!(page_0, txids[..4]);
+        assert_eq!(has_more, vec![PAGED_ADDRESS.to_string()]);
+
+        let (page_1, has_more) = scan_paged_address(&state, 1, false).await.unwrap();
+        assert_eq!(page_1, txids[4..]);
+        assert!(has_more.is_empty());
+
+        // `/address/:address/txs` returns the first page, mempool included
+        let address = be::Address::from_str(PAGED_ADDRESS, Network::Liquid).unwrap();
+        let response = handle_single_address(&state, &address).await.unwrap();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let heights: Vec<_> = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tx| tx["status"]["block_height"].as_i64().unwrap())
+            .collect();
+        assert_eq!(heights, vec![1, 2, -1, -1]);
+    }
+
     /// The subscription stream is marked to give back the connection permit, and closes the
     /// connection.
     #[tokio::test]
@@ -3173,13 +3257,21 @@ mod tests {
         max_active_subscriptions: usize,
         max_scripts_per_subscription: usize,
     ) -> State {
+        route_test_state_with_limits(max_active_subscriptions, max_scripts_per_subscription, 100)
+    }
+
+    fn route_test_state_with_limits(
+        max_active_subscriptions: usize,
+        max_scripts_per_subscription: usize,
+        max_txs_seen: usize,
+    ) -> State {
         State::new(
             crate::store::AnyStore::Mem(crate::store::memory::MemoryStore::new()),
             Identity::generate(),
             bitcoin::PrivateKey::generate(bitcoin::NetworkKind::Test),
             crate::server::StateConfig {
                 max_addresses: 100,
-                max_txs_seen: 100,
+                max_txs_seen,
                 descriptor_limits: Default::default(),
                 max_derivations_per_request: 1_000,
                 cache_control_seconds: 5,

@@ -58,6 +58,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sign=true`. Without it, the `X-Content-Signature`, `X-Content-Digest` and
   `X-Server-Address` headers are omitted. Signing hashes the whole response, which is costly
   for large ones, and most clients, like LWK, do not check the signature.
+- **Breaking:** mempool entries count toward `--max-txs-seen`. The history of a script is
+  its confirmed entries followed by its mempool entries, paged `--max-txs-seen` at a time:
+  a script whose confirmed and mempool entries together exceed it is listed in `has_more`,
+  and its mempool entries come on the page where the confirmed history ends, also for
+  `addresses=<addr>&page=N` with `N > 0`, which had confirmed entries only. Before, every
+  mempool entry was added to page 0 on top of the cap. `utxo_only` returns
+  `UtxoOnlyHistoryTooLarge` for such a script, and `/address/:address/txs` returns the first
+  page, mempool included.
 - **Breaking:** new databases hash scripts with SipHash-2-4 and a random 128-bit key, instead
   of FxHash with a random 64-bit salt. The script hash cannot change without reindexing, so
   starting on a database created by a previous release fails: point `--db-dir` to an empty
