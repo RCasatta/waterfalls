@@ -1001,13 +1001,28 @@ pub async fn inner_main(
                     let header_read_timeout = args.header_read_timeout_seconds;
                     let client = &client;
 
-                    let service = service_fn(move |req| infallible_route(state, client, req, network, add_cors, expose_metrics));
+                    let abort = route::ConnectionAbort::default();
+                    let service = {
+                        let abort = abort.clone();
+                        service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
+                            req.extensions_mut().insert(abort.clone());
+                            infallible_route(state, client, req, network, add_cors, expose_metrics)
+                        })
+                    };
 
-                    let result = http1::Builder::new()
+                    let connection = http1::Builder::new()
                         .timer(TokioTimer::new())
                         .header_read_timeout(Duration::from_secs(header_read_timeout))
-                        .serve_connection(io, service)
-                        .await;
+                        .serve_connection(io, service);
+                    let result = tokio::select! {
+                        result = connection => result,
+                        () = abort.aborted() => {
+                            // A large response not sent within its deadline, already logged.
+                            // Dropping the connection closes it even if its client stopped reading.
+                            inc_connection_error_counter("send_deadline");
+                            return;
+                        }
+                    };
 
                     if let Err(err) = result {
                         let msg = format!("{err:?}");
@@ -1020,6 +1035,10 @@ pub async fn inner_main(
                             let mut aggregation = header_timeout_aggregation.lock().await;
                             *aggregation.counts.entry(peer_addr.ip()).or_insert(0) += 1;
                             report_header_timeouts_if_due(&mut aggregation);
+                        } else if err.is_body_write_aborted() {
+                            // A large response not sent within its deadline, already logged
+                            inc_connection_error_counter("send_deadline");
+                            log::debug!("Error serving connection: {msg}");
                         } else {
                             log::error!("Error serving connection: {msg}");
                         }

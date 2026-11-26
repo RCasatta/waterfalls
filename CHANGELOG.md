@@ -14,7 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   time, the others wait. Each takes tens of MB of memory until its response is sent, so
   many of them at once could exhaust the memory of the server, and they slowed down every
   other request. Requests with a smaller history never wait. A request that cannot get
-  one within 10 seconds is answered `503` with `Retry-After: 5`.
+  one within 10 seconds is answered `503` with `Retry-After: 5`. A large response not read
+  by the client within 2 minutes is dropped and its connection closed, so that clients that
+  stop reading cannot keep the other large requests waiting. Such connections are counted by
+  `waterfalls_connection_errors_total{kind="send_deadline"}`.
 - The prometheus `/metrics` endpoint exposes again the `process_*` metrics (CPU time, resident
   and virtual memory, open file descriptors, threads, start time) on Linux, used by the
   Grafana dashboard.

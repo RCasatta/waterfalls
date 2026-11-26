@@ -65,6 +65,9 @@ pub struct State {
     /// Held by the waterfalls requests with a large history, see `LargeResponsePermit`.
     pub large_response_permits: Arc<Semaphore>,
 
+    /// Max time to send a large response before closing its connection, see `PermitBody`.
+    pub large_response_send_deadline: Duration,
+
     pub cached_fee_estimates: RwLock<(HashMap<u16, f64>, Option<Instant>)>,
 
     descriptor_metrics: Mutex<DescriptorMetrics>,
@@ -99,6 +102,7 @@ impl State {
                 std::thread::available_parallelism().map_or(1, |cores| cores.get()),
             )),
             large_response_permits: Arc::new(Semaphore::new(config.max_large_responses)),
+            large_response_send_deadline: crate::server::route::LARGE_RESPONSE_SEND_DEADLINE,
             cached_fee_estimates: RwLock::new((HashMap::new(), None)),
             descriptor_metrics: Mutex::new(DescriptorMetrics::new()),
             descriptor_max_used_index: Mutex::new(HashMap::new()),
