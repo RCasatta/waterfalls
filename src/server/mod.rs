@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use crate::be::{DescriptorLimits, DEFAULT_MAX_DESCRIPTOR_KEYS, DEFAULT_MAX_DESCRIPTOR_PATHS};
 use crate::fetch::{BackendValidationError, Client};
 use crate::inc_connection_error_counter;
+use crate::server::connection::{is_write_stall, serve_connection, ConnectionLimits};
 use crate::server::preload::headers;
 use crate::store::memory::MemoryStore;
 use crate::store::AnyStore;
@@ -24,10 +25,11 @@ use bitcoin::{NetworkKind, PrivateKey};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioIo, TokioTimer};
-use route::{infallible_metrics_route, infallible_route};
+use route::{infallible_metrics_route, infallible_route, too_many_connections_resp};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
+mod connection;
 mod derivation_cache;
 pub mod encryption;
 mod mempool;
@@ -43,7 +45,11 @@ pub(crate) use subscription::SubscriptionEvent;
 
 /// See [`Arguments::max_node_requests`]
 const DEFAULT_MAX_NODE_REQUESTS: usize = 8;
-const DEFAULT_MAX_TXS_SEEN: usize = 100;
+const DEFAULT_MAX_TXS_SEEN: usize = 25;
+/// See [`Arguments::write_stall_timeout_seconds`]
+const DEFAULT_WRITE_STALL_TIMEOUT_SECONDS: u64 = 30;
+/// See [`Arguments::max_connections`]
+const DEFAULT_MAX_CONNECTIONS: usize = 200;
 const DEFAULT_MAX_ACTIVE_SUBSCRIPTIONS: usize = 5_000;
 const DEFAULT_MAX_SCRIPTS_PER_SUBSCRIPTION: usize = 2_000;
 const DEFAULT_REORG_DATA_KEEP_HEIGHTS: u32 = 6;
@@ -133,7 +139,8 @@ pub struct Arguments {
     #[arg(env, long, default_value = "100")]
     pub max_addresses: usize,
 
-    /// Maximum number of confirmed TxSeen entries returned for a single script.
+    /// Maximum number of TxSeen entries returned for a single script in a page, mempool entries
+    /// included. Default is 25.
     #[arg(env, long)]
     pub max_txs_seen: Option<usize>,
 
@@ -168,12 +175,12 @@ pub struct Arguments {
     #[arg(env, long, default_value = "1000000")]
     pub derivation_cache_capacity: usize,
 
-    /// Maximum number of concurrently active SSE subscriptions.
-    #[arg(env, long, default_value = "100")]
+    /// Maximum number of concurrently active SSE subscriptions. Default is 5000.
+    #[arg(env, long)]
     pub max_active_subscriptions: Option<usize>,
 
-    /// Maximum number of scripts watched by a single SSE subscription.
-    #[arg(env, long, default_value = "500")]
+    /// Maximum number of scripts watched by a single SSE subscription. Default is 2000.
+    #[arg(env, long)]
     pub max_scripts_per_subscription: Option<usize>,
 
     /// Interval in minutes to log RocksDB statistics
@@ -216,6 +223,22 @@ pub struct Arguments {
     /// Timeout in seconds for reading incoming HTTP request headers (protects against slowloris attacks)
     #[arg(env, long, default_value = "10")]
     pub header_read_timeout_seconds: u64,
+
+    /// Timeout in seconds for a write to a client making no progress: the connection is closed,
+    /// freeing the response. Every write making progress resets it, so a slow but steady client
+    /// is not cut off. It applies to every connection of the public listener, subscriptions
+    /// included. Default is 30.
+    #[arg(env, long)]
+    pub write_stall_timeout_seconds: Option<u64>,
+
+    /// Maximum number of connections of the public listener served at the same time. A
+    /// connection holds its slot for its whole life, sending its responses included, so this
+    /// bounds the memory held by responses. A connection over the limit is answered 503 with
+    /// `Retry-After: 1` and closed, up to as many as this at the same time, the others are
+    /// closed without a response. A connection streaming a subscription gives back its slot,
+    /// subscriptions are bounded by `--max-active-subscriptions`. Default is 200.
+    #[arg(env, long)]
+    pub max_connections: Option<usize>,
 
     /// Delay in milliseconds between mempool sync cycles. Default is 500.
     #[arg(env, long)]
@@ -279,6 +302,11 @@ impl std::fmt::Debug for Arguments {
                 "header_read_timeout_seconds",
                 &self.header_read_timeout_seconds,
             )
+            .field("max_connections", &self.max_connections)
+            .field(
+                "write_stall_timeout_seconds",
+                &self.write_stall_timeout_seconds,
+            )
             .field(
                 "mempool_sleep_between_cycles_ms",
                 &self.mempool_sleep_between_cycles_ms,
@@ -320,6 +348,34 @@ impl Arguments {
         self.max_node_requests.unwrap_or(DEFAULT_MAX_NODE_REQUESTS)
     }
 
+    /// See [`Arguments::max_connections`].
+    fn max_connections(&self) -> usize {
+        self.max_connections.unwrap_or(DEFAULT_MAX_CONNECTIONS)
+    }
+
+    /// See [`Arguments::max_txs_seen`].
+    fn max_txs_seen(&self) -> usize {
+        self.max_txs_seen.unwrap_or(DEFAULT_MAX_TXS_SEEN)
+    }
+
+    /// The worst-case memory of the responses being sent, in bytes: every connection sending the
+    /// largest descriptor response, every script of every path of its page with a full history.
+    fn responses_memory_bound(&self) -> usize {
+        self.max_connections()
+            .saturating_mul(self.descriptor_limits().max_paths)
+            .saturating_mul(route::MAX_ADDRESSES as usize)
+            .saturating_mul(self.max_txs_seen())
+            .saturating_mul(route::RESPONSE_ENTRY_BYTES)
+    }
+
+    /// See [`Arguments::write_stall_timeout_seconds`].
+    fn write_stall_timeout(&self) -> Duration {
+        Duration::from_secs(
+            self.write_stall_timeout_seconds
+                .unwrap_or(DEFAULT_WRITE_STALL_TIMEOUT_SECONDS),
+        )
+    }
+
     pub fn is_valid(&self) -> Result<(), Error> {
         if self.rpc_user_password_file.is_none() && self.rpc_user_password.is_none() {
             Err(Error::String(
@@ -356,6 +412,22 @@ impl Arguments {
         } else if self.request_timeout_seconds == 0 {
             Err(Error::String(
                 "Request timeout must be greater than 0".to_string(),
+            ))
+        } else if self.max_connections == Some(0) {
+            Err(Error::String(
+                "Max connections must be greater than 0".to_string(),
+            ))
+        } else if self
+            .max_connections
+            .is_some_and(|max| max > Semaphore::MAX_PERMITS)
+        {
+            Err(Error::String(format!(
+                "Max connections must be at most {}",
+                Semaphore::MAX_PERMITS
+            )))
+        } else if self.write_stall_timeout_seconds == Some(0) {
+            Err(Error::String(
+                "Write stall timeout must be greater than 0".to_string(),
             ))
         } else if self.mempool_sleep_between_cycles_ms == Some(0) {
             Err(Error::String(
@@ -532,6 +604,79 @@ mod argument_tests {
     }
 
     #[test]
+    fn max_connections_must_be_non_zero() {
+        let valid = Arguments {
+            rpc_user_password: Some("user:pass".to_string()),
+            request_timeout_seconds: 1,
+            ..Default::default()
+        };
+        assert_eq!(valid.max_connections(), 200);
+
+        let args = Arguments {
+            max_connections: Some(1),
+            ..valid
+        };
+        assert!(args.is_valid().is_ok());
+        assert_eq!(args.max_connections(), 1);
+
+        let args = Arguments {
+            max_connections: Some(Semaphore::MAX_PERMITS),
+            ..args
+        };
+        assert!(args.is_valid().is_ok());
+
+        // the connection semaphores cannot have more permits
+        let args = Arguments {
+            max_connections: Some(Semaphore::MAX_PERMITS + 1),
+            ..args
+        };
+        assert!(args.is_valid().is_err());
+
+        let args = Arguments {
+            max_connections: Some(0),
+            ..args
+        };
+        assert!(args.is_valid().is_err());
+    }
+
+    #[test]
+    fn responses_memory_bound_follows_limits() {
+        // 200 connections x 2 paths x 1000 scripts x 25 entries x 200 bytes
+        assert_eq!(Arguments::default().responses_memory_bound(), 2_000_000_000);
+
+        let args = Arguments {
+            max_connections: Some(10),
+            max_descriptor_paths: Some(1),
+            max_txs_seen: Some(100),
+            ..Default::default()
+        };
+        assert_eq!(args.responses_memory_bound(), 200_000_000);
+    }
+
+    #[test]
+    fn write_stall_timeout_must_be_non_zero() {
+        let valid = Arguments {
+            rpc_user_password: Some("user:pass".to_string()),
+            request_timeout_seconds: 1,
+            ..Default::default()
+        };
+        assert_eq!(valid.write_stall_timeout(), Duration::from_secs(30));
+
+        let args = Arguments {
+            write_stall_timeout_seconds: Some(1),
+            ..valid
+        };
+        assert!(args.is_valid().is_ok());
+        assert_eq!(args.write_stall_timeout(), Duration::from_secs(1));
+
+        let args = Arguments {
+            write_stall_timeout_seconds: Some(0),
+            ..args
+        };
+        assert!(args.is_valid().is_err());
+    }
+
+    #[test]
     fn max_derivations_per_request_follows_path_limit() {
         // A full page of 1000 indexes of a single key descriptor on every path.
         assert_eq!(Arguments::default().max_derivations_per_request(), 2_000);
@@ -673,6 +818,9 @@ pub enum Error {
     /// Blocks kept being indexed while the request was served, so a consistent response could
     /// not be built. Transient: the client should retry.
     BlockchainChanged,
+    /// The public listener is already serving `--max-connections` connections. Transient: the
+    /// client should retry.
+    TooManyConnections,
     /// The node did not answer a request of the handler in time, it may answer 503 while it is
     /// busy or starting. Transient: the client should retry.
     NodeUnavailable,
@@ -765,13 +913,24 @@ pub async fn inner_main(
         .wif_key
         .unwrap_or_else(|| PrivateKey::generate(network_kind));
 
+    log::info!(
+        "worst-case memory of the responses being sent: {} MB ({} connections x {} descriptor \
+         paths x {} scripts x {} entries x {} bytes)",
+        args.responses_memory_bound() / 1_000_000,
+        args.max_connections(),
+        args.descriptor_limits().max_paths,
+        route::MAX_ADDRESSES,
+        args.max_txs_seen(),
+        route::RESPONSE_ENTRY_BYTES,
+    );
+
     let state = Arc::new(State::new(
         store,
         key,
         wif_key,
         StateConfig {
             max_addresses: args.max_addresses,
-            max_txs_seen: args.max_txs_seen.unwrap_or(DEFAULT_MAX_TXS_SEEN),
+            max_txs_seen: args.max_txs_seen(),
             descriptor_limits: args.descriptor_limits(),
             max_derivations_per_request: args.max_derivations_per_request(),
             cache_control_seconds: args.cache_control_seconds,
@@ -935,12 +1094,18 @@ pub async fn inner_main(
         args.max_node_requests(),
         Duration::from_secs(args.request_timeout_seconds),
     ));
+    let connection_limits = Arc::new(ConnectionLimits {
+        header_read_timeout: Duration::from_secs(args.header_read_timeout_seconds),
+        write_stall_timeout: args.write_stall_timeout(),
+        permits: Arc::new(Semaphore::new(args.max_connections())),
+        reject_permits: Arc::new(Semaphore::new(args.max_connections())),
+    });
     loop {
         tokio::select! {
             Ok((stream, peer_addr)) = listener.accept() => {
-                let io = TokioIo::new(stream);
                 let state = state.clone();
                 let client = client.clone();
+                let connection_limits = connection_limits.clone();
                 let header_timeout_aggregation = header_timeout_aggregation.clone();
 
                 tokio::task::spawn(async move {
@@ -949,16 +1114,15 @@ pub async fn inner_main(
                     let add_cors = args.add_cors;
                     // when a dedicated metrics listener is configured, keep metrics off the public one
                     let expose_metrics = args.metrics_listen.is_none();
-                    let header_read_timeout = args.header_read_timeout_seconds;
                     let client = &client;
 
-                    let service = service_fn(move |req| infallible_route(state, client, req, network, add_cors, expose_metrics));
-
-                    let result = http1::Builder::new()
-                        .timer(TokioTimer::new())
-                        .header_read_timeout(Duration::from_secs(header_read_timeout))
-                        .serve_connection(io, service)
-                        .await;
+                    let result = serve_connection(
+                        stream,
+                        &connection_limits,
+                        move |req| infallible_route(state, client, req, network, add_cors, expose_metrics),
+                        move || too_many_connections_resp(add_cors),
+                    )
+                    .await;
 
                     if let Err(err) = result {
                         let msg = format!("{err:?}");
@@ -966,6 +1130,10 @@ pub async fn inner_main(
                             // The client closed the connection before sending a whole request
                             inc_connection_error_counter("incomplete_message");
                             log::debug!("Error serving connection: {msg}");
+                        } else if is_write_stall(&err) {
+                            // The client stopped reading the response
+                            inc_connection_error_counter("write_stall");
+                            log::debug!("Closed connection of {peer_addr}: {msg}");
                         } else if msg.contains("HeaderTimeout") {
                             inc_connection_error_counter("header_timeout");
                             let mut aggregation = header_timeout_aggregation.lock().await;

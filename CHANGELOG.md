@@ -35,6 +35,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--max-descriptor-keys`. The default is `--max-descriptor-paths` times the 1000 indexes
   scanned per path in a page, 2000 with the default paths, so that a full page fits.
 
+- `--write-stall-timeout-seconds` (`WRITE_STALL_TIMEOUT_SECONDS`, default 30) closes a
+  connection of the public listener when a write to the client makes no progress for that
+  long, freeing the response of a client that stopped reading. Progress resets it, so a slow
+  but steady client is not cut off. Such closures are counted by
+  `waterfalls_connection_errors_total{kind="write_stall"}`.
+
+- `--max-connections` (`MAX_CONNECTIONS`, default 200) bounds the connections served at the
+  same time by the public listener. A connection holds its slot until it closes, so this
+  bounds the memory held by responses being sent. A connection over the limit is answered
+  503 `TooManyConnections` with `Retry-After: 1` and closed, counted by
+  `waterfalls_connection_errors_total{kind="max_connections"}`. At most `--max-connections`
+  connections are being answered 503 at the same time, the others are closed without a
+  response, counted by `kind="max_connections_closed"`. A connection streaming a
+  `/v1/subscribe` response gives back its slot, subscriptions are bounded by
+  `--max-active-subscriptions`; the stream response now has `Connection: close`.
+
 ### Changed
 
 - Building needs Rust 1.88 (was 1.85), see `rust-toolchain.toml`.
@@ -42,6 +58,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sign=true`. Without it, the `X-Content-Signature`, `X-Content-Digest` and
   `X-Server-Address` headers are omitted. Signing hashes the whole response, which is costly
   for large ones, and most clients, like LWK, do not check the signature.
+- **Breaking:** `--max-txs-seen` defaults to 25 (was 100), so that the largest descriptor
+  response is about 10 MB of JSON (2 paths x 1000 scripts x 25 entries). Clients follow
+  `has_more` more often, and `utxo_only` returns `UtxoOnlyHistoryTooLarge` for scripts with
+  more than 25 entries. The worst-case memory of the responses being sent,
+  `--max-connections` x `--max-descriptor-paths` x 1000 x `--max-txs-seen` x ~200 bytes, is
+  logged at startup: about 2 GB with the defaults.
+- **Breaking:** mempool entries count toward `--max-txs-seen`. The history of a script is
+  its confirmed entries followed by its mempool entries, paged `--max-txs-seen` at a time:
+  a script whose confirmed and mempool entries together exceed it is listed in `has_more`,
+  and its mempool entries come on the page where the confirmed history ends, also for
+  `addresses=<addr>&page=N` with `N > 0`, which had confirmed entries only. Before, every
+  mempool entry was added to page 0 on top of the cap. `utxo_only` returns
+  `UtxoOnlyHistoryTooLarge` for such a script, and `/address/:address/txs` returns the first
+  page, mempool included.
 - **Breaking:** new databases hash scripts with SipHash-2-4 and a random 128-bit key, instead
   of FxHash with a random 64-bit salt. The script hash cannot change without reindexing, so
   starting on a database created by a previous release fails: point `--db-dir` to an empty
@@ -89,6 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `--max-active-subscriptions` and `--max-scripts-per-subscription` default to 5000 and 2000
+  as intended, they were 100 and 500.
 - `utxo_only` waterfalls responses no longer include outputs spent by a mempool transaction,
   confirmed or not. A client trusting them as unspent, like LWK 0.20, counted those
   outputs in its balance until the spending transaction confirmed.

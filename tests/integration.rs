@@ -159,27 +159,22 @@ async fn integration_addresses_txs_seen_truncation() {
         .any(|tx_seen| tx_seen.txid == expected_txids[4]));
     assert!(txs_page_1.iter().all(|tx_seen| tx_seen.height > 0));
 
+    // The mempool entries follow the confirmed history and count toward the page size: the
+    // mempool tx lands on the last page
     let mempool_txid = test_env.send_to(&addr, 11_000);
 
-    let result_page_0 = timeout(Duration::from_secs(10), async {
+    let result_page_1 = timeout(Duration::from_secs(10), async {
         loop {
             let result = test_env
                 .client()
-                .waterfalls_addresses(&[addr.clone()])
+                .waterfalls_addresses_with_page(&[addr.clone()], 1)
                 .await
                 .unwrap()
                 .0;
-            let txs_page_0 = &result.txs_seen.get("addresses").unwrap()[0];
-            if txs_page_0.len() == 4
-                && txs_page_0
-                    .iter()
-                    .any(|tx_seen| tx_seen.txid == mempool_txid)
-                && txs_page_0
-                    .iter()
-                    .filter(|tx_seen| tx_seen.height == 0)
-                    .map(|tx_seen| tx_seen.txid)
-                    .collect::<Vec<_>>()
-                    == vec![mempool_txid]
+            let txs_page_1 = &result.txs_seen.get("addresses").unwrap()[0];
+            if txs_page_1
+                .iter()
+                .any(|tx_seen| tx_seen.txid == mempool_txid)
             {
                 break result;
             }
@@ -187,52 +182,40 @@ async fn integration_addresses_txs_seen_truncation() {
         }
     })
     .await
-    .expect("timed out waiting for page 0 truncated history with mempool");
-    let txs_page_0 = &result_page_0.txs_seen.get("addresses").unwrap()[0];
+    .expect("timed out waiting for the mempool tx on the last page");
+    let txs_page_1 = &result_page_1.txs_seen.get("addresses").unwrap()[0];
 
-    assert_eq!(txs_page_0.len(), 4);
-    assert_eq!(result_page_0.page, 0);
-    assert_eq!(result_page_0.has_more, Some(vec![addr.to_string()]));
-    assert!(txs_page_0
-        .iter()
-        .any(|tx_seen| tx_seen.txid == expected_txids[0]));
-    assert!(txs_page_0
-        .iter()
-        .any(|tx_seen| tx_seen.txid == expected_txids[1]));
-    assert!(txs_page_0
-        .iter()
-        .any(|tx_seen| tx_seen.txid == mempool_txid));
+    assert_eq!(result_page_1.page, 1);
+    assert_eq!(result_page_1.has_more, None);
     assert_eq!(
-        txs_page_0
+        txs_page_1
             .iter()
-            .filter(|tx_seen| tx_seen.height == 0)
             .map(|tx_seen| tx_seen.txid)
             .collect::<Vec<_>>(),
-        vec![mempool_txid]
+        vec![expected_txids[3], expected_txids[4], mempool_txid]
     );
+    assert_eq!(txs_page_1[2].height, 0);
 
-    let result_page_1 = test_env
+    let result_page_0 = test_env
         .client()
-        .waterfalls_addresses_with_page(&[addr.clone()], 1)
+        .waterfalls_addresses(&[addr.clone()])
         .await
         .unwrap()
         .0;
-    let txs_page_1 = &result_page_1.txs_seen.get("addresses").unwrap()[0];
+    let txs_page_0 = &result_page_0.txs_seen.get("addresses").unwrap()[0];
+    assert_eq!(result_page_0.has_more, Some(vec![addr.to_string()]));
+    assert_eq!(
+        txs_page_0
+            .iter()
+            .map(|tx_seen| tx_seen.txid)
+            .collect::<Vec<_>>(),
+        expected_txids[..3].to_vec()
+    );
 
-    assert_eq!(txs_page_1.len(), 2);
-    assert_eq!(result_page_1.page, 1);
-    assert_eq!(result_page_1.has_more, None);
-    assert!(txs_page_1
-        .iter()
-        .any(|tx_seen| tx_seen.txid == expected_txids[3]));
-    assert!(txs_page_1
-        .iter()
-        .any(|tx_seen| tx_seen.txid == expected_txids[4]));
-    assert!(txs_page_1.iter().all(|tx_seen| tx_seen.height > 0));
-
+    // The esplora endpoint returns the first page only
     let address_txs = test_env.client().address_txs(&addr).await.unwrap();
     let address_txs: serde_json::Value = serde_json::from_str(&address_txs).unwrap();
-    assert_eq!(address_txs.as_array().unwrap().len(), 4);
+    assert_eq!(address_txs.as_array().unwrap().len(), 3);
 
     let err = test_env
         .client()

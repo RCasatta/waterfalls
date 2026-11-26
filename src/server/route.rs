@@ -29,6 +29,7 @@ use std::{
 use tokio::time::Interval;
 
 use super::{
+    connection::SubscriptionStream,
     encryption,
     sign::MsgSigAddress,
     subscription::{SubscriptionError, SubscriptionEvent, SubscriptionId, SubscriptionReceiver},
@@ -51,6 +52,12 @@ const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 50;
 /// Derivation indexes scanned per path in a page of a descriptor request
 pub(crate) const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
+/// Above this many `TxSeen` entries, about 2 MB of JSON, a waterfalls response is encoded and
+/// signed on the blocking pool, see [`encode_waterfalls`]
+const LARGE_RESPONSE_ENTRIES: usize = 10_000;
+/// Approximate size of a `TxSeen` entry in a JSON waterfalls response, to estimate the memory
+/// of the responses
+pub(crate) const RESPONSE_ENTRY_BYTES: usize = 200;
 const MAX_ADDRESS_LENGTH: usize = 100; // max characters for an address (excessive to be conservative)
 const MAX_TX_BODY_SIZE: usize = 1024 * 1024; // 1MB limit for transaction broadcast body
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30); // timeout for reading request body
@@ -682,7 +689,7 @@ fn error_resp(status: StatusCode, error: &Error) -> Resp {
     let mut response = Response::new(full_body(error.to_string().into_bytes()));
     *response.status_mut() = status;
     let retry_after = match error {
-        Error::BlockchainChanged | Error::NodeUnavailable => {
+        Error::BlockchainChanged | Error::NodeUnavailable | Error::TooManyConnections => {
             Some(BLOCKCHAIN_CHANGED_RETRY_AFTER_SECONDS)
         }
         Error::Subscription(SubscriptionError::TooManySubscriptions) => {
@@ -726,7 +733,9 @@ fn error_status(error: &Error) -> StatusCode {
         }
         Error::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         Error::BodyReadTimeout => StatusCode::REQUEST_TIMEOUT,
-        Error::BlockchainChanged | Error::NodeUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+        Error::BlockchainChanged | Error::NodeUnavailable | Error::TooManyConnections => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -749,40 +758,21 @@ async fn handle_single_address(state: &Arc<State>, address: &be::Address) -> Res
     let script_hash = [state.store.hash(script_pubkey.as_bytes())];
     // Read in a block snapshot, so that every confirmed entry has its block hash.
     let result = with_block_snapshot(state, || async move {
-        // The mempool is read before the db, see `find_scripts`.
-        let mut seen_mempool = vec![Vec::new()];
-        state
-            .mempool
-            .lock()
-            .await
-            .append_seen(&script_hash, &mut seen_mempool);
-        let mut seen_blockchain = state
-            .store_blocking(move |db| db.get_history(&script_hash))
-            .await?;
         // TODO add pagination for `/address/:address/txs`; for now we only return the first capped page.
-        truncate_history_page(&mut seen_blockchain, 0, state.max_txs_seen);
-        remove_confirmed_from_mempool(&seen_blockchain, &mut seen_mempool);
-        let mut result: Vec<_> = seen_blockchain
+        let mut seen = Vec::with_capacity(1);
+        find_scripts(state, &mut seen, script_hash.to_vec(), 0).await?;
+        let mut result: Vec<_> = seen
             .into_iter()
-            .next()
-            .unwrap_or_default()
-            .iter()
+            .flatten()
             .map(|e| EsploraTx {
                 txid: e.txid,
                 status: Status {
-                    block_height: Some(e.height as i32),
+                    // the mempool entries have height 0
+                    block_height: Some(if e.height == 0 { -1 } else { e.height as i32 }),
                     block_hash: None,
                 },
             })
             .collect();
-
-        result.extend(seen_mempool.iter().flatten().map(|tx_seen| EsploraTx {
-            txid: tx_seen.txid,
-            status: Status {
-                block_height: Some(-1),
-                block_hash: None,
-            },
-        }));
 
         {
             let blocks_hash_ts = state.blocks_hash_ts.lock().await;
@@ -870,6 +860,7 @@ async fn handle_waterfalls_req(
     } = with_block_snapshot(state, || scan_waterfalls(state, &inputs, with_tip, network)).await?;
 
     let elements: usize = map.values().map(|v| v.len()).sum();
+    let entries: usize = map.values().flatten().map(|v| v.len()).sum();
 
     let waterfall_response = WaterfallResponse {
         txs_seen: map,
@@ -887,18 +878,7 @@ async fn handle_waterfalls_req(
     } else {
         "application/json"
     };
-    let result = if cbor {
-        let mut bytes = Vec::new();
-        minicbor::encode(&waterfall_response, &mut bytes).expect("writing to a Vec cannot fail");
-        bytes
-    } else {
-        serde_json::to_vec(&waterfall_response)
-            .expect("does not contain a map with non-string keys")
-    };
-
-    let m = sign.then(|| {
-        sign_response(&state.secp, &state.wif_key, &result).to_msg_sig_address(state.address())
-    });
+    let (result, m) = encode_waterfalls(state, waterfall_response, entries, cbor, sign).await?;
 
     log::info!(
         "{id:x}: {elements} elements, elapsed: {:.2?} ({:.2?} derivations)",
@@ -919,6 +899,53 @@ async fn handle_waterfalls_req(
         add_server_timing_header(&mut response, start.elapsed())?;
     }
     Ok(response)
+}
+
+/// Encodes `response` in CBOR or JSON, and signs it if `sign`.
+///
+/// A response with more than [`LARGE_RESPONSE_ENTRIES`] entries takes milliseconds to encode
+/// and sign, which would keep an async worker from serving the other requests meanwhile: it is
+/// done on the blocking pool. Smaller responses are encoded inline, where the thread hop costs
+/// more than it saves.
+///
+/// If the request is dropped meanwhile, for example because the client disconnected, the
+/// blocking task still runs to the end, a few milliseconds.
+async fn encode_waterfalls(
+    state: &Arc<State>,
+    response: WaterfallResponse,
+    entries: usize,
+    cbor: bool,
+    sign: bool,
+) -> Result<(Vec<u8>, Option<MsgSigAddress>), Error> {
+    if entries <= LARGE_RESPONSE_ENTRIES {
+        return Ok(encode_and_sign(state, &response, cbor, sign));
+    }
+    let state = Arc::clone(state);
+    tokio::task::spawn_blocking(move || encode_and_sign(&state, &response, cbor, sign))
+        .await
+        .map_err(|e| {
+            log::error!("encoding task failed: {e}");
+            Error::String(format!("encoding task failed: {e}"))
+        })
+}
+
+fn encode_and_sign(
+    state: &State,
+    response: &WaterfallResponse,
+    cbor: bool,
+    sign: bool,
+) -> (Vec<u8>, Option<MsgSigAddress>) {
+    let result = if cbor {
+        let mut bytes = Vec::new();
+        minicbor::encode(response, &mut bytes).expect("writing to a Vec cannot fail");
+        bytes
+    } else {
+        serde_json::to_vec(response).expect("does not contain a map with non-string keys")
+    };
+    let m = sign.then(|| {
+        sign_response(&state.secp, &state.wif_key, &result).to_msg_sig_address(state.address())
+    });
+    (result, m)
 }
 
 /// Reads the history, the tip and the block hashes needed by a waterfalls response.
@@ -964,7 +991,7 @@ async fn scan_waterfalls(
                     .await?;
                     derivations_duration += batch_derivations_duration;
 
-                    let find_result = find_scripts(state, &mut result, scripts, 0, true).await?;
+                    let find_result = find_scripts(state, &mut result, scripts, 0).await?;
                     let max_used_index = find_result
                         .max_used_offset
                         .map(|offset| batch_start + offset);
@@ -1021,9 +1048,7 @@ async fn scan_waterfalls(
             } else {
                 0
             };
-            let append_mempool = page == 0;
-            let find_result =
-                find_scripts(state, &mut result, scripts, page, append_mempool).await?;
+            let find_result = find_scripts(state, &mut result, scripts, page).await?;
             if utxo_only && find_result.has_more.iter().any(|has_more| *has_more) {
                 return Err(Error::UtxoOnlyHistoryTooLarge);
             }
@@ -1408,7 +1433,7 @@ async fn scan_descriptor_max_used_index(
             derive_script_hashes_batch(state, desc, batch_start, GAP_LIMIT, budget).await?;
 
         let mut result = Vec::with_capacity(GAP_LIMIT as usize);
-        let find_result = find_scripts(state, &mut result, scripts, 0, true).await?;
+        let find_result = find_scripts(state, &mut result, scripts, 0).await?;
         if let Some(max_used_offset) = find_result.max_used_offset {
             max_used_index = Some(batch_start + max_used_offset);
         }
@@ -1458,6 +1483,9 @@ fn sse_resp(
         .header(CONTENT_TYPE, "text/event-stream")
         .header(CACHE_CONTROL, "no-cache")
         .header("X-Accel-Buffering", "no")
+        // the connection gave back its permit, see `SubscriptionStream`
+        .header(header::CONNECTION, "close")
+        .extension(SubscriptionStream)
         .body(body)
         .map_err(|_| Error::Other)
 }
@@ -1572,32 +1600,26 @@ async fn find_scripts(
     result: &mut Vec<Vec<TxSeen>>,
     scripts: Vec<u64>,
     address_history_page: usize,
-    append_mempool: bool,
 ) -> Result<FindScriptsResult, Error> {
     // The mempool is read before the db: the blocks thread removes txs from the mempool after
     // indexing the block confirming them, so a tx missing from this mempool read because it was
     // just confirmed is found in the db read that follows.
     let mut seen_mempool = vec![Vec::new(); scripts.len()];
-    if append_mempool {
-        state
-            .mempool
-            .lock()
-            .await
-            .append_seen(&scripts, &mut seen_mempool);
-    }
-    let mut seen_blockchain = state
+    state
+        .mempool
+        .lock()
+        .await
+        .append_seen(&scripts, &mut seen_mempool);
+    let seen_blockchain = state
         .store_blocking(move |db| db.get_history(&scripts))
         .await?;
-    let has_more = truncate_history_page(
-        &mut seen_blockchain,
+    let (seen, has_more) = history_page(
+        seen_blockchain,
+        seen_mempool,
         address_history_page,
         state.max_txs_seen,
     );
-    remove_confirmed_from_mempool(&seen_blockchain, &mut seen_mempool);
-    for (txs_seen, mempool_txs_seen) in seen_blockchain.iter_mut().zip(seen_mempool) {
-        txs_seen.extend(mempool_txs_seen);
-    }
-    let max_used_offset = seen_blockchain
+    let max_used_offset = seen
         .iter()
         .enumerate()
         .filter_map(|(index, txs_seen)| {
@@ -1608,8 +1630,8 @@ async fn find_scripts(
             }
         })
         .max();
-    let is_last = seen_blockchain.iter().all(|e| e.is_empty());
-    result.extend(seen_blockchain);
+    let is_last = seen.iter().all(|e| e.is_empty());
+    result.extend(seen);
     Ok(FindScriptsResult {
         is_last,
         has_more,
@@ -1617,44 +1639,47 @@ async fn find_scripts(
     })
 }
 
-/// Removes from `seen_mempool` the txs also in `seen_blockchain` for the same script.
+/// The page `page` of the history of each script, and whether the script has entries after it.
 ///
-/// Since the mempool is read before the db, a tx confirmed in between is in both.
+/// The history of a script is its confirmed entries followed by its mempool entries, so that a
+/// page has at most `max_txs_seen` entries, mempool included, and the mempool entries come on
+/// the page where the confirmed history ends.
 ///
-/// Callers pass the history already truncated to the requested page, so a tx confirmed in
-/// between whose entry falls past the page is still reported unconfirmed, in that one response.
-/// This needs a script with more than a page of history and a block indexed between the two
-/// reads, while filtering against the full history would hash it on every such request.
-fn remove_confirmed_from_mempool(
-    seen_blockchain: &[Vec<TxSeen>],
-    seen_mempool: &mut [Vec<TxSeen>],
-) {
-    for (confirmed, mempool) in seen_blockchain.iter().zip(seen_mempool.iter_mut()) {
-        if !mempool.is_empty() && !confirmed.is_empty() {
-            let confirmed: HashSet<_> = confirmed.iter().map(|tx_seen| tx_seen.txid).collect();
-            mempool.retain(|tx_seen| !confirmed.contains(&tx_seen.txid));
-        }
-    }
-}
-
-fn truncate_history_page(
-    result: &mut [Vec<TxSeen>],
+/// Since the mempool is read before the db, a tx confirmed in between is in both: it is removed
+/// from the mempool entries of the script.
+fn history_page(
+    seen_blockchain: Vec<Vec<TxSeen>>,
+    seen_mempool: Vec<Vec<TxSeen>>,
     page: usize,
     max_txs_seen: usize,
-) -> Vec<bool> {
+) -> (Vec<Vec<TxSeen>>, Vec<bool>) {
     let start = page.saturating_mul(max_txs_seen);
     let end = start.saturating_add(max_txs_seen);
-    let mut has_more = Vec::with_capacity(result.len());
+    let mut has_more = Vec::with_capacity(seen_blockchain.len());
+    let mut result = Vec::with_capacity(seen_blockchain.len());
 
-    for txs_seen in result.iter_mut() {
-        has_more.push(txs_seen.len() > end);
-        *txs_seen = txs_seen
-            .get(start..txs_seen.len().min(end))
-            .unwrap_or(&[])
-            .to_vec();
+    for (confirmed, mut mempool) in seen_blockchain.into_iter().zip(seen_mempool) {
+        if !mempool.is_empty() && !confirmed.is_empty() {
+            let mempool_txids: HashSet<_> = mempool.iter().map(|tx_seen| tx_seen.txid).collect();
+            let confirmed_txids: HashSet<_> = confirmed
+                .iter()
+                .map(|tx_seen| tx_seen.txid)
+                .filter(|txid| mempool_txids.contains(txid))
+                .collect();
+            mempool.retain(|tx_seen| !confirmed_txids.contains(&tx_seen.txid));
+        }
+        has_more.push(confirmed.len().saturating_add(mempool.len()) > end);
+        result.push(
+            confirmed
+                .into_iter()
+                .chain(mempool)
+                .skip(start)
+                .take(max_txs_seen)
+                .collect(),
+        );
     }
 
-    has_more
+    (result, has_more)
 }
 
 /// Everything a waterfalls response needs, read from the same indexed blocks
@@ -1779,26 +1804,8 @@ pub async fn infallible_route(
         Err(e) => error_resp(error_status(&e), &e),
     };
 
-    // Add CORS headers if enabled
     if add_cors {
-        let headers = response.headers_mut();
-        headers.insert(
-            header::ACCESS_CONTROL_ALLOW_ORIGIN,
-            header::HeaderValue::from_static("*"),
-        );
-        headers.insert(
-            header::ACCESS_CONTROL_ALLOW_METHODS,
-            header::HeaderValue::from_static("GET, HEAD, POST, OPTIONS"),
-        );
-        headers.insert(
-            header::ACCESS_CONTROL_ALLOW_HEADERS,
-            header::HeaderValue::from_static("Content-Type"),
-        );
-        // Let browser clients read when to retry a 503
-        headers.insert(
-            header::ACCESS_CONTROL_EXPOSE_HEADERS,
-            header::HeaderValue::from_static("Retry-After"),
-        );
+        add_cors_headers(&mut response);
     }
 
     if is_head {
@@ -1806,6 +1813,42 @@ pub async fn infallible_route(
     }
 
     Ok(response)
+}
+
+/// The response to the requests of a connection over `--max-connections`, it closes the
+/// connection.
+pub fn too_many_connections_resp(add_cors: bool) -> Resp {
+    let error = Error::TooManyConnections;
+    let mut response = error_resp(error_status(&error), &error);
+    response.headers_mut().insert(
+        header::CONNECTION,
+        header::HeaderValue::from_static("close"),
+    );
+    if add_cors {
+        add_cors_headers(&mut response);
+    }
+    response
+}
+
+fn add_cors_headers(response: &mut Resp) {
+    let headers = response.headers_mut();
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        header::HeaderValue::from_static("*"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        header::HeaderValue::from_static("GET, HEAD, POST, OPTIONS"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        header::HeaderValue::from_static("Content-Type"),
+    );
+    // Let browser clients read when to retry a 503
+    headers.insert(
+        header::ACCESS_CONTROL_EXPOSE_HEADERS,
+        header::HeaderValue::from_static("Retry-After"),
+    );
 }
 
 /// Encode all registered prometheus metrics in the text exposition format.
@@ -2273,37 +2316,55 @@ mod tests {
     }
 
     #[test]
-    fn test_truncate_history_page() {
-        let txid = crate::be::Txid::all_zeros();
-        let mut history = vec![
+    fn test_history_page() {
+        let txid = |n: u8| crate::be::Txid::from_str(&format!("{n:064x}")).unwrap();
+        let heights = |page: &[TxSeen]| page.iter().map(|tx| tx.height).collect::<Vec<_>>();
+        let confirmed = vec![
             vec![
-                TxSeen::new(txid, 1, V::Undefined),
-                TxSeen::new(txid, 2, V::Undefined),
-                TxSeen::new(txid, 3, V::Undefined),
+                TxSeen::new(txid(1), 1, V::Undefined),
+                TxSeen::new(txid(2), 2, V::Undefined),
+                TxSeen::new(txid(3), 3, V::Undefined),
             ],
-            vec![TxSeen::new(txid, 10, V::Undefined)],
+            vec![TxSeen::new(txid(10), 10, V::Undefined)],
         ];
 
-        truncate_history_page(&mut history, 0, 2);
-        assert_eq!(
-            history[0].iter().map(|tx| tx.height).collect::<Vec<_>>(),
-            vec![1, 2]
-        );
-        assert_eq!(
-            history[1].iter().map(|tx| tx.height).collect::<Vec<_>>(),
-            vec![10]
-        );
+        let (page, has_more) = history_page(confirmed.clone(), vec![vec![], vec![]], 0, 2);
+        assert_eq!(heights(&page[0]), vec![1, 2]);
+        assert_eq!(heights(&page[1]), vec![10]);
+        assert_eq!(has_more, vec![true, false]);
 
-        let mut history = vec![vec![
-            TxSeen::new(txid, 1, V::Undefined),
-            TxSeen::new(txid, 2, V::Undefined),
-            TxSeen::new(txid, 3, V::Undefined),
-        ]];
-        truncate_history_page(&mut history, 1, 2);
-        assert_eq!(
-            history[0].iter().map(|tx| tx.height).collect::<Vec<_>>(),
-            vec![3]
-        );
+        let (page, has_more) = history_page(confirmed.clone(), vec![vec![], vec![]], 1, 2);
+        assert_eq!(heights(&page[0]), vec![3]);
+        assert!(page[1].is_empty());
+        assert_eq!(has_more, vec![false, false]);
+
+        // The mempool entries follow the confirmed ones and count toward the page size; the
+        // mempool entry of a tx confirmed in between the two reads is dropped
+        let mempool = vec![
+            vec![
+                TxSeen::mempool(txid(4), V::Undefined),
+                TxSeen::mempool(txid(5), V::Undefined),
+            ],
+            vec![
+                TxSeen::mempool(txid(10), V::Undefined),
+                TxSeen::mempool(txid(11), V::Undefined),
+            ],
+        ];
+        let (page, has_more) = history_page(confirmed.clone(), mempool.clone(), 0, 2);
+        assert_eq!(heights(&page[0]), vec![1, 2]);
+        assert_eq!(heights(&page[1]), vec![10, 0]);
+        assert_eq!(page[1][1].txid, txid(11));
+        assert_eq!(has_more, vec![true, false]);
+
+        let (page, has_more) = history_page(confirmed.clone(), mempool.clone(), 1, 2);
+        assert_eq!(heights(&page[0]), vec![3, 0]);
+        assert_eq!(page[0][1].txid, txid(4));
+        assert_eq!(has_more, vec![true, false]);
+
+        let (page, has_more) = history_page(confirmed, mempool, 2, 2);
+        assert_eq!(page[0].len(), 1);
+        assert_eq!(page[0][0].txid, txid(5));
+        assert_eq!(has_more, vec![false, false]);
     }
 
     /// Store access must not run on the async runtime (#53): while a store read is stuck, other
@@ -3025,6 +3086,169 @@ mod tests {
         );
     }
 
+    const PAGED_ADDRESS: &str = "ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh";
+
+    /// A state with `max_txs_seen`, where `PAGED_ADDRESS` received `confirmed` confirmed txs and
+    /// `unconfirmed` mempool txs. Returns the state and the txids, oldest first.
+    async fn state_with_paged_history(
+        max_txs_seen: usize,
+        confirmed: u8,
+        unconfirmed: u8,
+    ) -> (Arc<State>, Vec<crate::be::Txid>) {
+        let state = Arc::new(route_test_state_with_limits(100, 100, max_txs_seen));
+        let address = be::Address::from_str(PAGED_ADDRESS, Network::Liquid).unwrap();
+        let script_hash = state.store.hash(address.script_pubkey().as_bytes());
+        let txid = |n: u8| crate::be::Txid::from_str(&format!("{n:064x}")).unwrap();
+
+        let txids: Vec<_> = (1..=confirmed + unconfirmed).map(txid).collect();
+        let (confirmed_txids, mempool_txids) = txids.split_at(confirmed as usize);
+        for (height, txid) in (1..).zip(confirmed_txids) {
+            let block_hash = BlockHash::from_str(&format!("{height:064x}")).unwrap();
+            let history =
+                BTreeMap::from([(script_hash, vec![TxSeen::new(*txid, height, V::Vout(0))])]);
+            let utxos = BTreeMap::from([(crate::OutPoint::new(*txid, 0), script_hash)]);
+            state
+                .store
+                .update(
+                    &crate::store::BlockMeta::new(height, block_hash, 0),
+                    vec![],
+                    history,
+                    utxos,
+                )
+                .unwrap();
+        }
+        let txs: Vec<_> = mempool_txids
+            .iter()
+            .map(|txid| (*txid, be::MempoolTx::from_parts(vec![], vec![script_hash])))
+            .collect();
+        let txs: Vec<_> = txs.iter().map(|(txid, tx)| (*txid, tx)).collect();
+        state.mempool.lock().await.update(&[], &txs, &[]);
+        (state, txids)
+    }
+
+    /// Scans `PAGED_ADDRESS`, returns its txids and the `has_more` of the response
+    async fn scan_paged_address(
+        state: &Arc<State>,
+        page: u16,
+        utxo_only: bool,
+    ) -> Result<(Vec<crate::be::Txid>, Vec<String>), Error> {
+        let query = format!("addresses={PAGED_ADDRESS}&page={page}&utxo_only={utxo_only}");
+        let inputs = parse_query(
+            &query,
+            &state.key,
+            false,
+            state.max_addresses,
+            Network::Liquid,
+        )?;
+        let scan = scan_waterfalls(state, &inputs, WithTip::No, Network::Liquid).await?;
+        let txids = scan.map["addresses"][0]
+            .iter()
+            .map(|tx_seen| tx_seen.txid)
+            .collect();
+        Ok((txids, scan.has_more))
+    }
+
+    /// The mempool entries of a script count toward `--max-txs-seen`: a script over it with
+    /// them is listed in `has_more`, and the next address page returns the rest.
+    #[tokio::test]
+    async fn mempool_entries_count_toward_history_cap() {
+        let (state, txids) = state_with_paged_history(4, 2, 3).await;
+
+        let (page_0, has_more) = scan_paged_address(&state, 0, false).await.unwrap();
+        assert_eq!(page_0, txids[..4]);
+        assert_eq!(has_more, vec![PAGED_ADDRESS.to_string()]);
+
+        let (page_1, has_more) = scan_paged_address(&state, 1, false).await.unwrap();
+        assert_eq!(page_1, txids[4..]);
+        assert!(has_more.is_empty());
+
+        // `/address/:address/txs` returns the first page, mempool included
+        let address = be::Address::from_str(PAGED_ADDRESS, Network::Liquid).unwrap();
+        let response = handle_single_address(&state, &address).await.unwrap();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let heights: Vec<_> = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tx| tx["status"]["block_height"].as_i64().unwrap())
+            .collect();
+        assert_eq!(heights, vec![1, 2, -1, -1]);
+    }
+
+    /// `utxo_only` refuses a script whose history, mempool included, exceeds the default
+    /// `--max-txs-seen`.
+    #[tokio::test]
+    async fn utxo_only_counts_mempool_entries() {
+        let max_txs_seen = super::super::DEFAULT_MAX_TXS_SEEN;
+        assert_eq!(max_txs_seen, 25);
+
+        let (state, txids) = state_with_paged_history(max_txs_seen, 20, 5).await;
+        let (utxos, has_more) = scan_paged_address(&state, 0, true).await.unwrap();
+        assert_eq!(utxos, txids);
+        assert!(has_more.is_empty());
+
+        let (state, _) = state_with_paged_history(max_txs_seen, 20, 6).await;
+        let err = scan_paged_address(&state, 0, true).await.unwrap_err();
+        assert_eq!(err, Error::UtxoOnlyHistoryTooLarge);
+    }
+
+    /// A large response is encoded and signed on the blocking pool, with the same result as
+    /// inline.
+    #[tokio::test]
+    async fn large_response_encoded_off_runtime() {
+        let state = Arc::new(route_test_state());
+        let txid = crate::be::Txid::all_zeros();
+        let scripts = vec![vec![TxSeen::new(txid, 1, V::Undefined); 100]; 101];
+        let entries = 100 * 101;
+        assert!(entries > LARGE_RESPONSE_ENTRIES);
+        let response = || WaterfallResponse {
+            txs_seen: BTreeMap::from([("addresses".to_string(), scripts.clone())]),
+            page: 0,
+            tip: None,
+            tip_meta: None,
+            has_more: None,
+        };
+
+        for cbor in [false, true] {
+            let (inline, _) = encode_and_sign(&state, &response(), cbor, false);
+            let (bytes, m) = encode_waterfalls(&state, response(), entries, cbor, true)
+                .await
+                .unwrap();
+            assert_eq!(bytes, inline);
+            let m = m.expect("signed when asked");
+            let expected = sign_response(&state.secp, &state.wif_key, &inline);
+            assert_eq!(
+                m.signature,
+                expected.to_msg_sig_address(state.address()).signature
+            );
+        }
+    }
+
+    /// The subscription stream is marked to give back the connection permit, and closes the
+    /// connection.
+    #[tokio::test]
+    async fn subscription_response_gives_back_connection() {
+        let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
+        let state = Arc::new(route_test_state());
+        let response = handle_subscribe_req(&state, desc).await.unwrap();
+        assert!(response.extensions().get::<SubscriptionStream>().is_some());
+        assert_eq!(response.headers()[header::CONNECTION], "close");
+    }
+
+    #[test]
+    fn too_many_connections_response() {
+        let response = too_many_connections_resp(true);
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[header::RETRY_AFTER], "1");
+        assert_eq!(response.headers()[header::CONNECTION], "close");
+        assert_eq!(
+            response.headers()[header::ACCESS_CONTROL_EXPOSE_HEADERS],
+            "Retry-After"
+        );
+        assert!(response.extensions().get::<SubscriptionStream>().is_none());
+    }
+
     /// A node answering 503 for ever does not hold the permits of the handlers: the requests
     /// give up after the deadline with a 503, even when they have to wait for a permit.
     #[tokio::test]
@@ -3125,13 +3349,21 @@ mod tests {
         max_active_subscriptions: usize,
         max_scripts_per_subscription: usize,
     ) -> State {
+        route_test_state_with_limits(max_active_subscriptions, max_scripts_per_subscription, 100)
+    }
+
+    fn route_test_state_with_limits(
+        max_active_subscriptions: usize,
+        max_scripts_per_subscription: usize,
+        max_txs_seen: usize,
+    ) -> State {
         State::new(
             crate::store::AnyStore::Mem(crate::store::memory::MemoryStore::new()),
             Identity::generate(),
             bitcoin::PrivateKey::generate(bitcoin::NetworkKind::Test),
             crate::server::StateConfig {
                 max_addresses: 100,
-                max_txs_seen: 100,
+                max_txs_seen,
                 descriptor_limits: Default::default(),
                 max_derivations_per_request: 1_000,
                 cache_control_seconds: 5,

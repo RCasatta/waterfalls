@@ -4,6 +4,8 @@ use crate::{be, OutPoint, ScriptHash, TxSeen, V};
 
 pub struct Mempool {
     txid_hashes: HashMap<crate::be::Txid, HashSet<ScriptHash>>,
+    /// The entries of each script, in the order the txs were added: the history pages put them
+    /// after the confirmed entries, so their order must be the same across requests.
     hash_txids: HashMap<ScriptHash, Vec<(crate::be::Txid, i32)>>,
     outpoints_created: HashMap<OutPoint, ScriptHash>,
     /// The outpoints spent by mempool transactions, with the spending transaction
@@ -95,8 +97,6 @@ impl Mempool {
         // be fetched from the db or from the mempool itself
         let mut txid_hashes: HashMap<crate::be::Txid, HashSet<ScriptHash>> =
             HashMap::with_capacity(txs.len());
-        let mut txid_script_positions: HashMap<crate::be::Txid, Vec<(ScriptHash, i32)>> =
-            HashMap::with_capacity(txs.len());
 
         debug_assert_eq!(
             spending_script_hashes.len(),
@@ -122,20 +122,20 @@ impl Mempool {
 
                 txid_hashes.entry(*txid).or_default().insert(e);
                 // Negative position for inputs: -(vin + 1)
-                txid_script_positions
-                    .entry(*txid)
+                self.hash_txids
+                    .entry(e)
                     .or_default()
-                    .push((e, -(vin as i32) - 1));
+                    .push((*txid, -(vin as i32) - 1));
             }
 
             for (vout, script_hash) in tx.output_script_hashes_iter().enumerate() {
                 let e = script_hash;
                 txid_hashes.entry(*txid).or_default().insert(e);
                 // Positive position for outputs: vout + 1
-                txid_script_positions
-                    .entry(*txid)
+                self.hash_txids
+                    .entry(e)
                     .or_default()
-                    .push((e, vout as i32 + 1));
+                    .push((*txid, vout as i32 + 1));
             }
         }
 
@@ -143,16 +143,6 @@ impl Mempool {
         for (k, v) in txid_hashes {
             changed.extend(v.iter().copied());
             self.txid_hashes.entry(k).or_default().extend(&v);
-        }
-
-        // Add position information to hash_txids
-        for (txid, script_positions) in txid_script_positions {
-            for (script_hash, position) in script_positions {
-                self.hash_txids
-                    .entry(script_hash)
-                    .or_default()
-                    .push((txid, position));
-            }
         }
 
         changed
@@ -213,6 +203,27 @@ mod test {
 
     fn txid(n: u8) -> crate::be::Txid {
         crate::be::Txid::from_str(&format!("{n:064x}")).unwrap()
+    }
+
+    #[test]
+    fn mempool_entries_keep_insertion_order() {
+        let txs: Vec<_> = (1..=20)
+            .map(|n| (txid(n), be::MempoolTx::from_parts(vec![], vec![7, 7])))
+            .collect();
+        let txs: Vec<_> = txs.iter().map(|(txid, tx)| (*txid, tx)).collect();
+        let mut mempool = Mempool::new();
+        mempool.update(&[], &txs[..10], &[]);
+        mempool.update(&[], &txs[10..], &[]);
+        mempool.update(&[txid(3)], &[], &[]);
+
+        let mut seen = vec![Vec::new()];
+        mempool.append_seen(&[7], &mut seen);
+        let expected: Vec<_> = (1..=20)
+            .filter(|n| *n != 3)
+            .flat_map(|n| [(txid(n), 1), (txid(n), 2)])
+            .collect();
+        let seen: Vec<_> = seen[0].iter().map(|e| (e.txid, e.v.raw())).collect();
+        assert_eq!(seen, expected);
     }
 
     #[test]

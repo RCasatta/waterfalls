@@ -46,17 +46,18 @@ GET /v2/waterfalls.cbor?<query_params>
 - `to_index` (integer, optional): Maximum derivation index for descriptors (default: 0)
 
 - `utxo_only` (boolean, optional): Return only unspent outputs (default: false)
-  - If any requested script has more history than the server-side truncation threshold, the request returns `400 UtxoOnlyHistoryTooLarge`
+  - If any requested script has more history than the server-side truncation threshold, mempool entries included, the request returns `400 UtxoOnlyHistoryTooLarge`
 
 - `sign` (boolean, optional): Sign the response with the server key (default: false), see [Message Signing](#security-features)
 
 **History truncation:**
 
-- To avoid unbounded responses on highly reused addresses, Waterfalls caps the number of confirmed `TxSeen` entries returned for a single script pubkey
-- The server-side cap is configurable with `--max-txs-seen` (or `MAX_TXS_SEEN`) and defaults to `100`
+- To avoid unbounded responses on highly reused addresses, Waterfalls caps the number of `TxSeen` entries returned for a single script pubkey, mempool entries included
+- The server-side cap is configurable with `--max-txs-seen` (or `MAX_TXS_SEEN`) and defaults to `25`
 - Truncation is applied independently to each script/address result
-- For `addresses=<single_address>`, clients can continue the confirmed history by increasing `page`
-- Mempool entries are included on page `0`; subsequent pages contain only confirmed history
+- The history of a script is its confirmed entries, oldest first, followed by its mempool entries, in the order the server saw them; a page has at most `--max-txs-seen` entries of it
+- For `addresses=<single_address>`, clients can continue the history by increasing `page`
+- Mempool entries come on the page where the confirmed history ends, which is not page `0` when the confirmed history alone fills it
 - Descriptor responses do not page the history of a single derived address; instead, `has_more` lists the concrete derived addresses whose history was truncated so the client can continue via the `addresses` endpoint
 - For descriptor-derived scripts that do not have an address representation (for example bare scripts), `has_more` contains a sentinel string of the form `non_address_script:<derivation_index>`
 
@@ -85,7 +86,7 @@ GET /v2/waterfalls.cbor?<query_params>
 **Response fields:**
 
 - `txs_seen`: Transaction history grouped by descriptor key or by the literal `"addresses"` key
-- `has_more` (array of strings, optional): Usually concrete addresses whose confirmed history was truncated on this response page. For descriptor-derived scripts without an address form, entries use the sentinel format `non_address_script:<derivation_index>`
+- `has_more` (array of strings, optional): Usually concrete addresses whose history, mempool entries included, was truncated on this response page. For descriptor-derived scripts without an address form, entries use the sentinel format `non_address_script:<derivation_index>`
 - `page`: Echoes the requested page
 - `tip`: Current tip block hash
 
@@ -477,7 +478,7 @@ The API returns appropriate HTTP status codes:
 - `404 Not Found`: Resource not found (block, transaction, endpoint)
 - `422 Unprocessable Entity`: Decryption failure (wrong identity used for encrypted descriptor)
 - `500 Internal Server Error`: Server error
-- `503 Service Unavailable`: The server cannot serve the request now (blocks are being indexed, or the maximum of active subscriptions is reached)
+- `503 Service Unavailable`: The server cannot serve the request now (blocks are being indexed, the maximum of connections or of active subscriptions is reached)
 
 Common error conditions:
 - `AtLeastOneFieldMandatory`: Neither descriptor nor addresses provided
@@ -490,6 +491,7 @@ Common error conditions:
 - `InvalidDescriptor`: Malformed descriptor, or one over the [descriptor limits](#descriptor-limits)
 - `TooManyDerivations`: The descriptor request needs to derive more indexes than the server allows, see [descriptor limits](#descriptor-limits)
 - `TooManyScripts` (400): The subscription would watch more scripts than the server allows, see the watched range of [Descriptor Subscription](#descriptor-subscription)
+- `TooManyConnections` (503): The server is already serving its maximum number of connections (`--max-connections`), retry later, with `Retry-After: 1`. The connection is closed after this response. Under heavier overload, a connection may be closed without any response. An open subscription stream does not count toward this limit
 - `TooManySubscriptions` (503): The server already has its maximum number of active subscriptions, retry later, with `Retry-After: 10`
 - `InvalidAddress`: Malformed address
 - `InvalidTx`: Malformed transaction in the `POST /tx` body (not valid UTF-8 or hex, or not a transaction)
