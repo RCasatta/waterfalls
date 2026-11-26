@@ -41,6 +41,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but steady client is not cut off. Such closures are counted by
   `waterfalls_connection_errors_total{kind="write_stall"}`.
 
+- `--max-connections` (`MAX_CONNECTIONS`, default 200) bounds the connections served at the
+  same time by the public listener. A connection holds its slot until it closes, so this
+  bounds the memory held by responses being sent. A connection over the limit is answered
+  503 `TooManyConnections` with `Retry-After: 1` and closed, counted by
+  `waterfalls_connection_errors_total{kind="max_connections"}`. At most `--max-connections`
+  connections are being answered 503 at the same time, the others are closed without a
+  response, counted by `kind="max_connections_closed"`. A connection streaming a
+  `/v1/subscribe` response gives back its slot, subscriptions are bounded by
+  `--max-active-subscriptions`; the stream response now has `Connection: close`.
+
 ### Changed
 
 - Building needs Rust 1.88 (was 1.85), see `rust-toolchain.toml`.

@@ -477,7 +477,7 @@ The API returns appropriate HTTP status codes:
 - `404 Not Found`: Resource not found (block, transaction, endpoint)
 - `422 Unprocessable Entity`: Decryption failure (wrong identity used for encrypted descriptor)
 - `500 Internal Server Error`: Server error
-- `503 Service Unavailable`: The server cannot serve the request now (blocks are being indexed, or the maximum of active subscriptions is reached)
+- `503 Service Unavailable`: The server cannot serve the request now (blocks are being indexed, the maximum of connections or of active subscriptions is reached)
 
 Common error conditions:
 - `AtLeastOneFieldMandatory`: Neither descriptor nor addresses provided
@@ -490,6 +490,7 @@ Common error conditions:
 - `InvalidDescriptor`: Malformed descriptor, or one over the [descriptor limits](#descriptor-limits)
 - `TooManyDerivations`: The descriptor request needs to derive more indexes than the server allows, see [descriptor limits](#descriptor-limits)
 - `TooManyScripts` (400): The subscription would watch more scripts than the server allows, see the watched range of [Descriptor Subscription](#descriptor-subscription)
+- `TooManyConnections` (503): The server is already serving its maximum number of connections (`--max-connections`), retry later, with `Retry-After: 1`. The connection is closed after this response. Under heavier overload, a connection may be closed without any response. An open subscription stream does not count toward this limit
 - `TooManySubscriptions` (503): The server already has its maximum number of active subscriptions, retry later, with `Retry-After: 10`
 - `InvalidAddress`: Malformed address
 - `InvalidTx`: Malformed transaction in the `POST /tx` body (not valid UTF-8 or hex, or not a transaction)

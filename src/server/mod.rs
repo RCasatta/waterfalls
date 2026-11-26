@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use crate::be::{DescriptorLimits, DEFAULT_MAX_DESCRIPTOR_KEYS, DEFAULT_MAX_DESCRIPTOR_PATHS};
 use crate::fetch::{BackendValidationError, Client};
 use crate::inc_connection_error_counter;
-use crate::server::connection::{is_write_stall, StallTimeoutIo};
+use crate::server::connection::{is_write_stall, serve_connection, ConnectionLimits};
 use crate::server::preload::headers;
 use crate::store::memory::MemoryStore;
 use crate::store::AnyStore;
@@ -25,9 +25,9 @@ use bitcoin::{NetworkKind, PrivateKey};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioIo, TokioTimer};
-use route::{infallible_metrics_route, infallible_route};
+use route::{infallible_metrics_route, infallible_route, too_many_connections_resp};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
 mod connection;
 mod derivation_cache;
@@ -48,6 +48,8 @@ const DEFAULT_MAX_NODE_REQUESTS: usize = 8;
 const DEFAULT_MAX_TXS_SEEN: usize = 100;
 /// See [`Arguments::write_stall_timeout_seconds`]
 const DEFAULT_WRITE_STALL_TIMEOUT_SECONDS: u64 = 30;
+/// See [`Arguments::max_connections`]
+const DEFAULT_MAX_CONNECTIONS: usize = 200;
 const DEFAULT_MAX_ACTIVE_SUBSCRIPTIONS: usize = 5_000;
 const DEFAULT_MAX_SCRIPTS_PER_SUBSCRIPTION: usize = 2_000;
 const DEFAULT_REORG_DATA_KEEP_HEIGHTS: u32 = 6;
@@ -228,6 +230,15 @@ pub struct Arguments {
     #[arg(env, long)]
     pub write_stall_timeout_seconds: Option<u64>,
 
+    /// Maximum number of connections of the public listener served at the same time. A
+    /// connection holds its slot for its whole life, sending its responses included, so this
+    /// bounds the memory held by responses. A connection over the limit is answered 503 with
+    /// `Retry-After: 1` and closed, up to as many as this at the same time, the others are
+    /// closed without a response. A connection streaming a subscription gives back its slot,
+    /// subscriptions are bounded by `--max-active-subscriptions`. Default is 200.
+    #[arg(env, long)]
+    pub max_connections: Option<usize>,
+
     /// Delay in milliseconds between mempool sync cycles. Default is 500.
     #[arg(env, long)]
     pub mempool_sleep_between_cycles_ms: Option<u64>,
@@ -290,6 +301,7 @@ impl std::fmt::Debug for Arguments {
                 "header_read_timeout_seconds",
                 &self.header_read_timeout_seconds,
             )
+            .field("max_connections", &self.max_connections)
             .field(
                 "write_stall_timeout_seconds",
                 &self.write_stall_timeout_seconds,
@@ -333,6 +345,11 @@ impl Arguments {
     /// See [`Arguments::max_node_requests`].
     fn max_node_requests(&self) -> usize {
         self.max_node_requests.unwrap_or(DEFAULT_MAX_NODE_REQUESTS)
+    }
+
+    /// See [`Arguments::max_connections`].
+    fn max_connections(&self) -> usize {
+        self.max_connections.unwrap_or(DEFAULT_MAX_CONNECTIONS)
     }
 
     /// See [`Arguments::write_stall_timeout_seconds`].
@@ -380,6 +397,18 @@ impl Arguments {
             Err(Error::String(
                 "Request timeout must be greater than 0".to_string(),
             ))
+        } else if self.max_connections == Some(0) {
+            Err(Error::String(
+                "Max connections must be greater than 0".to_string(),
+            ))
+        } else if self
+            .max_connections
+            .is_some_and(|max| max > Semaphore::MAX_PERMITS)
+        {
+            Err(Error::String(format!(
+                "Max connections must be at most {}",
+                Semaphore::MAX_PERMITS
+            )))
         } else if self.write_stall_timeout_seconds == Some(0) {
             Err(Error::String(
                 "Write stall timeout must be greater than 0".to_string(),
@@ -559,6 +588,42 @@ mod argument_tests {
     }
 
     #[test]
+    fn max_connections_must_be_non_zero() {
+        let valid = Arguments {
+            rpc_user_password: Some("user:pass".to_string()),
+            request_timeout_seconds: 1,
+            ..Default::default()
+        };
+        assert_eq!(valid.max_connections(), 200);
+
+        let args = Arguments {
+            max_connections: Some(1),
+            ..valid
+        };
+        assert!(args.is_valid().is_ok());
+        assert_eq!(args.max_connections(), 1);
+
+        let args = Arguments {
+            max_connections: Some(Semaphore::MAX_PERMITS),
+            ..args
+        };
+        assert!(args.is_valid().is_ok());
+
+        // the connection semaphores cannot have more permits
+        let args = Arguments {
+            max_connections: Some(Semaphore::MAX_PERMITS + 1),
+            ..args
+        };
+        assert!(args.is_valid().is_err());
+
+        let args = Arguments {
+            max_connections: Some(0),
+            ..args
+        };
+        assert!(args.is_valid().is_err());
+    }
+
+    #[test]
     fn write_stall_timeout_must_be_non_zero() {
         let valid = Arguments {
             rpc_user_password: Some("user:pass".to_string()),
@@ -723,6 +788,9 @@ pub enum Error {
     /// Blocks kept being indexed while the request was served, so a consistent response could
     /// not be built. Transient: the client should retry.
     BlockchainChanged,
+    /// The public listener is already serving `--max-connections` connections. Transient: the
+    /// client should retry.
+    TooManyConnections,
     /// The node did not answer a request of the handler in time, it may answer 503 while it is
     /// busy or starting. Transient: the client should retry.
     NodeUnavailable,
@@ -985,13 +1053,18 @@ pub async fn inner_main(
         args.max_node_requests(),
         Duration::from_secs(args.request_timeout_seconds),
     ));
-    let write_stall_timeout = args.write_stall_timeout();
+    let connection_limits = Arc::new(ConnectionLimits {
+        header_read_timeout: Duration::from_secs(args.header_read_timeout_seconds),
+        write_stall_timeout: args.write_stall_timeout(),
+        permits: Arc::new(Semaphore::new(args.max_connections())),
+        reject_permits: Arc::new(Semaphore::new(args.max_connections())),
+    });
     loop {
         tokio::select! {
             Ok((stream, peer_addr)) = listener.accept() => {
-                let io = TokioIo::new(StallTimeoutIo::new(stream, write_stall_timeout));
                 let state = state.clone();
                 let client = client.clone();
+                let connection_limits = connection_limits.clone();
                 let header_timeout_aggregation = header_timeout_aggregation.clone();
 
                 tokio::task::spawn(async move {
@@ -1000,16 +1073,15 @@ pub async fn inner_main(
                     let add_cors = args.add_cors;
                     // when a dedicated metrics listener is configured, keep metrics off the public one
                     let expose_metrics = args.metrics_listen.is_none();
-                    let header_read_timeout = args.header_read_timeout_seconds;
                     let client = &client;
 
-                    let service = service_fn(move |req| infallible_route(state, client, req, network, add_cors, expose_metrics));
-
-                    let result = http1::Builder::new()
-                        .timer(TokioTimer::new())
-                        .header_read_timeout(Duration::from_secs(header_read_timeout))
-                        .serve_connection(io, service)
-                        .await;
+                    let result = serve_connection(
+                        stream,
+                        &connection_limits,
+                        move |req| infallible_route(state, client, req, network, add_cors, expose_metrics),
+                        move || too_many_connections_resp(add_cors),
+                    )
+                    .await;
 
                     if let Err(err) = result {
                         let msg = format!("{err:?}");

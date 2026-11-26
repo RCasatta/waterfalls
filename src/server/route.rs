@@ -29,6 +29,7 @@ use std::{
 use tokio::time::Interval;
 
 use super::{
+    connection::SubscriptionStream,
     encryption,
     sign::MsgSigAddress,
     subscription::{SubscriptionError, SubscriptionEvent, SubscriptionId, SubscriptionReceiver},
@@ -682,7 +683,7 @@ fn error_resp(status: StatusCode, error: &Error) -> Resp {
     let mut response = Response::new(full_body(error.to_string().into_bytes()));
     *response.status_mut() = status;
     let retry_after = match error {
-        Error::BlockchainChanged | Error::NodeUnavailable => {
+        Error::BlockchainChanged | Error::NodeUnavailable | Error::TooManyConnections => {
             Some(BLOCKCHAIN_CHANGED_RETRY_AFTER_SECONDS)
         }
         Error::Subscription(SubscriptionError::TooManySubscriptions) => {
@@ -726,7 +727,9 @@ fn error_status(error: &Error) -> StatusCode {
         }
         Error::BodyTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         Error::BodyReadTimeout => StatusCode::REQUEST_TIMEOUT,
-        Error::BlockchainChanged | Error::NodeUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+        Error::BlockchainChanged | Error::NodeUnavailable | Error::TooManyConnections => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -1458,6 +1461,9 @@ fn sse_resp(
         .header(CONTENT_TYPE, "text/event-stream")
         .header(CACHE_CONTROL, "no-cache")
         .header("X-Accel-Buffering", "no")
+        // the connection gave back its permit, see `SubscriptionStream`
+        .header(header::CONNECTION, "close")
+        .extension(SubscriptionStream)
         .body(body)
         .map_err(|_| Error::Other)
 }
@@ -1779,26 +1785,8 @@ pub async fn infallible_route(
         Err(e) => error_resp(error_status(&e), &e),
     };
 
-    // Add CORS headers if enabled
     if add_cors {
-        let headers = response.headers_mut();
-        headers.insert(
-            header::ACCESS_CONTROL_ALLOW_ORIGIN,
-            header::HeaderValue::from_static("*"),
-        );
-        headers.insert(
-            header::ACCESS_CONTROL_ALLOW_METHODS,
-            header::HeaderValue::from_static("GET, HEAD, POST, OPTIONS"),
-        );
-        headers.insert(
-            header::ACCESS_CONTROL_ALLOW_HEADERS,
-            header::HeaderValue::from_static("Content-Type"),
-        );
-        // Let browser clients read when to retry a 503
-        headers.insert(
-            header::ACCESS_CONTROL_EXPOSE_HEADERS,
-            header::HeaderValue::from_static("Retry-After"),
-        );
+        add_cors_headers(&mut response);
     }
 
     if is_head {
@@ -1806,6 +1794,42 @@ pub async fn infallible_route(
     }
 
     Ok(response)
+}
+
+/// The response to the requests of a connection over `--max-connections`, it closes the
+/// connection.
+pub fn too_many_connections_resp(add_cors: bool) -> Resp {
+    let error = Error::TooManyConnections;
+    let mut response = error_resp(error_status(&error), &error);
+    response.headers_mut().insert(
+        header::CONNECTION,
+        header::HeaderValue::from_static("close"),
+    );
+    if add_cors {
+        add_cors_headers(&mut response);
+    }
+    response
+}
+
+fn add_cors_headers(response: &mut Resp) {
+    let headers = response.headers_mut();
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        header::HeaderValue::from_static("*"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        header::HeaderValue::from_static("GET, HEAD, POST, OPTIONS"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        header::HeaderValue::from_static("Content-Type"),
+    );
+    // Let browser clients read when to retry a 503
+    headers.insert(
+        header::ACCESS_CONTROL_EXPOSE_HEADERS,
+        header::HeaderValue::from_static("Retry-After"),
+    );
 }
 
 /// Encode all registered prometheus metrics in the text exposition format.
@@ -3023,6 +3047,30 @@ mod tests {
             error_status(&Error::Subscription(SubscriptionError::Empty)),
             StatusCode::BAD_REQUEST
         );
+    }
+
+    /// The subscription stream is marked to give back the connection permit, and closes the
+    /// connection.
+    #[tokio::test]
+    async fn subscription_response_gives_back_connection() {
+        let desc = be::Descriptor::from_str(TESTNET_DESC, Network::LiquidTestnet).unwrap();
+        let state = Arc::new(route_test_state());
+        let response = handle_subscribe_req(&state, desc).await.unwrap();
+        assert!(response.extensions().get::<SubscriptionStream>().is_some());
+        assert_eq!(response.headers()[header::CONNECTION], "close");
+    }
+
+    #[test]
+    fn too_many_connections_response() {
+        let response = too_many_connections_resp(true);
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[header::RETRY_AFTER], "1");
+        assert_eq!(response.headers()[header::CONNECTION], "close");
+        assert_eq!(
+            response.headers()[header::ACCESS_CONTROL_EXPOSE_HEADERS],
+            "Retry-After"
+        );
+        assert!(response.extensions().get::<SubscriptionStream>().is_none());
     }
 
     /// A node answering 503 for ever does not hold the permits of the handlers: the requests
