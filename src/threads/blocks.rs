@@ -624,6 +624,7 @@ mod reorg_tests {
                 max_derivations_per_request: 1_000,
                 cache_control_seconds: 5,
                 server_timing: false,
+                max_large_responses: 4,
                 derivation_cache_capacity: 1000,
                 subscription_limits: SubscriptionLimits {
                     max_active_subscriptions: 100,

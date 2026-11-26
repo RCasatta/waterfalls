@@ -43,6 +43,8 @@ pub(crate) use subscription::SubscriptionEvent;
 
 /// See [`Arguments::max_node_requests`]
 const DEFAULT_MAX_NODE_REQUESTS: usize = 8;
+/// See [`Arguments::max_large_responses`]
+const DEFAULT_MAX_LARGE_RESPONSES: usize = 4;
 const DEFAULT_MAX_TXS_SEEN: usize = 100;
 const DEFAULT_MAX_ACTIVE_SUBSCRIPTIONS: usize = 5_000;
 const DEFAULT_MAX_SCRIPTS_PER_SUBSCRIPTION: usize = 2_000;
@@ -213,6 +215,14 @@ pub struct Arguments {
     #[arg(env, long)]
     pub max_node_requests: Option<usize>,
 
+    /// Maximum number of waterfalls requests with a large history (more than 10,000 entries)
+    /// handled at the same time, the others wait. Such a response takes tens of MB of memory
+    /// and keeps a worker busy while encoded, so the limit bounds both the memory and how much
+    /// the large requests slow down the others. Requests with a smaller history never wait.
+    /// Default is 4.
+    #[arg(env, long)]
+    pub max_large_responses: Option<usize>,
+
     /// Timeout in seconds for reading incoming HTTP request headers (protects against slowloris attacks)
     #[arg(env, long, default_value = "10")]
     pub header_read_timeout_seconds: u64,
@@ -275,6 +285,7 @@ impl std::fmt::Debug for Arguments {
             .field("request_timeout_seconds", &self.request_timeout_seconds)
             .field("node_disable_conn_pool", &self.node_disable_conn_pool)
             .field("max_node_requests", &self.max_node_requests)
+            .field("max_large_responses", &self.max_large_responses)
             .field(
                 "header_read_timeout_seconds",
                 &self.header_read_timeout_seconds,
@@ -320,6 +331,12 @@ impl Arguments {
         self.max_node_requests.unwrap_or(DEFAULT_MAX_NODE_REQUESTS)
     }
 
+    /// See [`Arguments::max_large_responses`].
+    fn max_large_responses(&self) -> usize {
+        self.max_large_responses
+            .unwrap_or(DEFAULT_MAX_LARGE_RESPONSES)
+    }
+
     pub fn is_valid(&self) -> Result<(), Error> {
         if self.rpc_user_password_file.is_none() && self.rpc_user_password.is_none() {
             Err(Error::String(
@@ -352,6 +369,10 @@ impl Arguments {
         } else if self.max_node_requests == Some(0) {
             Err(Error::String(
                 "Max node requests must be greater than 0".to_string(),
+            ))
+        } else if self.max_large_responses == Some(0) {
+            Err(Error::String(
+                "Max large responses must be greater than 0".to_string(),
             ))
         } else if self.request_timeout_seconds == 0 {
             Err(Error::String(
@@ -532,6 +553,30 @@ mod argument_tests {
     }
 
     #[test]
+    fn max_large_responses_must_be_non_zero() {
+        let valid = Arguments {
+            rpc_user_password: Some("user:pass".to_string()),
+            request_timeout_seconds: 1,
+            ..Default::default()
+        };
+        assert!(valid.is_valid().is_ok());
+        assert_eq!(valid.max_large_responses(), 4);
+
+        let args = Arguments {
+            max_large_responses: Some(1),
+            ..valid.clone()
+        };
+        assert!(args.is_valid().is_ok());
+        assert_eq!(args.max_large_responses(), 1);
+
+        let args = Arguments {
+            max_large_responses: Some(0),
+            ..args
+        };
+        assert!(args.is_valid().is_err());
+    }
+
+    #[test]
     fn max_derivations_per_request_follows_path_limit() {
         // A full page of 1000 indexes of a single key descriptor on every path.
         assert_eq!(Arguments::default().max_derivations_per_request(), 2_000);
@@ -676,6 +721,9 @@ pub enum Error {
     /// The node did not answer a request of the handler in time, it may answer 503 while it is
     /// busy or starting. Transient: the client should retry.
     NodeUnavailable,
+    /// The request waited too long for a permit of `--max-large-responses`. Transient: the
+    /// client should retry.
+    TooManyLargeResponses,
 }
 
 impl std::fmt::Display for Error {
@@ -776,6 +824,7 @@ pub async fn inner_main(
             max_derivations_per_request: args.max_derivations_per_request(),
             cache_control_seconds: args.cache_control_seconds,
             server_timing: args.server_timing,
+            max_large_responses: args.max_large_responses(),
             derivation_cache_capacity: args.derivation_cache_capacity,
             subscription_limits: SubscriptionLimits {
                 max_active_subscriptions: args
@@ -952,13 +1001,28 @@ pub async fn inner_main(
                     let header_read_timeout = args.header_read_timeout_seconds;
                     let client = &client;
 
-                    let service = service_fn(move |req| infallible_route(state, client, req, network, add_cors, expose_metrics));
+                    let abort = route::ConnectionAbort::default();
+                    let service = {
+                        let abort = abort.clone();
+                        service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
+                            req.extensions_mut().insert(abort.clone());
+                            infallible_route(state, client, req, network, add_cors, expose_metrics)
+                        })
+                    };
 
-                    let result = http1::Builder::new()
+                    let connection = http1::Builder::new()
                         .timer(TokioTimer::new())
                         .header_read_timeout(Duration::from_secs(header_read_timeout))
-                        .serve_connection(io, service)
-                        .await;
+                        .serve_connection(io, service);
+                    let result = tokio::select! {
+                        result = connection => result,
+                        () = abort.aborted() => {
+                            // A large response not sent within its deadline, already logged.
+                            // Dropping the connection closes it even if its client stopped reading.
+                            inc_connection_error_counter("send_deadline");
+                            return;
+                        }
+                    };
 
                     if let Err(err) = result {
                         let msg = format!("{err:?}");
@@ -971,6 +1035,10 @@ pub async fn inner_main(
                             let mut aggregation = header_timeout_aggregation.lock().await;
                             *aggregation.counts.entry(peer_addr.ip()).or_insert(0) += 1;
                             report_header_timeouts_if_due(&mut aggregation);
+                        } else if err.is_body_write_aborted() {
+                            // A large response not sent within its deadline, already logged
+                            inc_connection_error_counter("send_deadline");
+                            log::debug!("Error serving connection: {msg}");
                         } else {
                             log::error!("Error serving connection: {msg}");
                         }

@@ -62,6 +62,12 @@ pub struct State {
     /// One permit per core, held while deriving scripts on the blocking thread pool.
     pub derivation_permits: Arc<Semaphore>,
 
+    /// Held by the waterfalls requests with a large history, see `LargeResponsePermit`.
+    pub large_response_permits: Arc<Semaphore>,
+
+    /// Max time to send a large response before closing its connection, see `PermitBody`.
+    pub large_response_send_deadline: Duration,
+
     pub cached_fee_estimates: RwLock<(HashMap<u16, f64>, Option<Instant>)>,
 
     descriptor_metrics: Mutex<DescriptorMetrics>,
@@ -95,6 +101,8 @@ impl State {
             derivation_permits: Arc::new(Semaphore::new(
                 std::thread::available_parallelism().map_or(1, |cores| cores.get()),
             )),
+            large_response_permits: Arc::new(Semaphore::new(config.max_large_responses)),
+            large_response_send_deadline: crate::server::route::LARGE_RESPONSE_SEND_DEADLINE,
             cached_fee_estimates: RwLock::new((HashMap::new(), None)),
             descriptor_metrics: Mutex::new(DescriptorMetrics::new()),
             descriptor_max_used_index: Mutex::new(HashMap::new()),
@@ -394,6 +402,7 @@ pub struct StateConfig {
     pub max_derivations_per_request: usize,
     pub cache_control_seconds: u32,
     pub server_timing: bool,
+    pub max_large_responses: usize,
     pub derivation_cache_capacity: usize,
     pub subscription_limits: SubscriptionLimits,
 }
