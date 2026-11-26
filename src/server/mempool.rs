@@ -6,6 +6,8 @@ pub struct Mempool {
     txid_hashes: HashMap<crate::be::Txid, HashSet<ScriptHash>>,
     hash_txids: HashMap<ScriptHash, Vec<(crate::be::Txid, i32)>>,
     outpoints_created: HashMap<OutPoint, ScriptHash>,
+    /// The outpoints spent by mempool transactions, with the spending transaction
+    outpoints_spent: HashMap<OutPoint, crate::be::Txid>,
 }
 
 pub struct MempoolStats {
@@ -27,6 +29,7 @@ impl Mempool {
             txid_hashes: HashMap::new(),
             hash_txids: HashMap::new(),
             outpoints_created: HashMap::new(),
+            outpoints_spent: HashMap::new(),
         }
     }
 
@@ -66,6 +69,8 @@ impl Mempool {
         let txid_set: HashSet<crate::be::Txid> = txids.iter().copied().collect();
         self.outpoints_created
             .retain(|k, _| !txid_set.contains(&k.txid));
+        self.outpoints_spent
+            .retain(|_, spending| !txid_set.contains(spending));
     }
 
     fn add(
@@ -80,6 +85,10 @@ impl Mempool {
                 .map(move |(vout, script_hash)| (OutPoint::new(*txid, vout as u32), script_hash))
         });
         self.outpoints_created.extend(outputs_created);
+        self.outpoints_spent.extend(
+            txs.iter()
+                .flat_map(|(txid, tx)| tx.inputs_iter().map(move |outpoint| (outpoint, *txid))),
+        );
 
         // we need to build this map for every txid all the ScriptHash involved, for output is easy
         // while for input we have to check the ScriptHash of previous output, the previous output must
@@ -173,6 +182,11 @@ impl Mempool {
         result
     }
 
+    /// Whether `outpoint` is spent by a mempool transaction
+    pub fn is_spent(&self, outpoint: &OutPoint) -> bool {
+        self.outpoints_spent.contains_key(outpoint)
+    }
+
     pub(crate) fn txids_iter(&self) -> impl Iterator<Item = crate::be::Txid> + '_ {
         self.txid_hashes.keys().cloned()
     }
@@ -193,6 +207,34 @@ impl Mempool {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
+    use super::*;
+
+    fn txid(n: u8) -> crate::be::Txid {
+        crate::be::Txid::from_str(&format!("{n:064x}")).unwrap()
+    }
+
     #[test]
-    fn test_mempool() {}
+    fn mempool_tracks_spent_outpoints() {
+        let confirmed = OutPoint::new(txid(1), 0);
+        let spend_tx = be::MempoolTx::from_parts(vec![confirmed], vec![7]);
+        let unconfirmed = OutPoint::new(txid(2), 0);
+        let chained_tx = be::MempoolTx::from_parts(vec![unconfirmed], vec![8]);
+
+        let mut mempool = Mempool::new();
+        mempool.update(&[], &[(txid(2), &spend_tx)], &[Some(6)]);
+        assert!(mempool.is_spent(&confirmed));
+        assert!(!mempool.is_spent(&unconfirmed));
+
+        mempool.update(&[], &[(txid(3), &chained_tx)], &[None]);
+        assert!(mempool.is_spent(&unconfirmed));
+
+        // Dropping the spending transaction makes its prevouts unspent again
+        mempool.update(&[txid(3)], &[], &[]);
+        assert!(!mempool.is_spent(&unconfirmed));
+        assert!(mempool.is_spent(&confirmed));
+        mempool.update(&[txid(2)], &[], &[]);
+        assert!(!mempool.is_spent(&confirmed));
+    }
 }

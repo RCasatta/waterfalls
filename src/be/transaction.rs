@@ -116,6 +116,17 @@ impl MempoolTx {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_parts(
+        inputs: Vec<crate::OutPoint>,
+        output_script_hashes: Vec<crate::ScriptHash>,
+    ) -> Self {
+        Self {
+            inputs,
+            output_script_hashes,
+        }
+    }
+
     pub(crate) fn inputs_iter(&self) -> impl Iterator<Item = crate::OutPoint> + '_ {
         self.inputs.iter().copied()
     }

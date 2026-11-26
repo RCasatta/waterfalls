@@ -85,6 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `utxo_only` waterfalls responses no longer include outputs spent by a mempool transaction,
+  confirmed or not. A client trusting them as unspent, like LWK 0.20, counted those
+  outputs in its balance until the spending transaction confirmed.
 - `/v1/subscribe` refused because the descriptor would watch too many scripts returns HTTP 400
   `Subscription(TooManyScripts)`, and refused because the maximum number of active subscriptions
   is reached returns HTTP 503 `Subscription(TooManySubscriptions)` with `Retry-After: 10`, instead

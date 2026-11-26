@@ -1227,8 +1227,15 @@ async fn filter_utxo_only(state: &Arc<State>, result: &mut [Vec<TxSeen>]) -> Res
         .zip(outpoints.iter())
         .filter_map(|(u, o)| if u.is_some() { Some(o) } else { None })
         .collect();
+    // Read after the db: an output spent by a transaction confirmed in between is missing from
+    // the db UTXOs instead.
+    let spent_in_mempool: HashSet<_> = {
+        let mempool = state.mempool.lock().await;
+        outpoints.iter().filter(|o| mempool.is_spent(o)).collect()
+    };
     for e in result.iter_mut() {
         e.retain(|f| match f.outpoint() {
+            Some(o) if spent_in_mempool.contains(&o) => false,
             Some(o) => {
                 // For confirmed transactions, check if UTXO exists in DB
                 if f.height > 0 {
