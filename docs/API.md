@@ -48,6 +48,8 @@ GET /v2/waterfalls.cbor?<query_params>
 - `utxo_only` (boolean, optional): Return only unspent outputs (default: false)
   - If any requested script has more history than the server-side truncation threshold, the request returns `400 UtxoOnlyHistoryTooLarge`
 
+- `sign` (boolean, optional): Sign the response with the server key (default: false), see [Message Signing](#security-features)
+
 **History truncation:**
 
 - To avoid unbounded responses on highly reused addresses, Waterfalls caps the number of confirmed `TxSeen` entries returned for a single script pubkey
@@ -558,7 +560,7 @@ let txid = client.broadcast(&transaction).await?;
 
 ## Security Features
 
-- **Message Signing**: Responses include cryptographic signatures in headers:
+- **Message Signing**: Waterfalls responses requested with `sign=true` include cryptographic signatures in headers:
   - `X-Content-Signature`: Message signature
   - `X-Content-Digest`: Content digest
   - `X-Server-Address`: Server address for verification

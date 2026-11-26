@@ -481,6 +481,7 @@ pub(crate) fn parse_query(
     let mut page = 0u16;
     let mut to_index = 0u32;
     let mut utxo_only = false;
+    let mut sign = false;
     let mut descriptor = None;
     let mut addresses = None;
 
@@ -489,6 +490,7 @@ pub(crate) fn parse_query(
             "page" => page = value.parse().unwrap_or(0),
             "to_index" => to_index = value.parse().unwrap_or(0),
             "utxo_only" => utxo_only = value.parse().unwrap_or(false),
+            "sign" => sign = value.parse().unwrap_or(false),
             "descriptor" => descriptor = Some(value.into_owned()),
             "addresses" => addresses = Some(value.into_owned()),
             _ => {}
@@ -515,6 +517,7 @@ pub(crate) fn parse_query(
                 page,
                 to_index,
                 utxo_only,
+                sign,
             }))
         }
         (None, Some(addresses)) => {
@@ -540,6 +543,7 @@ pub(crate) fn parse_query(
                 addresses,
                 page,
                 utxo_only,
+                sign,
             }))
         }
         (None, None) => Err(Error::AtLeastOneFieldMandatory),
@@ -822,6 +826,7 @@ async fn handle_waterfalls_req(
     let start = Instant::now();
     let is_descriptor = inputs.descriptor().is_some();
     let page = inputs.page();
+    let sign = inputs.sign();
 
     // TODO add label with batches?
     let timer = crate::WATERFALLS_HISTOGRAM
@@ -834,6 +839,7 @@ async fn handle_waterfalls_req(
             page,
             to_index,
             utxo_only,
+            ..
         }) => {
             let id = string_hash(&descriptor.normalized_id_string());
             state.record_descriptor_access(id).await;
@@ -846,6 +852,7 @@ async fn handle_waterfalls_req(
             addresses,
             page,
             utxo_only,
+            ..
         }) => {
             if *utxo_only && *page > 0 {
                 return Err(Error::UtxoOnlyHistoryTooLarge);
@@ -889,8 +896,9 @@ async fn handle_waterfalls_req(
             .expect("does not contain a map with non-string keys")
     };
 
-    let m = sign_response(&state.secp, &state.wif_key, &result);
-    let m = m.to_msg_sig_address(state.address());
+    let m = sign.then(|| {
+        sign_response(&state.secp, &state.wif_key, &result).to_msg_sig_address(state.address())
+    });
 
     log::info!(
         "{id:x}: {elements} elements, elapsed: {:.2?} ({:.2?} derivations)",
@@ -905,7 +913,7 @@ async fn handle_waterfalls_req(
         hyper::StatusCode::OK,
         Some(content),
         Some(state.cache_control_seconds),
-        Some(m),
+        m,
     )?;
     if state.server_timing && is_descriptor {
         add_server_timing_header(&mut response, start.elapsed())?;
@@ -936,6 +944,7 @@ async fn scan_waterfalls(
             page,
             to_index,
             utxo_only,
+            ..
         }) => {
             let (page, to_index, utxo_only) = (*page, *to_index, *utxo_only);
             utxo_only_req = utxo_only;
@@ -998,6 +1007,7 @@ async fn scan_waterfalls(
             addresses,
             page,
             utxo_only,
+            ..
         }) => {
             let utxo_only = *utxo_only;
             utxo_only_req = utxo_only;
@@ -1964,6 +1974,21 @@ mod tests {
             MAINNET_DESC
         );
         assert_eq!(result.page(), 0);
+        assert!(!result.sign());
+
+        // Signing is asked with `sign=true`
+        let result = parse_query(
+            &format!("{query}&sign=true"),
+            &key,
+            false,
+            100,
+            Network::Liquid,
+        )
+        .unwrap();
+        assert!(result.sign());
+        let query_addresses = "addresses=ex1qq6krj23yx9s4xjeas453huxx8azrk942qrxsvh&sign=true";
+        let result = parse_query(query_addresses, &key, false, 100, Network::Liquid).unwrap();
+        assert!(result.sign());
 
         // Test valid encrypted descriptor
         let encrypted = encryption::encrypt(MAINNET_DESC, key.to_public()).unwrap();
@@ -2325,6 +2350,7 @@ mod tests {
                 addresses: vec![address],
                 page: 0,
                 utxo_only: false,
+                sign: false,
             });
             let response = async {
                 let response =
@@ -2499,6 +2525,7 @@ mod tests {
             addresses: vec![address],
             page: 0,
             utxo_only: false,
+            sign: false,
         });
         let response = handle_waterfalls_req(&state, request, WithTip::All, false, Network::Liquid)
             .await
@@ -2590,6 +2617,7 @@ mod tests {
                 page: 0,
                 to_index,
                 utxo_only: false,
+                sign: false,
             })
         };
         let scan = |state, to_index| async move {

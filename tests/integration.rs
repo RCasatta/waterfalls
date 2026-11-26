@@ -901,8 +901,14 @@ async fn do_test(test_env: waterfalls::test_env::TestEnv) {
     let address = client.server_address().await.unwrap();
     assert_eq!(address, server_address);
 
-    // Verify signature
+    // Responses are signed only on request
     let (result, headers) = client.waterfalls_v2(&bitcoin_desc).await.unwrap();
+    assert!(headers.get("X-Content-Signature").is_none());
+    assert!(headers.get("X-Server-Address").is_none());
+
+    // Verify signature
+    let (signed_result, headers) = client.waterfalls_v2_signed(&bitcoin_desc).await.unwrap();
+    assert_eq!(signed_result, result);
     let message = serde_json::to_string(&result).unwrap();
     let signature = headers.get("X-Content-Signature").unwrap();
     let signature = MessageSignature::from_str(signature.to_str().unwrap()).unwrap();

@@ -612,6 +612,15 @@ impl WaterfallClient {
         self.waterfalls_version(desc, 2, None, None, false).await
     }
 
+    /// Like [`Self::waterfalls_v2`], asking for a signed response
+    pub async fn waterfalls_v2_signed(
+        &self,
+        desc: &str,
+    ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
+        self.waterfalls_version_inner(desc, 2, None, None, false, true)
+            .await
+    }
+
     pub async fn waterfalls_v1(
         &self,
         desc: &str,
@@ -634,12 +643,28 @@ impl WaterfallClient {
         to_index: Option<u32>,
         utxo_only: bool,
     ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
+        self.waterfalls_version_inner(desc, version, page, to_index, utxo_only, false)
+            .await
+    }
+
+    async fn waterfalls_version_inner(
+        &self,
+        desc: &str,
+        version: u8,
+        page: Option<u32>,
+        to_index: Option<u32>,
+        utxo_only: bool,
+        sign: bool,
+    ) -> anyhow::Result<(WaterfallResponse, HeaderMap)> {
         let descriptor_url = format!("{}/v{}/waterfalls", self.base_url, version);
 
         let mut builder = self.client.get(&descriptor_url).query(&[
             ("descriptor", desc),
             ("utxo_only", utxo_only.to_string().as_str()),
         ]);
+        if sign {
+            builder = builder.query(&[("sign", "true")]);
+        }
 
         if let Some(to_index) = to_index {
             builder = builder.query(&[("to_index", to_index.to_string().as_str())]);

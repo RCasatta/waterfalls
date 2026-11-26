@@ -74,6 +74,9 @@ pub struct DescriptorRequest {
 
     /// If true, does not return txid of transactions having only spent outputs
     utxo_only: bool,
+
+    /// If true, the response is signed with the server key, see [`WaterfallRequest::sign`]
+    sign: bool,
 }
 
 /// Request to the waterfalls endpoint using a list of addresses
@@ -86,6 +89,9 @@ pub struct AddressesRequest {
     page: u16,
 
     utxo_only: bool,
+
+    /// If true, the response is signed with the server key, see [`WaterfallRequest::sign`]
+    sign: bool,
 }
 
 /// Response from the waterfalls endpoint
@@ -139,6 +145,16 @@ impl WaterfallRequest {
         match self {
             WaterfallRequest::Descriptor(d) => d.page,
             WaterfallRequest::Addresses(a) => a.page,
+        }
+    }
+
+    /// Whether the client asked for a signed response (`sign=true`), with the
+    /// `X-Content-Signature`, `X-Content-Digest` and `X-Server-Address` headers. Signing hashes
+    /// the whole response, so it is done only on request.
+    pub fn sign(&self) -> bool {
+        match self {
+            WaterfallRequest::Descriptor(d) => d.sign,
+            WaterfallRequest::Addresses(a) => a.sign,
         }
     }
 }
