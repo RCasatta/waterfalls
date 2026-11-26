@@ -905,18 +905,28 @@ async fn handle_waterfalls_req(
     } else {
         "application/json"
     };
-    let result = if cbor {
-        let mut bytes = Vec::new();
-        minicbor::encode(&waterfall_response, &mut bytes).expect("writing to a Vec cannot fail");
-        bytes
-    } else {
-        serde_json::to_vec(&waterfall_response)
-            .expect("does not contain a map with non-string keys")
+    // A large response takes tens of milliseconds to encode and sign, which would keep an async
+    // worker from serving the other requests meanwhile. The permit moves into the task, so that
+    // it is not released before the task ends if this request is dropped meanwhile, for example
+    // when the client disconnects.
+    let (result, m, large_permit) = match large_permit.into_inner() {
+        Some(permit) => {
+            let state = Arc::clone(state);
+            tokio::task::spawn_blocking(move || {
+                let (result, m) = encode_and_sign(&state, &waterfall_response, cbor, sign);
+                (result, m, Some(permit))
+            })
+            .await
+            .map_err(|e| {
+                log::error!("encoding task failed: {e}");
+                Error::String(format!("encoding task failed: {e}"))
+            })?
+        }
+        None => {
+            let (result, m) = encode_and_sign(state, &waterfall_response, cbor, sign);
+            (result, m, None)
+        }
     };
-
-    let m = sign.then(|| {
-        sign_response(&state.secp, &state.wif_key, &result).to_msg_sig_address(state.address())
-    });
 
     log::info!(
         "{id:x}: {elements} elements, elapsed: {:.2?} ({:.2?} derivations)",
@@ -936,10 +946,30 @@ async fn handle_waterfalls_req(
     if state.server_timing && is_descriptor {
         add_server_timing_header(&mut response, start.elapsed())?;
     }
-    Ok(match large_permit.into_inner() {
+    Ok(match large_permit {
         Some(permit) => hold_until_sent(response, permit),
         None => response,
     })
+}
+
+/// Encodes `response` in CBOR or JSON, and signs it if `sign`.
+fn encode_and_sign(
+    state: &State,
+    response: &WaterfallResponse,
+    cbor: bool,
+    sign: bool,
+) -> (Vec<u8>, Option<MsgSigAddress>) {
+    let result = if cbor {
+        let mut bytes = Vec::new();
+        minicbor::encode(response, &mut bytes).expect("writing to a Vec cannot fail");
+        bytes
+    } else {
+        serde_json::to_vec(response).expect("does not contain a map with non-string keys")
+    };
+    let m = sign.then(|| {
+        sign_response(&state.secp, &state.wif_key, &result).to_msg_sig_address(state.address())
+    });
+    (result, m)
 }
 
 /// Reads the history, the tip and the block hashes needed by a waterfalls response.
