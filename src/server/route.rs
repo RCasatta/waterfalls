@@ -52,6 +52,9 @@ const GAP_LIMIT: u32 = 20;
 const MAX_BATCH: u32 = 50;
 /// Derivation indexes scanned per path in a page of a descriptor request
 pub(crate) const MAX_ADDRESSES: u32 = GAP_LIMIT * MAX_BATCH;
+/// Above this many `TxSeen` entries, about 2 MB of JSON, a waterfalls response is encoded and
+/// signed on the blocking pool, see [`encode_waterfalls`]
+const LARGE_RESPONSE_ENTRIES: usize = 10_000;
 /// Approximate size of a `TxSeen` entry in a JSON waterfalls response, to estimate the memory
 /// of the responses
 pub(crate) const RESPONSE_ENTRY_BYTES: usize = 200;
@@ -857,6 +860,7 @@ async fn handle_waterfalls_req(
     } = with_block_snapshot(state, || scan_waterfalls(state, &inputs, with_tip, network)).await?;
 
     let elements: usize = map.values().map(|v| v.len()).sum();
+    let entries: usize = map.values().flatten().map(|v| v.len()).sum();
 
     let waterfall_response = WaterfallResponse {
         txs_seen: map,
@@ -874,18 +878,7 @@ async fn handle_waterfalls_req(
     } else {
         "application/json"
     };
-    let result = if cbor {
-        let mut bytes = Vec::new();
-        minicbor::encode(&waterfall_response, &mut bytes).expect("writing to a Vec cannot fail");
-        bytes
-    } else {
-        serde_json::to_vec(&waterfall_response)
-            .expect("does not contain a map with non-string keys")
-    };
-
-    let m = sign.then(|| {
-        sign_response(&state.secp, &state.wif_key, &result).to_msg_sig_address(state.address())
-    });
+    let (result, m) = encode_waterfalls(state, waterfall_response, entries, cbor, sign).await?;
 
     log::info!(
         "{id:x}: {elements} elements, elapsed: {:.2?} ({:.2?} derivations)",
@@ -906,6 +899,53 @@ async fn handle_waterfalls_req(
         add_server_timing_header(&mut response, start.elapsed())?;
     }
     Ok(response)
+}
+
+/// Encodes `response` in CBOR or JSON, and signs it if `sign`.
+///
+/// A response with more than [`LARGE_RESPONSE_ENTRIES`] entries takes milliseconds to encode
+/// and sign, which would keep an async worker from serving the other requests meanwhile: it is
+/// done on the blocking pool. Smaller responses are encoded inline, where the thread hop costs
+/// more than it saves.
+///
+/// If the request is dropped meanwhile, for example because the client disconnected, the
+/// blocking task still runs to the end, a few milliseconds.
+async fn encode_waterfalls(
+    state: &Arc<State>,
+    response: WaterfallResponse,
+    entries: usize,
+    cbor: bool,
+    sign: bool,
+) -> Result<(Vec<u8>, Option<MsgSigAddress>), Error> {
+    if entries <= LARGE_RESPONSE_ENTRIES {
+        return Ok(encode_and_sign(state, &response, cbor, sign));
+    }
+    let state = Arc::clone(state);
+    tokio::task::spawn_blocking(move || encode_and_sign(&state, &response, cbor, sign))
+        .await
+        .map_err(|e| {
+            log::error!("encoding task failed: {e}");
+            Error::String(format!("encoding task failed: {e}"))
+        })
+}
+
+fn encode_and_sign(
+    state: &State,
+    response: &WaterfallResponse,
+    cbor: bool,
+    sign: bool,
+) -> (Vec<u8>, Option<MsgSigAddress>) {
+    let result = if cbor {
+        let mut bytes = Vec::new();
+        minicbor::encode(response, &mut bytes).expect("writing to a Vec cannot fail");
+        bytes
+    } else {
+        serde_json::to_vec(response).expect("does not contain a map with non-string keys")
+    };
+    let m = sign.then(|| {
+        sign_response(&state.secp, &state.wif_key, &result).to_msg_sig_address(state.address())
+    });
+    (result, m)
 }
 
 /// Reads the history, the tip and the block hashes needed by a waterfalls response.
@@ -3151,6 +3191,38 @@ mod tests {
         let (state, _) = state_with_paged_history(max_txs_seen, 20, 6).await;
         let err = scan_paged_address(&state, 0, true).await.unwrap_err();
         assert_eq!(err, Error::UtxoOnlyHistoryTooLarge);
+    }
+
+    /// A large response is encoded and signed on the blocking pool, with the same result as
+    /// inline.
+    #[tokio::test]
+    async fn large_response_encoded_off_runtime() {
+        let state = Arc::new(route_test_state());
+        let txid = crate::be::Txid::all_zeros();
+        let scripts = vec![vec![TxSeen::new(txid, 1, V::Undefined); 100]; 101];
+        let entries = 100 * 101;
+        assert!(entries > LARGE_RESPONSE_ENTRIES);
+        let response = || WaterfallResponse {
+            txs_seen: BTreeMap::from([("addresses".to_string(), scripts.clone())]),
+            page: 0,
+            tip: None,
+            tip_meta: None,
+            has_more: None,
+        };
+
+        for cbor in [false, true] {
+            let (inline, _) = encode_and_sign(&state, &response(), cbor, false);
+            let (bytes, m) = encode_waterfalls(&state, response(), entries, cbor, true)
+                .await
+                .unwrap();
+            assert_eq!(bytes, inline);
+            let m = m.expect("signed when asked");
+            let expected = sign_response(&state.secp, &state.wif_key, &inline);
+            assert_eq!(
+                m.signature,
+                expected.to_msg_sig_address(state.address()).signature
+            );
+        }
     }
 
     /// The subscription stream is marked to give back the connection permit, and closes the
