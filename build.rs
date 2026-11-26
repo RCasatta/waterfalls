@@ -2,7 +2,7 @@ fn main() {
     // Get git commit hash - prioritize environment variable, then fallback to .git files
     let git_hash = std::env::var("GIT_COMMIT_HASH").unwrap_or_else(|_| get_git_commit_from_files());
 
-    println!("cargo:rustc-env=GIT_COMMIT_HASH={}", git_hash);
+    println!("cargo:rustc-env=GIT_COMMIT_HASH={git_hash}");
 
     // Watch for git file changes to trigger rebuilds
     if std::path::Path::new(".git").exists() {
@@ -11,7 +11,7 @@ fn main() {
         // Also watch the current branch ref if it exists
         if let Ok(head_content) = std::fs::read_to_string(".git/HEAD") {
             if let Some(ref_path) = head_content.strip_prefix("ref: ").map(|s| s.trim()) {
-                println!("cargo:rerun-if-changed=.git/{}", ref_path);
+                println!("cargo:rerun-if-changed=.git/{ref_path}");
             }
         }
     }

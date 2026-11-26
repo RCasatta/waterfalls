@@ -537,7 +537,7 @@ fn parse_fee_estimates_rpc_reply(text: &str) -> anyhow::Result<HashMap<u16, f64>
             }
             let feerate = result["feerate"].as_f64()?;
             if feerate == -1f64 {
-                log::warn!("not enough data to estimate fee for target {}", target);
+                log::warn!("not enough data to estimate fee for target {target}");
                 return None;
             }
             // Convert from BTC/kB to sat/vB

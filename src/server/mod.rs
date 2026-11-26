@@ -563,7 +563,7 @@ impl std::str::FromStr for Network {
             "bitcoin-testnet4" => Ok(Self::BitcoinTestnet4),
             "bitcoin-regtest" => Ok(Self::BitcoinRegtest),
             "bitcoin-signet" => Ok(Self::BitcoinSignet),
-            _ => Err(Error::String(format!("Invalid network: {}", s))),
+            _ => Err(Error::String(format!("Invalid network: {s}"))),
         }
     }
 }
@@ -573,14 +573,14 @@ impl std::fmt::Display for Network {
         let s = match self {
             Network::Liquid => "liquid",
             Network::LiquidTestnet => "liquid-testnet",
-            Network::ElementsRegtest { .. } => "elements-regtest",
+            Network::ElementsRegtest => "elements-regtest",
             Network::Bitcoin => "bitcoin",
             Network::BitcoinTestnet => "bitcoin-testnet",
             Network::BitcoinTestnet4 => "bitcoin-testnet4",
             Network::BitcoinRegtest => "bitcoin-regtest",
             Network::BitcoinSignet => "bitcoin-signet",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -680,7 +680,7 @@ pub enum Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 impl std::error::Error for Error {}
@@ -730,7 +730,7 @@ pub async fn inner_main(
     args: Arguments,
     shutdown_signal: impl Future<Output = ()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    log::info!("starting waterfalls with args: {:?}", args);
+    log::info!("starting waterfalls with args: {args:?}");
 
     let startup_client = Client::new(&args)?;
     let mut signal = std::pin::pin!(shutdown_signal);

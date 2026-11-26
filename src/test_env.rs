@@ -815,7 +815,7 @@ impl WaterfallClient {
 
     pub async fn address_txs(&self, address: &be::Address) -> anyhow::Result<String> {
         let url = format!("{}/address/{}/txs", self.base_url, address);
-        println!("url: {}", url);
+        println!("url: {url}");
         let response = self.client.get(&url).send().await?;
         let status_code = response.status().as_u16();
         let text = response.text().await?;

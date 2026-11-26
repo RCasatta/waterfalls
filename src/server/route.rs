@@ -452,7 +452,7 @@ pub async fn route(
                         headers,
                     );
                 } else {
-                    log::debug!("<--- {:?}", res);
+                    log::debug!("<--- {res:?}");
                 };
             }
             Err(e) => {
@@ -850,7 +850,7 @@ async fn handle_waterfalls_req(
             if *utxo_only && *page > 0 {
                 return Err(Error::UtxoOnlyHistoryTooLarge);
             }
-            string_hash(&format!("{:?}", addresses))
+            string_hash(&format!("{addresses:?}"))
         }
     };
 

@@ -51,6 +51,8 @@ const DESCRIPTOR_MAX_USED_INDEX_BUCKET_LABEL_WIDTH: usize = 5;
 
 /// Request to the waterfalls endpoint
 #[derive(Debug)]
+// One per HTTP request, not worth a box
+#[allow(clippy::large_enum_variant)]
 pub enum WaterfallRequest {
     Descriptor(DescriptorRequest),
     Addresses(AddressesRequest),
@@ -444,8 +446,7 @@ fn descriptor_max_used_index_bucket_label(index: u32) -> String {
 
 fn descriptor_max_used_index_bucket_range_label(lower: u32, upper: u32) -> String {
     format!(
-        "{lower:0width$}-{upper:0width$}",
-        width = DESCRIPTOR_MAX_USED_INDEX_BUCKET_LABEL_WIDTH
+        "{lower:0DESCRIPTOR_MAX_USED_INDEX_BUCKET_LABEL_WIDTH$}-{upper:0DESCRIPTOR_MAX_USED_INDEX_BUCKET_LABEL_WIDTH$}"
     )
 }
 

@@ -260,7 +260,7 @@ mod tests {
 
         // Test serialization to JSON (human readable)
         let json = serde_json::to_string(&txid).unwrap();
-        assert_eq!(json, format!("\"{}\"", txid_str));
+        assert_eq!(json, format!("\"{txid_str}\""));
 
         // Test deserialization from JSON (human readable)
         let deserialized_txid: Txid = serde_json::from_str(&json).unwrap();
@@ -278,7 +278,7 @@ mod tests {
         let mut hasher = random_state.build_hasher();
         std::hash::Hash::hash(&txid, &mut hasher);
         let hash = std::hash::Hasher::finish(&hasher);
-        println!("hash: {}", hash);
+        println!("hash: {hash}");
     }
 
     #[test]

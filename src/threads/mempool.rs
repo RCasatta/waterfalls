@@ -34,7 +34,7 @@ pub(crate) async fn mempool_sync_infallible(
     )
     .await
     {
-        log::error!("{:?}", e);
+        log::error!("{e:?}");
     }
 }
 
@@ -73,7 +73,7 @@ async fn sync_mempool_once(
             let is_big_delta = new.len() >= BIG_MEMPOOL_DELTA_THRESHOLD
                 || removed.len() >= BIG_MEMPOOL_DELTA_THRESHOLD;
             if !new.is_empty() {
-                log::debug!("new txs in mempool {:?}, tip: {tip:?}", new);
+                log::debug!("new txs in mempool {new:?}, tip: {tip:?}");
             }
             if is_big_delta {
                 log::info!(

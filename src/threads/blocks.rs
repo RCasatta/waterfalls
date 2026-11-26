@@ -37,7 +37,7 @@ pub(crate) async fn blocks_infallible(
     )
     .await
     {
-        log::error!("{:?}", e);
+        log::error!("{e:?}");
     }
 }
 
@@ -78,8 +78,7 @@ async fn get_next_block_to_index(
                         BlockMeta::new(previous_height, hash, ts)
                     };
                     log::info!(
-                        "reorg: rolling back to previous block {:?}, calling store.reorg()",
-                        previous_block_meta
+                        "reorg: rolling back to previous block {previous_block_meta:?}, calling store.reorg()"
                     );
                     *last_indexed = Some(previous_block_meta);
                     state
@@ -94,8 +93,7 @@ async fn get_next_block_to_index(
                         .notify_all_subscriptions(SubscriptionEvent::Reorg)
                         .await;
                     log::info!(
-                        "reorg: store.reorg() completed, will re-fetch block at height {}",
-                        reorged_height
+                        "reorg: store.reorg() completed, will re-fetch block at height {reorged_height}"
                     );
                     None
                 }
@@ -155,7 +153,7 @@ pub async fn index(
         .await
         .iter()
         .enumerate()
-        .last()
+        .next_back()
         .map(|(height, (hash, ts))| BlockMeta::new(height as u32, *hash, *ts));
 
     log::info!("last indexed block is: {last_indexed:?}");
@@ -242,7 +240,7 @@ pub async fn index(
         // Log RocksDB stats at the specified interval (independent of initial sync)
         if last_rocksdb_stats_logging.elapsed() >= rocksdb_stats_interval {
             if let Some(stats) = db.stats() {
-                log::info!("RocksDB Stats:\n{}", stats);
+                log::info!("RocksDB Stats:\n{stats}");
             }
             last_rocksdb_stats_logging = Instant::now();
         }

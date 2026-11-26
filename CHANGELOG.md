@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Building needs Rust 1.88 (was 1.85), see `rust-toolchain.toml`.
 - **Breaking:** new databases hash scripts with SipHash-2-4 and a random 128-bit key, instead
   of FxHash with a random 64-bit salt. The script hash cannot change without reindexing, so
   starting on a database created by a previous release fails: point `--db-dir` to an empty

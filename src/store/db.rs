@@ -214,7 +214,7 @@ impl DBStore {
             .map(|p| p.get())
             .unwrap_or(1)
             .min(4) as i32;
-        log::info!("Setting RocksDB parallelism to {} threads", parallelism);
+        log::info!("Setting RocksDB parallelism to {parallelism} threads");
         db_opts.increase_parallelism(parallelism);
         db_opts.set_max_background_jobs(parallelism);
 
@@ -426,11 +426,11 @@ impl DBStore {
         result.push_str("=== Column Family Stats ===\n");
         for cf_name in [UTXO_CF, HISTORY_CF] {
             if let Some(cf) = self.db.cf_handle(cf_name) {
-                result.push_str(&format!("\n--- {} ---\n", cf_name));
+                result.push_str(&format!("\n--- {cf_name} ---\n"));
 
                 // column family overall stats
                 if let Ok(Some(stats)) = self.db.property_value_cf(&cf, "rocksdb.stats") {
-                    result.push_str(&format!("{}\n", stats));
+                    result.push_str(&format!("{stats}\n"));
                 }
 
                 // Size information
@@ -473,7 +473,7 @@ impl DBStore {
                     self.db.property_value_cf(&cf, "rocksdb.estimate-num-keys")
                 {
                     let keys: u64 = num_keys.parse().unwrap_or(0);
-                    result.push_str(&format!("Estimated Keys: {}\n", keys));
+                    result.push_str(&format!("Estimated Keys: {keys}\n"));
                 }
 
                 for i in 0..=6 {
@@ -485,7 +485,7 @@ impl DBStore {
                             // avoid printing if there are no files at this level
                             continue;
                         }
-                        result.push_str(&format!("L{i} Number of files: {}\n", num));
+                        result.push_str(&format!("L{i} Number of files: {num}\n"));
                     }
 
                     if let Ok(Some(ratio)) = self
@@ -515,7 +515,7 @@ impl DBStore {
         // Compact all other column families
         for cf_name in COLUMN_FAMILIES {
             if let Some(cf) = self.db.cf_handle(cf_name) {
-                log::info!("Compacting column family: {}", cf_name);
+                log::info!("Compacting column family: {cf_name}");
                 self.db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
             }
         }
@@ -530,7 +530,7 @@ impl DBStore {
     }
 
     fn _reorg(&self, height: Height) -> Result<()> {
-        log::warn!("reorg: reading reorg data for height {}", height);
+        log::warn!("reorg: reading reorg data for height {height}");
 
         // Read reorg data from database
         let reorg_cf = self.db.cf_handle(REORG_CF).expect("missing REORG_CF");
@@ -547,7 +547,7 @@ impl DBStore {
 
         // Deserialize reorg data
         let reorg_data = ReorgData::from_bytes(&reorg_bytes)
-            .with_context(|| format!("failed to deserialize reorg data for height {}", height))?;
+            .with_context(|| format!("failed to deserialize reorg data for height {height}"))?;
 
         log::info!(
             "reorg: restoring {} spent UTXOs, removing {} created UTXOs, removing {} history entries",
@@ -583,10 +583,7 @@ impl DBStore {
 
         self.write(batch)?;
 
-        log::info!(
-            "reorg: database rollback completed successfully for height {}",
-            height
-        );
+        log::info!("reorg: database rollback completed successfully for height {height}");
 
         Ok(())
     }

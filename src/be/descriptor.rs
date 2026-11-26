@@ -913,7 +913,7 @@ mod tests {
 
         let desc_str = "elwpkh([a12b02f4/44'/0'/0']xpub6BzhLAQUDcBUfHRQHZxDF2AbcJqp4Kaeq6bzJpXrjrWuK26ymTFwkEFbxPra2bJ7yeZKbDjfDeFwxe93JMqpo5SsPJH6dZdvV9kMzJkAZ69/0/*)#20ufqv7z";
         let desc = Descriptor::from_str(desc_str, Network::Liquid).unwrap();
-        assert_eq!(format!("{}", desc), desc_str);
+        assert_eq!(format!("{desc}"), desc_str);
     }
 
     #[test]

@@ -483,7 +483,7 @@ pub fn block_cache(c: &mut Criterion) {
         let mut group = c.benchmark_group(format!("block_cache/{}", scenario.name));
 
         for &num_threads in thread_counts {
-            let label = format!("{}t", num_threads);
+            let label = format!("{num_threads}t");
 
             group.bench_function(format!("lru/{label}"), |b| {
                 if num_threads == 1 {

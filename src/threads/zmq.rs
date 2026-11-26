@@ -19,7 +19,7 @@ pub(crate) async fn rawtx_listener_infallible(
     shutdown_signal: impl Future<Output = ()>,
 ) {
     if let Err(e) = rawtx_listener(state, endpoint, family, shutdown_signal).await {
-        log::error!("{:?}", e);
+        log::error!("{e:?}");
     }
 }
 
@@ -86,12 +86,12 @@ async fn process_rawtx_message(
         return Ok(());
     };
     let Some(payload) = parts.next() else {
-        log::warn!("received ZMQ message without payload for topic {:?}", topic);
+        log::warn!("received ZMQ message without payload for topic {topic:?}");
         return Ok(());
     };
 
     if topic != b"rawtx" {
-        log::debug!("ignoring ZMQ topic {:?}", topic);
+        log::debug!("ignoring ZMQ topic {topic:?}");
         return Ok(());
     }
 

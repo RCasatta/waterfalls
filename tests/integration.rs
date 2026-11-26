@@ -1496,19 +1496,13 @@ async fn test_bitcoin_reorg() {
     // Wait for the waterfalls server to index block A
     test_env.client().wait_tip_hash(block_a_hash).await.unwrap();
 
-    println!(
-        "Created block A: {} with transaction: {}",
-        block_a_hash, txid_a
-    );
+    println!("Created block A: {block_a_hash} with transaction: {txid_a}");
 
     // Check address history after transaction A is mined
     // The recipient_a address should show transaction A in its history
     let recipient_a_history_before_reorg =
         test_env.client().address_txs(&recipient_a).await.unwrap();
-    println!(
-        "recipient_a history before reorg: {:?}",
-        recipient_a_history_before_reorg
-    );
+    println!("recipient_a history before reorg: {recipient_a_history_before_reorg:?}");
     assert!(
         recipient_a_history_before_reorg.contains(&txid_a.to_string()),
         "Transaction A should be in recipient A's history before reorg"
@@ -1534,11 +1528,8 @@ async fn test_bitcoin_reorg() {
     let block_b_hash = blocks_b_hashes[0];
     let final_tip_hash = blocks_b_hashes[1];
 
-    println!(
-        "Created block B: {} with transaction: {}",
-        block_b_hash, txid_b
-    );
-    println!("New tip after reorg: {}", final_tip_hash);
+    println!("Created block B: {block_b_hash} with transaction: {txid_b}");
+    println!("New tip after reorg: {final_tip_hash}");
 
     // Wait for the waterfalls server to index the new tip
     // This should trigger the "every utxo must exist when spent" expect line
@@ -1555,10 +1546,7 @@ async fn test_bitcoin_reorg() {
     // transaction A should be removed from recipient A's history since it was reorged out
     let recipient_a_history_after_reorg =
         test_env.client().address_txs(&recipient_a).await.unwrap();
-    println!(
-        "recipient_a history after reorg: {:?}",
-        recipient_a_history_after_reorg
-    );
+    println!("recipient_a history after reorg: {recipient_a_history_after_reorg:?}");
     assert!(
         !recipient_a_history_after_reorg.contains(&txid_a.to_string()),
         "Transaction A should NOT be in recipient A's history after reorg - it should be removed by history correction"
@@ -1567,10 +1555,7 @@ async fn test_bitcoin_reorg() {
     // Transaction B should now be in recipient B's history
     let recipient_b_history_after_reorg =
         test_env.client().address_txs(&recipient_b).await.unwrap();
-    println!(
-        "recipient_b history after reorg: {:?}",
-        recipient_b_history_after_reorg
-    );
+    println!("recipient_b history after reorg: {recipient_b_history_after_reorg:?}");
     assert!(
         recipient_b_history_after_reorg.contains(&txid_b.to_string()),
         "Transaction B should be in recipient B's history after reorg"
@@ -1740,7 +1725,7 @@ async fn do_test_bitcoin_two_block_reorg(test_env: waterfalls::test_env::TestEnv
     let block_h1_hash = block_h1_hashes[0];
 
     println!("\n=== Original Chain ===");
-    println!("Block H+1: {} with tx_a: {}", block_h1_hash, txid_a);
+    println!("Block H+1: {block_h1_hash} with tx_a: {txid_a}");
 
     // Wait for waterfalls to index block H+1
     test_env
@@ -1778,7 +1763,7 @@ async fn do_test_bitcoin_two_block_reorg(test_env: waterfalls::test_env::TestEnv
     let block_h2_hashes = test_env.node_generate(1).await;
     let block_h2_hash = block_h2_hashes[0];
 
-    println!("Block H+2: {} with tx_b: {}", block_h2_hash, txid_b);
+    println!("Block H+2: {block_h2_hash} with tx_b: {txid_b}");
 
     // Wait for waterfalls to index block H+2
     test_env
@@ -1807,10 +1792,10 @@ async fn do_test_bitcoin_two_block_reorg(test_env: waterfalls::test_env::TestEnv
     println!("\n=== Triggering 2-block reorg ===");
 
     // Invalidate both blocks (must invalidate in reverse order: H+2, then H+1)
-    println!("Invalidating block H+2: {}", block_h2_hash);
+    println!("Invalidating block H+2: {block_h2_hash}");
     test_env.invalidate_block(block_h2_hash);
 
-    println!("Invalidating block H+1: {}", block_h1_hash);
+    println!("Invalidating block H+1: {block_h1_hash}");
     test_env.invalidate_block(block_h1_hash);
 
     // After invalidating blocks, tx_a and tx_b go back into the mempool.
@@ -1830,8 +1815,7 @@ async fn do_test_bitcoin_two_block_reorg(test_env: waterfalls::test_env::TestEnv
     let final_tip_hash = new_blocks[2];
 
     println!(
-        "New blocks mined: H+1'={}, H+2'={}, H+3'={}",
-        block_h1_prime_hash, block_h2_prime_hash, final_tip_hash
+        "New blocks mined: H+1'={block_h1_prime_hash}, H+2'={block_h2_prime_hash}, H+3'={final_tip_hash}"
     );
     println!("✓ tx_a and tx_b were naturally re-included by the node");
     test_env
@@ -1844,15 +1828,15 @@ async fn do_test_bitcoin_two_block_reorg(test_env: waterfalls::test_env::TestEnv
 
     // If we get here without panicking, verify the state
     let current_tip = test_env.client().tip_hash().await.unwrap();
-    println!("Current tip: {}", current_tip);
+    println!("Current tip: {current_tip}");
     assert_eq!(current_tip, final_tip_hash);
 
     // Check address histories after 2-block reorg
     let recipient_a_history_after = test_env.client().address_txs(&recipient_a).await.unwrap();
     let recipient_b_history_after = test_env.client().address_txs(&recipient_b).await.unwrap();
 
-    println!("Recipient A history: {:?}", recipient_a_history_after);
-    println!("Recipient B history: {:?}", recipient_b_history_after);
+    println!("Recipient A history: {recipient_a_history_after:?}");
+    println!("Recipient B history: {recipient_b_history_after:?}");
 
     // After a proper 2-block reorg with tx_a and tx_b re-included:
     // - Both transactions should STILL be in the histories (they were re-mined)
@@ -1927,7 +1911,7 @@ async fn test_bitcoin_reorg_data_not_persisted() {
     // Mine block H+1 containing transaction A
     let block_h1_hashes = test_env.node_generate(1).await;
     let block_h1_hash = block_h1_hashes[0];
-    println!("Block H+1: {} with tx_a: {}", block_h1_hash, txid_a);
+    println!("Block H+1: {block_h1_hash} with tx_a: {txid_a}");
 
     // Verify transaction A is indexed
     test_env
@@ -2214,31 +2198,26 @@ async fn do_lwk_scan(
             if let Some(previous_balance) = previous_balance.as_ref() {
                 assert_eq!(
                     &balance, previous_balance,
-                    "waterfalls_active: {} utxo_only: {}",
-                    waterfalls_active, utxo_only
+                    "waterfalls_active: {waterfalls_active} utxo_only: {utxo_only}"
                 );
             } else {
                 previous_balance = Some(balance.clone());
             }
             let policy_balance = balance.get(&network.policy_asset()).unwrap();
             println!(
-                "Scan completed in {:?} - waterfalls_active: {}, utxo_only: {} txs: {} balance: {}",
-                duration, waterfalls_active, utxo_only, txs, policy_balance
+                "Scan completed in {duration:?} - waterfalls_active: {waterfalls_active}, utxo_only: {utxo_only} txs: {txs} balance: {policy_balance}"
             );
             if let Some(expected_satoshi_balance) = expected_satoshi_balance {
                 assert_eq!(
                     policy_balance, &expected_satoshi_balance,
-                    "waterfalls_active: {} utxo_only: {}",
-                    waterfalls_active, utxo_only
+                    "waterfalls_active: {waterfalls_active} utxo_only: {utxo_only}"
                 );
             }
             if !utxo_only {
                 if let Some(expected_txs) = expected_txs_full {
                     assert!(
                         txs >= expected_txs,
-                        "txs: {} >= expected_txs: {}",
-                        txs,
-                        expected_txs
+                        "txs: {txs} >= expected_txs: {expected_txs}"
                     );
                 }
             }
@@ -2420,7 +2399,7 @@ async fn test_waterfalls_descriptor_vs_addresses() {
         let descriptor = descriptor.elements().unwrap();
 
         let (resp, _) = client.waterfalls(descriptor_str).await.unwrap();
-        println!("resp: {:?}", resp);
+        println!("resp: {resp:?}");
         let len = resp.txs_seen.get(&descriptor.to_string()).unwrap().len();
 
         let mut addresses = vec![];

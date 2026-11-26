@@ -94,7 +94,7 @@ mod test {
         let result = decrypt(&encrypted, &identity2);
         assert!(matches!(result, Err(Error::CannotDecrypt)));
 
-        println!("Error when using wrong key: {:?}", result);
+        println!("Error when using wrong key: {result:?}");
     }
 
     #[test]
